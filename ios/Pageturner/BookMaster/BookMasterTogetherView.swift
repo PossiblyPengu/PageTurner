@@ -16,6 +16,9 @@ struct BookMasterTogetherView: View {
     @State private var answering: Set<String> = []
     /// The last refresh missed while older data is still on screen.
     @State private var refreshFailed = false
+    @State private var showChat = false
+    /// The chat notice already opened from here, so its dot goes out until a newer message.
+    @State private var chatSeenNotice: String?
 
     var body: some View {
         NavigationStack {
@@ -34,7 +37,16 @@ struct BookMasterTogetherView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Together")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(isPresented: $showChat) { BMChatView() }
             .toolbar {
+                if BookMaster.shared.isLinked {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { openChat() } label: {
+                            Image(systemName: unreadChat == nil ? "bubble.left.and.bubble.right" : "bubble.left.and.bubble.right.fill")
+                        }
+                        .accessibilityLabel(unreadChat == nil ? "Chat" : "Chat, a message is waiting")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("Settings")
@@ -52,6 +64,7 @@ struct BookMasterTogetherView: View {
 
     @ViewBuilder
     private var linkedBody: some View {
+        chatCard
         if let together, !together.nudges.isEmpty {
             nudgeCard(together.nudges)
         }
@@ -104,6 +117,48 @@ struct BookMasterTogetherView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .bmCard()
         }
+    }
+
+    // MARK: Chat
+
+    /// The notice that says a message is waiting — until you have opened it.
+    private var unreadChat: BMNotice? {
+        guard let notice = BMChat.unreadNotice(together?.notices ?? []),
+              notice.id != chatSeenNotice else { return nil }
+        return notice
+    }
+
+    private func openChat() {
+        chatSeenNotice = BMChat.unreadNotice(together?.notices ?? [])?.id
+        showChat = true
+    }
+
+    /// The way into the shared room, with the newest line when one waits.
+    private var chatCard: some View {
+        Button { openChat() } label: {
+            HStack(spacing: 12) {
+                Image(systemName: unreadChat == nil ? "bubble.left.and.bubble.right" : "bubble.left.and.bubble.right.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Chat").font(.headline).foregroundStyle(.primary)
+                    Text(unreadChat?.text ?? "Talk to \(together?.partner?.name ?? "the other reader") — shared with BookMaster, Kindred and Quest Log")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                if unreadChat != nil {
+                    Circle().fill(Color.accentColor).frame(width: 10, height: 10)
+                        .accessibilityHidden(true)
+                }
+                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .bmCard()
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Derived rows

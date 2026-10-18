@@ -141,6 +141,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   `BMEditSheet` (catalogue edit), `BMScanView` (barcode → catalogue search). `GoodreadsCSV` parses an
   export on-device (scalars not Characters — a CRLF is one grapheme but two terminators); only the rows
   travel to `/pageturner/import`. New bridge writes go through `sendJSON` (username merged server-side).
+- Chat (`BMChat.swift` is pure and Linux-checked; `BMChatView.swift` is the screen): the suite's one shared room, in BookMaster's
+  database, through the `chat` (GET reads, POST sends), `chat-read` and `chat-remove` bridge routes — a message sent here is tagged
+  `pageturner` by the server, whatever the body says. Reached from the Together tab (toolbar button and a card); the unread dot is the
+  feed's `bookmaster:chat:<id>` notice (`BMChat.unreadNotice`), gone once the room is opened. It polls every 5s while on screen and reports
+  how far you have read. Quest Log's own private chat is end-to-end encrypted and is deliberately **not** in the app: it is opened from
+  BookMaster's web Chat page with Quest Log's passphrase.
 - Notifications are **local** (`Notifications/`): a sideloaded app has no push entitlement, so iOS's
   background refresh (best effort, its schedule) asks BookMaster for new suggestions and posts them.
 - Siri/Shortcuts (`Intents/`) and Spotlight (`Library/SpotlightIndexer.swift`) hand requests to the shell

@@ -314,6 +314,58 @@ struct BMThread: Decodable {
     var you: String?
 }
 
+// MARK: - Chat
+
+/// One message in the suite's shared room.
+struct BMChatMessage: Decodable, Identifiable, Hashable {
+    var id: Int
+    var userId: String
+    var name: String
+    var body: String
+    /// The app it was written in — "bookmaster", "kindred", "pageturner"…
+    var app: String
+    /// Milliseconds since 1970, the way every suite clock is kept.
+    var at: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, body, app, at
+        case userId = "user_id"
+    }
+
+    var date: Date { Date(timeIntervalSince1970: at / 1000) }
+}
+
+struct BMChatPerson: Decodable, Hashable {
+    var id: String
+    var displayName: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+    }
+}
+
+/// The newest message each reader has seen.
+struct BMChatRead: Decodable, Hashable {
+    var mine: Int
+    var theirs: Int
+}
+
+/// The room as one screen needs it: the messages, who is in it, who has read what.
+struct BMChatRoom: Decodable {
+    var messages: [BMChatMessage]
+    var me: BMChatPerson
+    var partner: BMChatPerson?
+    var read: BMChatRead
+    var unread: Int
+    /// Whether `messages` begins at the first message there is.
+    var complete: Bool
+}
+
+struct BMChatSent: Decodable {
+    var message: BMChatMessage
+}
+
 // MARK: - Overview (stats)
 
 struct BMStats: Decodable {

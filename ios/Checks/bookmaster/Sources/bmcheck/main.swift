@@ -133,6 +133,7 @@ func runData() async {
     runSpokenWordsChecks()
     runShelfChecks()
     runSuiteChecks()
+    runChatChecks()
     runGoodreadsChecks()
     runPaceChecks()
     runQolChecks()
@@ -283,6 +284,58 @@ func run() async {
         let mine = thread.comments.first { $0.userId == thread.you }
         check("own comment readable and recognised", mine?.content == "Slow start but worth it")
     } catch { check("fetch the thread", false, "\(error)") }
+
+    // ------------------------------------------------------------------ chat
+    section("Chat")
+    do {
+        let sent = try await bm.sendChat("hello from the reader")
+        check("a message sends, and comes back as mine", sent.body == "hello from the reader" && sent.name == "Andrew", "\(sent)")
+        check("…tagged as written in Pageturner", sent.app == "pageturner", sent.app)
+        let row = q("select body, app, user_id from chat_messages where id=\(sent.id)").first
+        check("it is in the shared room, in the database", s(row, "body") == "hello from the reader" && s(row, "app") == "pageturner", "\(String(describing: row))")
+
+        let room = try await bm.fetchChat()
+        check("the room reads back: the message, me, my partner, what I have read",
+              room.messages.last?.id == sent.id && room.me.displayName == "Andrew"
+              && room.partner?.displayName == "Kristen" && room.read.mine == sent.id && room.unread == 0, "\(room)")
+
+        // Kristen answers from Kindred
+        let ms = Int(Date().timeIntervalSince1970 * 1000)
+        _ = q("insert into chat_messages (user_id, body, app, created_at) select id, 'and from kindred', 'kindred', \(ms) from users where username='kristenkrae'")
+        let answer = q("select id from chat_messages where body='and from kindred'").first
+        let answerId = Int(s(answer, "id") ?? "") ?? -1
+        let since = try await bm.fetchChat(after: sent.id)
+        check("what came since is just her answer, unread, and says where it was written",
+              since.messages.map(\.id) == [answerId] && since.unread == 1 && since.messages.first?.app == "kindred", "\(since.messages.map(\.id)) unread \(since.unread)")
+        let feed = try await bm.fetchTogether()
+        check("her message shows in my suite feed as the chat notice", BMChat.unreadNotice(feed.notices)?.id == "bookmaster:chat:\(answerId)",
+              "\(feed.notices.map(\.id))")
+
+        try await bm.markChatRead(upTo: answerId)
+        let readRow = q("select r.last_read_id from chat_reads r join users u on u.id=r.user_id where u.username='pengu'").first
+        check("telling the server I have read it is kept", s(readRow, "last_read_id") == "\(answerId)", "\(String(describing: readRow))")
+        let afterRead = try await bm.fetchChat()
+        let feedAfter = try await bm.fetchTogether()
+        check("…so nothing is unread any more, and the notice is gone",
+              afterRead.unread == 0 && afterRead.read.mine == answerId && BMChat.unreadNotice(feedAfter.notices) == nil)
+
+        let older = try await bm.fetchChat(before: answerId)
+        check("paging back returns what came before", older.messages.map(\.id) == [sent.id] && older.complete, "\(older.messages.map(\.id))")
+
+        do {
+            try await bm.removeChat(id: answerId)
+            check("her message cannot be taken back by me", false, "removed")
+        } catch { check("her message cannot be taken back by me", q("select id from chat_messages where id=\(answerId)").count == 1) }
+        try await bm.removeChat(id: sent.id)
+        check("my own can", q("select id from chat_messages where id=\(sent.id)").isEmpty)
+        do {
+            _ = try await bm.sendChat("   ")
+            check("a blank message is refused", false)
+        } catch { check("a blank message is refused", true) }
+    } catch { check("chat", false, "\(error)") }
+    // leave the room as it was found
+    _ = q("delete from chat_messages")
+    _ = q("delete from chat_reads")
 
     // -------------------------------------------------------------- overview
     section("Overview")

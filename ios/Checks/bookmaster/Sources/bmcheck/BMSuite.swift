@@ -32,7 +32,7 @@ enum BMSuite {
             "today": "today", "library": "the library", "book": "a book",
             "series": "a series", "search": "finding a book",
             "progress": "their progress", "together": "Together",
-            "profile": "their profile",
+            "chat": "the chat", "profile": "their profile",
         ],
         "quest-log": [
             "dashboard": "the dashboard", "operations": "missions",
@@ -46,8 +46,8 @@ enum BMSuite {
         ],
         "pageturner": [
             "library": "the library", "reader": "a book", "player": "the player",
-            "bookmaster": "the BookMaster tab", "stats": "their stats",
-            "settings": "settings",
+            "bookmaster": "the BookMaster tab", "chat": "the chat",
+            "stats": "their stats", "settings": "settings",
         ],
     ]
 

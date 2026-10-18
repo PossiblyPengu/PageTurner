@@ -400,6 +400,32 @@ final class BookMaster {
         }
     }
 
+    // MARK: Chat
+
+    /// The suite's shared room: the newest page, or what came `after` an id,
+    /// or the page `before` one.
+    func fetchChat(after: Int? = nil, before: Int? = nil, limit: Int = 60) async throws -> BMChatRoom {
+        var query = ["limit": String(limit)]
+        if let after { query["after"] = String(after) }
+        if let before { query["before"] = String(before) }
+        return try await fetch("chat", query: query)
+    }
+
+    func sendChat(_ text: String) async throws -> BMChatMessage {
+        let reply: BMChatSent = try await sendJSON("chat", json: ["body": text])
+        return reply.message
+    }
+
+    /// "I have seen everything up to here."
+    func markChatRead(upTo id: Int) async throws {
+        try await sendJSON("chat-read", json: ["upTo": id])
+    }
+
+    /// Take back one of your own messages.
+    func removeChat(id: Int) async throws {
+        try await sendJSON("chat-remove", json: ["id": id])
+    }
+
     // MARK: The deeper reads
 
     /// A decoded GET behind the link check and the refusal handling, so the
