@@ -23,6 +23,8 @@ final class Notifier {
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
     /// Set when a notification is tapped; the shell switches to Together and clears it.
     var openTogether = false
+    /// The inbox item a tapped notification stands for; the shell opens it (`AppRouter.open`) and clears this.
+    var tappedItemID: String?
     /// The banner on screen, and the ones waiting behind it.
     private(set) var banner: BMInboxItem?
     private var bannerQueue: [BMInboxItem] = []
@@ -117,7 +119,10 @@ final class Notifier {
         let announce = settle(together)
         await refreshAuthorization()
         guard !announce.isEmpty else { return }
-        if UIApplication.shared.applicationState == .active {
+        // only an app behind another (or locked) needs a notification: while it is inactive — Control Centre
+        // pulled down, the app switcher, a Face ID sheet — the screen is the app's, and iOS would hold back
+        // a notification posted then
+        if UIApplication.shared.applicationState != .background {
             if AppPrefs.bannersOn { show(announce) }
         } else if notify, enabled {
             await post(announce)
@@ -192,6 +197,7 @@ final class Notifier {
             content.body = item.body
             content.sound = .default
             content.threadIdentifier = "together"
+            content.userInfo = ["id": item.id]
             // no trigger: deliver now
             try? await center.add(UNNotificationRequest(identifier: item.id, content: content, trigger: nil))
         }
@@ -255,6 +261,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
-        await MainActor.run { Notifier.shared.openTogether = true }
+        let id = response.notification.request.content.userInfo["id"] as? String
+        await MainActor.run {
+            // the one it was about, when that is known; otherwise the Together tab
+            if let id { Notifier.shared.tappedItemID = id } else { Notifier.shared.openTogether = true }
+        }
     }
 }

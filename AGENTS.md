@@ -199,7 +199,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   `BMKeepAlive` holds the rules) loops a silent sound so the app is kept running and looks every 30 s (90 s in Low Power Mode). It mixes
   with other sound, leaves a book's audio session alone (the category is only set when it is not already `.playback`), and stops when the
   app is in front. Unverified on a device: how long iOS keeps it alive. `pageturner://open` (`BMDeepLink`) still opens the chat or a web
-  page. BookMaster's server still has ntfy and Bark delivery (and Profile settings for them), unused by the app.
+  page. BookMaster no longer has an ntfy or Bark channel (its tables are left, unused).
 - Siri/Shortcuts (`Intents/`) and Spotlight (`Library/SpotlightIndexer.swift`) hand requests to the shell
   through `IntentRouter`, which holds them until the first screen exists.
 - Read-aloud voices (`Reader/` and `Neural/`): `SpeechVoices.swift` is Foundation-only (list, group, search, "best

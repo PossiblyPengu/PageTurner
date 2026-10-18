@@ -44,6 +44,11 @@ struct RootView: View {
                 router.tab = .together
                 notifier.openTogether = false
             }
+            .onChange(of: notifier.tappedItemID, initial: true) { _, id in
+                guard let id else { return }
+                notifier.tappedItemID = nil
+                openNotification(id)
+            }
             // however the link ended (a button, or three refusals), its leftovers go: pins, Up next, banners
             .onChange(of: bookMaster.isLinked) { old, linked in
                 guard old, !linked else { return }
@@ -59,6 +64,19 @@ struct RootView: View {
             // CI simulator run: launch arguments choose a screen (Debug/DebugScenario.swift)
             .task { await DebugScenario.run(library: library, router: router) { router.tab = $0 } }
             #endif
+    }
+
+    /// A tapped notification leads where its inbox item does; a pile ("3 new things") or one the inbox no longer
+    /// holds leads to the Together tab.
+    private func openNotification(_ id: String) {
+        let inbox = BMInboxStore.shared
+        inbox.loadIfNeeded()
+        if let item = inbox.items.first(where: { $0.id == id }) {
+            router.open(item)
+        } else {
+            router.dismissPresentations()
+            router.tab = .together
+        }
     }
 
     private func handle(_ request: IntentRouter.Request) {
