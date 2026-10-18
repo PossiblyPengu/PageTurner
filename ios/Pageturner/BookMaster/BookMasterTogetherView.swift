@@ -56,16 +56,9 @@ struct BookMasterTogetherView: View {
             .toolbar { barItems }
     }
 
+    /// Just Settings: the chat is not up here — the floating button reaches it from every screen (and the card below).
     @ToolbarContentBuilder
     private var barItems: some ToolbarContent {
-        if BookMaster.shared.isLinked {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { openChat() } label: {
-                    Image(systemName: unreadChat == nil ? "bubble.left.and.bubble.right" : "bubble.left.and.bubble.right.fill")
-                }
-                .accessibilityLabel(unreadChat == nil ? "Chat" : "Chat, a message is waiting")
-            }
-        }
         ToolbarItem(placement: .topBarTrailing) {
             Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
                 .accessibilityLabel("Settings")

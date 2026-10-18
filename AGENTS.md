@@ -143,7 +143,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   travel to `/pageturner/import`. New bridge writes go through `sendJSON` (username merged server-side).
 - Chat (`BMChat.swift` is pure and Linux-checked; `BMChatView.swift` is the screen): the suite's one shared room, in BookMaster's
   database, through the `chat` (GET reads, POST sends), `chat-read` and `chat-remove` bridge routes — a message sent here is tagged
-  `pageturner` by the server, whatever the body says. Reached from the Together tab (toolbar button and a card); the unread dot is the
+  `pageturner` by the server, whatever the body says. Reached from the floating chat button (below) and a card on the Together tab — no button in any header; the unread dot is the
   feed's `bookmaster:chat:<id>` notice (`BMChat.unreadNotice`), gone once the room is opened. It polls every 5s while on screen and reports
   how far you have read. Rules learned in review: a poll that began before a send or take-back finished carries the room as it was and is
   dropped (`edits`); one refresh at a time; reading is reported only while the screen is in front (`visible`); the length limit counts UTF-16
