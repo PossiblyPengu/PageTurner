@@ -17,6 +17,8 @@ struct BookMasterTogetherView: View {
     /// The last refresh missed while older data is still on screen.
     @State private var refreshFailed = false
     @State private var showChat = false
+    /// The in-app browser, when one of the suite's web apps is open.
+    @State private var browser: BMWebLaunch?
     /// The chat notice already opened from here, so its dot goes out until a newer message.
     @State private var chatSeenNotice: String?
 
@@ -38,6 +40,7 @@ struct BookMasterTogetherView: View {
             .navigationTitle("Together")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $showChat) { BMChatView() }
+            .navigationDestination(item: $browser) { BMWebBrowserView(launch: $0) }
             .toolbar {
                 if BookMaster.shared.isLinked {
                     ToolbarItem(placement: .topBarLeading) {
@@ -65,6 +68,7 @@ struct BookMasterTogetherView: View {
     @ViewBuilder
     private var linkedBody: some View {
         chatCard
+        appsCard
         if let together, !together.nudges.isEmpty {
             nudgeCard(together.nudges)
         }
@@ -555,9 +559,67 @@ struct BookMasterTogetherView: View {
     private func noticeCard(_ notices: [BMNotice]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("From the other apps").font(.headline)
-            ForEach(notices) { notice in Text(notice.text).font(.subheadline) }
+            ForEach(notices) { notice in
+                if canOpen(notice) {
+                    Button { open(notice) } label: {
+                        HStack(spacing: 8) {
+                            Text(notice.text).font(.subheadline).multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(notice.text).font(.subheadline)
+                }
+            }
         }
         .bmCard()
+    }
+
+    // MARK: The other apps
+
+    /// BookMaster, Kindred and Quest Log, opened in here.
+    private var appsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("The other apps").font(.headline)
+            HStack(spacing: 10) {
+                ForEach(BMWebApp.allCases) { app in
+                    Button { browser = BMWebLaunch(app: app) } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: app.symbol).font(.title3)
+                            Text(app.name).font(.footnote.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            Color(uiColor: .tertiarySystemGroupedBackground),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open \(app.name)")
+                }
+            }
+            Text("They open here, signed in once for all three.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .bmCard()
+    }
+
+    /// A notice opens its page — the chat in the app's own screen, anything else in the browser.
+    private func canOpen(_ notice: BMNotice) -> Bool {
+        notice.id.hasPrefix(BMChat.noticePrefix)
+            || BMWebApp.destination(noticeApp: notice.app, path: notice.path) != nil
+    }
+
+    private func open(_ notice: BMNotice) {
+        if notice.id.hasPrefix(BMChat.noticePrefix) {
+            openChat()
+        } else if let target = BMWebApp.destination(noticeApp: notice.app, path: notice.path) {
+            browser = BMWebLaunch(app: target.app, url: target.url)
+        }
     }
 
     // MARK: Fetching

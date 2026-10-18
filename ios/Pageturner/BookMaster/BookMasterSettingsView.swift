@@ -12,6 +12,7 @@ struct BookMasterSection: View {
     @State private var error: String?
     @State private var showLink = false
     @State private var confirmUnlink = false
+    @State private var confirmWebSignOut = false
     private let bookMaster = BookMaster.shared
     private let notifier = Notifier.shared
 
@@ -92,6 +93,18 @@ struct BookMasterSection: View {
                     }
                     .disabled(working)
                 }
+            }
+            Section("Web apps") {
+                Button("Sign out of BookMaster, Kindred and Quest Log", role: .destructive) { confirmWebSignOut = true }
+                    .alert("Sign out of the web apps?", isPresented: $confirmWebSignOut) {
+                        Button("Sign Out", role: .destructive) { Task { await BMWebPages.shared.clearSignIns() } }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("BookMaster, Kindred and Quest Log opened inside Pageturner forget who you are, and anything they saved here. Your accounts and everything in them are untouched.")
+                    }
+                Text("They open from the Together tab, signed in once for all three, and stay signed in until you do this.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             if let error {
                 Section { Text(error).foregroundStyle(.red) }

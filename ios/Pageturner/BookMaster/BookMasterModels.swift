@@ -248,6 +248,8 @@ struct BMNotice: Decodable, Identifiable, Hashable {
     var id: String
     var app: String
     var text: String
+    /// Where it opens, a path inside its own app.
+    var path: String? = nil
 }
 
 /// A suggestion you sent and have not heard back about yet.

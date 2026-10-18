@@ -134,6 +134,7 @@ func runData() async {
     runShelfChecks()
     runSuiteChecks()
     runChatChecks()
+    runWebAppsChecks()
     runGoodreadsChecks()
     runPaceChecks()
     runQolChecks()

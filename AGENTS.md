@@ -147,6 +147,15 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   feed's `bookmaster:chat:<id>` notice (`BMChat.unreadNotice`), gone once the room is opened. It polls every 5s while on screen and reports
   how far you have read. Quest Log's own private chat is end-to-end encrypted and is deliberately **not** in the app: it is opened from
   BookMaster's web Chat page with Quest Log's passphrase.
+- Web apps in the app (`BMWebApps.swift` is pure and Linux-checked; `BMWebBrowser.swift` is the WebKit layer): BookMaster, Kindred and Quest Log
+  open inside Pageturner from the Together tab (an "Other apps" card, and any notice in "From the other apps" opens its page). All three live on
+  `bookmaster.pages.dev` (BookMaster at the root, `/kindred/`, `/quest-log/`), so one persistent `WKWebsiteDataStore.default()` signs in once for
+  all; Settings → Web apps clears it. One `WKWebView` per app is kept alive (`BMWebPages`, shed on a memory warning). `BMWebPolicy.decide` is the
+  only rule for where a page may go: our host is shown, a link into another of the three switches the browser to that app, every other site, `mailto:`
+  and `tel:` go to iOS, and `pageturner://`, `file:`, `javascript:` and plain `http` are refused. The web view needs the app to supply what Safari does:
+  JS alert/confirm/prompt panels (without them `confirm()` silently answers no), `target=_blank` links, and `WKDownload` for files a page saves
+  (BookMaster's CSV/JSON export is a blob download) — handed to the share sheet. The sign-in is the web's own (BookMaster's password); nothing links
+  the bridge's device key to a web session, on purpose.
 - Notifications are **local** (`Notifications/`): a sideloaded app has no push entitlement, so iOS's
   background refresh (best effort, its schedule) asks BookMaster for new suggestions and posts them.
 - Siri/Shortcuts (`Intents/`) and Spotlight (`Library/SpotlightIndexer.swift`) hand requests to the shell
