@@ -36,6 +36,9 @@ final class AppRouter {
     var pendingDelete: [Book] = []
     var shelfTarget: ShelfTarget?
     var resumePrompt: ResumePrompt?
+    /// Where the Together tab should go next — the chat, or a page of one of the web apps — set by
+    /// a tapped notification and cleared by the tab once it has gone there.
+    var suiteTarget: BMDeepLink.Target?
 
     /// Close whatever sheet is up, so a request from outside lands on screen.
     func dismissPresentations() {

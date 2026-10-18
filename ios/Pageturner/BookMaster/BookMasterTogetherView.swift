@@ -23,44 +23,63 @@ struct BookMasterTogetherView: View {
     @State private var chatSeenNotice: String?
 
     var body: some View {
+        // grouped, so no one expression is a long chain the compiler has to solve at once
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 20) {
-                    if BookMaster.shared.isLinked {
-                        linkedBody
-                    } else {
-                        BMLinkPrompt()
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .ptReadableWidth()
-            }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("Together")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(isPresented: $showChat) { BMChatView() }
-            .navigationDestination(item: $browser) { BMWebBrowserView(launch: $0) }
-            .toolbar {
-                if BookMaster.shared.isLinked {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { openChat() } label: {
-                            Image(systemName: unreadChat == nil ? "bubble.left.and.bubble.right" : "bubble.left.and.bubble.right.fill")
-                        }
-                        .accessibilityLabel(unreadChat == nil ? "Chat" : "Chat, a message is waiting")
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("Settings")
-                }
-            }
-            .refreshable { await load() }
-            .task(id: BookMaster.shared.isLinked) { await load() }
+            reacting(destinations(page))
         }
         // the stack, not the list: a pushed pane is still the Together tab
         .onAppear { BookMaster.shared.place = "bookmaster" }
         .onDisappear { BookMaster.shared.place = "library" }
+    }
+
+    private var page: some View {
+        ScrollView {
+            LazyVStack(spacing: 20) {
+                if BookMaster.shared.isLinked {
+                    linkedBody
+                } else {
+                    BMLinkPrompt()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .ptReadableWidth()
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Together")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Where the page leads: the chat, the in-app browser, and the buttons that open them.
+    private func destinations<V: View>(_ content: V) -> some View {
+        content
+            .navigationDestination(isPresented: $showChat) { BMChatView() }
+            .navigationDestination(item: $browser) { BMWebBrowserView(launch: $0) }
+            .toolbar { barItems }
+    }
+
+    @ToolbarContentBuilder
+    private var barItems: some ToolbarContent {
+        if BookMaster.shared.isLinked {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { openChat() } label: {
+                    Image(systemName: unreadChat == nil ? "bubble.left.and.bubble.right" : "bubble.left.and.bubble.right.fill")
+                }
+                .accessibilityLabel(unreadChat == nil ? "Chat" : "Chat, a message is waiting")
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
+                .accessibilityLabel("Settings")
+        }
+    }
+
+    /// Loading, and going where a tapped notification (ntfy's `pageturner://open`) said.
+    private func reacting<V: View>(_ content: V) -> some View {
+        content
+            .refreshable { await load() }
+            .task(id: BookMaster.shared.isLinked) { await load() }
+            .onChange(of: router.suiteTarget, initial: true) { _, target in openTarget(target) }
     }
 
     // MARK: The page
@@ -130,6 +149,19 @@ struct BookMasterTogetherView: View {
         guard let notice = BMChat.unreadNotice(together?.notices ?? []),
               notice.id != chatSeenNotice else { return nil }
         return notice
+    }
+
+    /// Go where a tapped notification said: the native chat, or the browser at its page.
+    private func openTarget(_ target: BMDeepLink.Target?) {
+        guard let target else { return }
+        router.suiteTarget = nil
+        guard BookMaster.shared.isLinked else { return }
+        switch target {
+        case .chat:
+            openChat()
+        case let .web(app, url):
+            browser = BMWebLaunch(app: app, url: url)
+        }
     }
 
     private func openChat() {

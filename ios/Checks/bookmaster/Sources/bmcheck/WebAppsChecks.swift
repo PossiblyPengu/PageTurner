@@ -26,13 +26,15 @@ func runWebAppsChecks() {
           BMWebApp.allCases.count == 3 && BMWebApp.allCases.allSatisfy { !$0.name.isEmpty && !$0.symbol.isEmpty })
 
     // ---- where a notice goes
-    check("a notice's path is the app's own, on the shared host",
+    // the paths the suite really sends: Kindred's are relative to its folder, Quest Log's already carry theirs
+    check("Kindred's notice paths are under /kindred",
           BMWebApp.url(app: .kindred, path: "/today")?.absoluteString == "https://bookmaster.pages.dev/kindred/today"
-          && BMWebApp.url(app: .bookmaster, path: "/together")?.absoluteString == "https://bookmaster.pages.dev/together"
-          && BMWebApp.url(app: .questLog, path: "/")?.absoluteString == "https://bookmaster.pages.dev/quest-log/")
-    check("…with its query kept",
-          BMWebApp.url(app: .questLog, path: "/?tab=operations")?.absoluteString == "https://bookmaster.pages.dev/quest-log/?tab=operations",
-          BMWebApp.url(app: .questLog, path: "/?tab=operations")?.absoluteString ?? "nil")
+          && BMWebApp.url(app: .kindred, path: "/us?day=2026-10-17")?.absoluteString == "https://bookmaster.pages.dev/kindred/us?day=2026-10-17")
+    check("BookMaster's are on the root", BMWebApp.url(app: .bookmaster, path: "/together")?.absoluteString == "https://bookmaster.pages.dev/together")
+    check("Quest Log's already say /quest-log, and are not given it twice",
+          BMWebApp.url(app: .questLog, path: "/quest-log")?.absoluteString == "https://bookmaster.pages.dev/quest-log"
+          && BMWebApp.url(app: .questLog, path: "/quest-log/?tab=operations")?.absoluteString == "https://bookmaster.pages.dev/quest-log/?tab=operations",
+          BMWebApp.url(app: .questLog, path: "/quest-log")?.absoluteString ?? "nil")
     check("a path that is not plain is refused",
           BMWebApp.url(app: .kindred, path: "//evil.example/x") == nil
           && BMWebApp.url(app: .kindred, path: "https://evil.example/") == nil
@@ -40,13 +42,20 @@ func runWebAppsChecks() {
           && BMWebApp.url(app: .kindred, path: "/a\\b") == nil
           && BMWebApp.url(app: .kindred, path: "/a\nb") == nil
           && BMWebApp.url(app: .kindred, path: "") == nil)
+    // every path either builds an address on our host or is refused — never one on another host
+    let hostile = ["/@evil.example/", "/.evil.example", "/x?@evil.example", "/%2F%2Fevil.example", "/\\evil.example"]
     check("a path can never change the host",
-          ["/@evil.example/", "/.evil.example", "/x?@evil.example", "/%2F%2Fevil.example"].allSatisfy {
-              BMWebApp.url(app: .bookmaster, path: $0).map { $0.host == "bookmaster.pages.dev" } ?? true
+          hostile.allSatisfy { path in
+              BMWebApp.allCases.allSatisfy { app in
+                  guard let url = BMWebApp.url(app: app, path: path) else { return true }
+                  return url.host == "bookmaster.pages.dev"
+              }
           })
+    check("a notice whose path belongs elsewhere is opened where it belongs",
+          BMWebApp.destination(noticeApp: "quest-log", path: "/library")?.app == .bookmaster)
     check("a notice finds its app and address",
           BMWebApp.destination(noticeApp: "kindred", path: "/ask")?.app == .kindred
-          && BMWebApp.destination(noticeApp: "quest-log", path: "/")?.url.absoluteString == "https://bookmaster.pages.dev/quest-log/"
+          && BMWebApp.destination(noticeApp: "quest-log", path: "/quest-log")?.url.absoluteString == "https://bookmaster.pages.dev/quest-log"
           && BMWebApp.destination(noticeApp: "pageturner", path: "/x") == nil
           && BMWebApp.destination(noticeApp: "mystery", path: "/x") == nil
           && BMWebApp.destination(noticeApp: "kindred", path: nil) == nil)
@@ -57,7 +66,8 @@ func runWebAppsChecks() {
     check("…or oddities, or an empty name",
           BMWebPolicy.safeFileName("na:me\n.csv") == "name.csv" && BMWebPolicy.safeFileName("") == "download"
           && BMWebPolicy.safeFileName("///") == "download" && BMWebPolicy.safeFileName("...") == "download" && BMWebPolicy.safeFileName("  ") == "download")
-    check("…and a sane length", BMWebPolicy.safeFileName(String(repeating: "a", count: 500) + ".csv").count == 100)
+    let longName = BMWebPolicy.safeFileName(String(repeating: "a", count: 500) + ".csv")
+    check("…and a sane length that keeps the extension", longName.count == 100 && longName.hasSuffix(".csv"), longName)
 
     // ---- what the browser will show
     let main = BMWebPolicy.decide
@@ -78,6 +88,19 @@ func runWebAppsChecks() {
           && main(u("itms-apps://apps.apple.com/app/x"), true) == .block)
     check("a data: page is not a page, though a frame may carry one",
           main(u("data:text/html,hi"), true) == .block && main(u("data:text/html,hi"), false) == .allow)
+    // a page that asks for a window
+    check("a new window is opened only for a secure address of ours or for Safari",
+          BMWebPolicy.newWindow(u("https://bookmaster.pages.dev/library")) == .allow
+          && BMWebPolicy.newWindow(u("https://example.com/")) == .external)
+    check("…never for about:blank, blob: or data:, which are how a page builds its own document",
+          BMWebPolicy.newWindow(u("about:blank")) == .block && BMWebPolicy.newWindow(u("blob:https://bookmaster.pages.dev/1")) == .block
+          && BMWebPolicy.newWindow(u("data:text/html,x")) == .block && BMWebPolicy.newWindow(u("javascript:void(0)")) == .block
+          && BMWebPolicy.newWindow(u("mailto:a@b.example")) == .block)
+    // pages that only hand the reader on
+    check("BookMaster's link pages are handoffs, and nothing else is",
+          BMWebApp.isHandoff(u("https://bookmaster.pages.dev/link/kindred?from=x")) && BMWebApp.isHandoff(u("https://bookmaster.pages.dev/link/quest-log"))
+          && !BMWebApp.isHandoff(u("https://bookmaster.pages.dev/dashboard")) && !BMWebApp.isHandoff(u("https://bookmaster.pages.dev/linked"))
+          && !BMWebApp.isHandoff(u("https://example.com/link/kindred")) && !BMWebApp.isHandoff(nil))
     check("plumbing is let through", main(u("about:blank"), true) == .allow && main(u("blob:https://bookmaster.pages.dev/1234"), true) == .allow)
     check("only a secure page is offered to Safari",
           BMWebPolicy.shareable(u("https://bookmaster.pages.dev/library"))?.host == "bookmaster.pages.dev"

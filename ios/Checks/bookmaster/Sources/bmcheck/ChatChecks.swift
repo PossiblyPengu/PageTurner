@@ -43,6 +43,11 @@ func runChatChecks() {
     check("a blank draft is not sent", BMChat.sendable("   \n ") == nil && BMChat.sendable("") == nil)
     check("the limit is the server's: 2000 goes, 2001 does not",
           BMChat.sendable(String(repeating: "a", count: 2000)) != nil && BMChat.sendable(String(repeating: "a", count: 2001)) == nil)
+    check("…counted as the server counts, in UTF-16 units: 1000 emoji go, 1001 do not",
+          BMChat.sendable(String(repeating: "😀", count: 1000)) != nil && BMChat.sendable(String(repeating: "😀", count: 1001)) == nil)
+    check("…and a family emoji is eleven", BMChat.sendable(String(repeating: "👨‍👩‍👧‍👦", count: 181)) != nil
+          && BMChat.sendable(String(repeating: "👨‍👩‍👧‍👦", count: 182)) == nil)
+    check("too long is not the same as blank", BMChat.isTooLong(String(repeating: "a", count: 2001)) && !BMChat.isTooLong("") && !BMChat.isTooLong("   "))
 
     // ---- folding pages in
     let a = msg(1, "u1", at: 0), b = msg(2, "u2", at: 0), c = msg(3, "u1", at: 0), d = msg(4, "u2", at: 0)
@@ -57,6 +62,21 @@ func runChatChecks() {
           BMChat.replacingNewest([a, b, c, d], with: [b, d]).map(\.id) == [1, 2, 4])
     check("…and picks up what is new", BMChat.replacingNewest([a, b], with: [b, c, d]).map(\.id) == [1, 2, 3, 4])
     check("an empty page is an empty room", BMChat.replacingNewest([a, b], with: []).isEmpty)
+    // more than a page arrived while away: the old run is no longer joined to the new page
+    let far = (100..<103).map { msg($0, "u1", at: 0) }
+    check("a full page that reaches back to nothing held replaces it, so no hole is left",
+          BMChat.replacingNewest([a, b], with: far, pageSize: 3).map(\.id) == [100, 101, 102])
+    check("…but a page that is not full, or that overlaps, is joined as usual",
+          BMChat.replacingNewest([a, b], with: Array(far.prefix(2)), pageSize: 3).map(\.id) == [1, 2, 100, 101]
+          && BMChat.replacingNewest([a, b, c], with: [c, d, msg(5, "u1", at: 0)], pageSize: 3).map(\.id) == [1, 2, 3, 4, 5])
+
+    // ---- what to say when it fails
+    check("a rate limit says what the server said", BMChat.explain(BMError.server(429, "Slow down a little — too many messages at once.")) == "Slow down a little — too many messages at once.")
+    check("a broken link says to link again, not 'Unknown reader'",
+          BMChat.explain(BMError.server(404, "Unknown reader")).contains("Link it again"))
+    check("a server error without words is still a sentence", BMChat.explain(BMError.server(500, nil)) == "BookMaster answered 500."
+          && BMChat.explain(BMError.server(429, nil)).hasPrefix("Slow down"))
+    check("no connection says so", BMChat.explain(BMError.notLinked).hasPrefix("Couldn’t reach") && BMChat.explain(URLError(.notConnectedToInternet)).hasPrefix("Couldn’t reach"))
 
     // ---- seen
     check("seen once they have read it", BMChat.seenLabel(lastMineId: 5, theirsRead: 5, hasPartner: true) == "Seen"

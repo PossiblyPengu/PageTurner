@@ -94,6 +94,7 @@ struct BookMasterSection: View {
                     .disabled(working)
                 }
             }
+            if bookMaster.isLinked { BMNtfySection() }
             Section("Web apps") {
                 Button("Sign out of BookMaster, Kindred and Quest Log", role: .destructive) { confirmWebSignOut = true }
                     .alert("Sign out of the web apps?", isPresented: $confirmWebSignOut) {

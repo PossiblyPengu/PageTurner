@@ -30,6 +30,16 @@ enum BMWebApp: String, CaseIterable, Identifiable {
         }
     }
 
+    /// What a notice's path is relative to. Kindred's notices say `/today`, which is `/kindred/today` on the shared
+    /// host; Quest Log's already say `/quest-log` (BookMaster's `useAppOrigins` joins them the same way:
+    /// Kindred's origin includes its folder, Quest Log's is the bare host).
+    var noticePrefix: String {
+        switch self {
+        case .kindred: return "/kindred"
+        case .bookmaster, .questLog: return ""
+        }
+    }
+
     /// Where its own pages live on the shared host.
     var prefix: String {
         switch self {
@@ -79,7 +89,7 @@ enum BMWebApp: String, CaseIterable, Identifiable {
             parts.percentEncodedQuery = String(rest[rest.index(after: q)...])
             rest = String(rest[..<q])
         }
-        parts.percentEncodedPath = app.prefix + rest
+        parts.percentEncodedPath = app.noticePrefix + rest
         guard let url = parts.url, url.host?.lowercased() == BMLinkURL.bookMasterHost else { return nil }
         return url
     }
@@ -88,7 +98,15 @@ enum BMWebApp: String, CaseIterable, Identifiable {
     /// already here) and for a notice naming an app we do not know.
     static func destination(noticeApp: String, path: String?) -> (app: BMWebApp, url: URL)? {
         guard let path, let app = BMWebApp(rawValue: noticeApp), let url = url(app: app, path: path) else { return nil }
-        return (app, url)
+        // the page decides which app it belongs to, whatever the notice claimed
+        return (BMWebApp.app(for: url), url)
+    }
+
+    /// A BookMaster page that only hands the reader on to another app — "Linking Kindred…" — and has
+    /// nothing to come back to once it has.
+    static func isHandoff(_ url: URL?) -> Bool {
+        guard let url, url.host?.lowercased() == BMLinkURL.bookMasterHost else { return false }
+        return url.path.hasPrefix("/link/")
     }
 }
 
@@ -135,7 +153,21 @@ enum BMWebPolicy {
             .trimmingCharacters(in: .whitespaces)
         let trimmed = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "."))
         if trimmed.isEmpty { return "download" }
-        return String(trimmed.prefix(100))
+        guard trimmed.count > 100 else { return trimmed }
+        // too long: shorten the name, never the extension
+        let ext = NSString(string: trimmed).pathExtension
+        guard !ext.isEmpty, ext.count <= 10 else { return String(trimmed.prefix(100)) }
+        let stem = String(NSString(string: trimmed).deletingPathExtension.prefix(100 - ext.count - 1))
+        return "\(stem).\(ext)"
+    }
+
+    /// What a page that asks for a new window (`window.open`, `target=_blank`) gets. Only a secure address
+    /// is ever acted on: `about:blank` and `blob:` windows are how a page builds its own document, and
+    /// loading them over the page the reader is on would blank it. Refused, the page sees `window.open`
+    /// fail and falls back to a plain link.
+    static func newWindow(_ url: URL) -> Decision {
+        guard url.scheme?.lowercased() == "https" else { return .block }
+        return decide(url, mainFrame: true)
     }
 
     /// An address worth offering to open in Safari: the page itself, never plumbing.

@@ -145,7 +145,9 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   database, through the `chat` (GET reads, POST sends), `chat-read` and `chat-remove` bridge routes — a message sent here is tagged
   `pageturner` by the server, whatever the body says. Reached from the Together tab (toolbar button and a card); the unread dot is the
   feed's `bookmaster:chat:<id>` notice (`BMChat.unreadNotice`), gone once the room is opened. It polls every 5s while on screen and reports
-  how far you have read. Quest Log's own private chat is end-to-end encrypted and is deliberately **not** in the app: it is opened from
+  how far you have read. Rules learned in review: a poll that began before a send or take-back finished carries the room as it was and is
+  dropped (`edits`); one refresh at a time; reading is reported only while the screen is in front (`visible`); the length limit counts UTF-16
+  units like the server; a full page that reaches back to nothing held replaces it instead of leaving a hole. Quest Log's own private chat is end-to-end encrypted and is deliberately **not** in the app: it is opened from
   BookMaster's web Chat page with Quest Log's passphrase.
 - Web apps in the app (`BMWebApps.swift` is pure and Linux-checked; `BMWebBrowser.swift` is the WebKit layer): BookMaster, Kindred and Quest Log
   open inside Pageturner from the Together tab (an "Other apps" card, and any notice in "From the other apps" opens its page). All three live on
@@ -155,9 +157,22 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   and `tel:` go to iOS, and `pageturner://`, `file:`, `javascript:` and plain `http` are refused. The web view needs the app to supply what Safari does:
   JS alert/confirm/prompt panels (without them `confirm()` silently answers no), `target=_blank` links, and `WKDownload` for files a page saves
   (BookMaster's CSV/JSON export is a blob download) — handed to the share sheet. The sign-in is the web's own (BookMaster's password); nothing links
-  the bridge's device key to a web session, on purpose.
+  the bridge's device key to a web session, on purpose. Things this layer has to get right (each was a real bug in review): Quest Log's notice
+  paths already say `/quest-log` while Kindred's are relative to `/kindred` (`BMWebApp.noticePrefix`); BookMaster's `/link/*` pages only hand the
+  reader on, so after a cross-app switch the source page is sent back to its front door (`isHandoff`) or it stays on "Linking…"; `window.open`
+  of `about:blank`/`blob:` must be refused (`newWindow`) or it blanks the page; the pages are held by `BMWebPages` and the host view follows the
+  page (`BMWebHost.updateUIView`), because a page shed for memory or reset by sign-out is replaced while a view may still be showing it.
 - Notifications are **local** (`Notifications/`): a sideloaded app has no push entitlement, so iOS's
   background refresh (best effort, its schedule) asks BookMaster for new suggestions and posts them.
+- Instant notifications (`BMNtfy.swift` and `BMDeepLink.swift` are pure and Linux-checked; `BMNtfySection.swift` is the Settings section): real
+  push is impossible without a paid developer account, so BookMaster publishes every suite notice (`pushNotice`: chat, suggestions, Kindred,
+  Quest Log) to a private **ntfy** topic and the free ntfy iOS app shows it at once. The app only sets it up (`ntfy`, `ntfy-test`, `ntfy-remove`
+  bridge routes; the topic is made by BookMaster, so the app never holds a secret of its own) and tells the reader what to type into ntfy. A tap
+  carries `pageturner://open?app=<app>&path=<path>` (a suite notice's own fields); `BMDeepLink.parse` accepts only the native chat or a page of one
+  of the three web apps on BookMaster's host, because anyone can make such an address. `PageturnerApp.onOpenURL` → `IntentRouter.openSuite` →
+  `RootView` → `AppRouter.suiteTarget` → the Together tab opens it. While ntfy is on (`AppPrefs.ntfyActive`, re-asked from BookMaster every six
+  hours) `Notifier` stops posting its own local copies, and keeps only the badge. Whether iOS's ntfy app opens a custom-scheme tap is unverified
+  on a device, so the setting is explicit and "Send a Test Notification" proves the whole way.
 - Siri/Shortcuts (`Intents/`) and Spotlight (`Library/SpotlightIndexer.swift`) hand requests to the shell
   through `IntentRouter`, which holds them until the first screen exists.
 - Read-aloud voices (`Reader/` and `Neural/`): `SpeechVoices.swift` is Foundation-only (list, group, search, "best

@@ -79,6 +79,10 @@ struct RootView: View {
             router.tab = .reading
             guard let book = library.continueBook else { return }
             router.open(book, library: library)
+        case let .openSuite(target):
+            // the Together tab opens it: it owns the chat and the in-app browser
+            router.tab = .together
+            router.suiteTarget = target
         }
     }
 

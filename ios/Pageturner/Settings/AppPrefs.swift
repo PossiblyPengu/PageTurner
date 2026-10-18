@@ -38,6 +38,19 @@ enum AppPrefs {
         set { defaults.set(newValue, forKey: "daily-goal-min") }
     }
 
+    /// Whether BookMaster is sending this reader's notifications through ntfy (set from what BookMaster
+    /// says; see `BMNtfy`). When it is, Pageturner does not also post its own for the same things.
+    static var ntfyActive: Bool {
+        get { defaults.bool(forKey: "ntfy-active") }
+        set { defaults.set(newValue, forKey: "ntfy-active") }
+    }
+
+    /// When that was last asked of BookMaster (seconds since 1970), so it is not asked every refresh.
+    static var ntfyCheckedAt: Double {
+        get { defaults.double(forKey: "ntfy-checked") }
+        set { defaults.set(newValue, forKey: "ntfy-checked") }
+    }
+
     /// When the library was last backed up (seconds since 1970), 0 for never.
     static var lastBackupAt: Double {
         get { defaults.double(forKey: "backup-last") }

@@ -13,6 +13,9 @@ struct BMChatView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Kept as state: a long-running task would otherwise read the phase it started in.
     @State private var active = true
+    /// Whether this screen is the one in front. Reading is only reported from here: a chat that is pushed
+    /// but covered (another tab, a sheet) has not been looked at.
+    @State private var visible = false
     @State private var room: BMChatRoom?
     @State private var messages: [BMChatMessage] = []
     @State private var complete = true
@@ -20,14 +23,35 @@ struct BMChatView: View {
     @State private var sending = false
     @State private var loading = true
     @State private var loadingOlder = false
-    @State private var error: String?
+    /// Why the room could not be loaded; shown in its place while nothing has loaded.
+    @State private var loadError: String?
+    /// Why a send or a take-back failed; it stays until the next try or the next keystroke.
+    @State private var actionError: String?
+    /// The words put back in the box after a failed send, so that putting them back is not mistaken for typing.
+    @State private var restoredDraft: String?
     /// The newest message already reported as read, so each is reported once.
     @State private var reported = 0
+    /// Counts the sends and take-backs that have finished. A poll that began before one finished carries
+    /// the room as it was, and must not undo it.
+    @State private var edits = 0
+    @State private var refreshing = false
+    /// Whether the bottom of the thread is in view — so a message arriving while you read history
+    /// does not take you away from it.
+    @State private var atBottom = true
+    @State private var newBelow = false
     @FocusState private var focused: Bool
 
     private let pollSeconds: UInt64 = 5
 
     var body: some View {
+        // grouped, so no one expression is a long chain the compiler has to solve at once
+        lifecycle(content)
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle(room?.partner?.displayName ?? "Chat")
+            .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var content: some View {
         Group {
             if BookMaster.shared.isLinked {
                 VStack(spacing: 0) {
@@ -39,17 +63,27 @@ struct BMChatView: View {
                 ScrollView { BMLinkPrompt().padding(16) }
             }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle(room?.partner?.displayName ?? "Chat")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { BookMaster.shared.place = "chat" }
-        .onDisappear { BookMaster.shared.place = "bookmaster" }
-        .task(id: BookMaster.shared.isLinked) { await run() }
-        .onChange(of: scenePhase) { _, phase in
-            active = phase == .active
-            // back from the background: what came meanwhile, now
-            if active { Task { await refresh() } }
-        }
+    }
+
+    private func lifecycle<V: View>(_ view: V) -> some View {
+        view
+            .onAppear {
+                visible = true
+                BookMaster.shared.place = "chat"
+            }
+            .onDisappear {
+                visible = false
+                BookMaster.shared.place = "bookmaster"
+            }
+            .task(id: BookMaster.shared.isLinked) { await run() }
+            .onChange(of: scenePhase) { _, phase in
+                active = phase == .active
+                // back from the background: what came meanwhile, now
+                if active, visible { Task { await refresh() } }
+            }
+            .onChange(of: draft) { _, now in
+                if now == restoredDraft { restoredDraft = nil } else { actionError = nil }
+            }
     }
 
     // MARK: The thread
@@ -64,24 +98,17 @@ struct BMChatView: View {
                             .disabled(loadingOlder)
                             .padding(.vertical, 8)
                     }
-                    if messages.isEmpty, !loading {
-                        Text(emptyText)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 60)
-                            .padding(.horizontal, 24)
-                    }
+                    status
                     ForEach(rows) { row in
                         line(row)
                     }
-                    if let error {
-                        Label(error, systemImage: "exclamationmark.triangle")
+                    if let actionError {
+                        Label(actionError, systemImage: "exclamationmark.triangle")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.red)
                             .padding(.top, 8)
                     }
-                    Color.clear.frame(height: 1).id(bottom)
+                    bottomMarker
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -90,9 +117,8 @@ struct BMChatView: View {
             .refreshable { await refresh() }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: messages.last?.id) { _, _ in
-                withAnimation { proxy.scrollTo(bottom, anchor: .bottom) }
-            }
+            .onChange(of: messages.last?.id) { _, _ in follow(proxy) }
+            .overlay(alignment: .bottom) { newMessageChip(proxy) }
             .overlay {
                 if loading, messages.isEmpty { ProgressView() }
             }
@@ -100,6 +126,67 @@ struct BMChatView: View {
     }
 
     private let bottom = "chat-bottom"
+
+    /// The end of the thread, whose being on screen is "you are at the bottom".
+    private var bottomMarker: some View {
+        Color.clear.frame(height: 1).id(bottom)
+            .onAppear {
+                atBottom = true
+                newBelow = false
+            }
+            .onDisappear { atBottom = false }
+    }
+
+    /// A new message takes you to the bottom when you were there, or when it is yours; otherwise it waits
+    /// below, with a note, so the place you were reading is kept.
+    private func follow(_ proxy: ScrollViewProxy) {
+        let mine = messages.last.map { $0.userId == room?.me.id } ?? false
+        if atBottom || mine {
+            withAnimation { proxy.scrollTo(bottom, anchor: .bottom) }
+        } else {
+            newBelow = true
+        }
+    }
+
+    @ViewBuilder
+    private func newMessageChip(_ proxy: ScrollViewProxy) -> some View {
+        if newBelow, !atBottom {
+            Button {
+                withAnimation { proxy.scrollTo(bottom, anchor: .bottom) }
+            } label: {
+                Label("New message", systemImage: "arrow.down")
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+            }
+            .padding(.bottom, 8)
+        }
+    }
+
+    /// What stands in for an empty thread: the failure to load, or the room being empty — only once
+    /// the room is known, so a failed load never claims you are alone in it.
+    @ViewBuilder
+    private var status: some View {
+        if room == nil, !loading {
+            VStack(spacing: 10) {
+                Text(loadError ?? "Couldn’t reach BookMaster.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Try Again") { Task { await refresh() } }
+            }
+            .padding(.top, 60)
+            .padding(.horizontal, 24)
+        } else if room != nil, messages.isEmpty {
+            Text(emptyText)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 60)
+                .padding(.horizontal, 24)
+        }
+    }
 
     private var emptyText: String {
         room?.partner.map { "Nothing yet. Say hello to \($0.displayName) — it shows up in BookMaster, Kindred and Quest Log too." }
@@ -155,6 +242,8 @@ struct BMChatView: View {
         }
     }
 
+    /// The bubble's long-press is the menu with Delete and Copy. (Text selection is left off: on a
+    /// selectable text the long-press belongs to the selection, and the menu would never appear.)
     private func bubble(_ m: BMChatMessage, mine: Bool) -> some View {
         let fill: Color = mine ? .accentColor : Color(uiColor: .secondarySystemGroupedBackground)
         let ink: Color = mine ? .white : .primary
@@ -164,7 +253,6 @@ struct BMChatView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .textSelection(.enabled)
             .contextMenu { bubbleMenu(m, mine: mine) }
     }
 
@@ -200,20 +288,28 @@ struct BMChatView: View {
     // MARK: The composer
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .focused($focused)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    Color(uiColor: .secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            Button { Task { await send() } } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+        VStack(alignment: .leading, spacing: 4) {
+            if BMChat.isTooLong(draft) {
+                Text("Too long — a message can be up to \(BMChat.maxLength.formatted()) characters.")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 12)
             }
-            .disabled(sending || BMChat.sendable(draft) == nil)
-            .accessibilityLabel("Send")
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Message", text: $draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .focused($focused)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        Color(uiColor: .secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                Button { Task { await send() } } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+                }
+                .disabled(sending || room == nil || BMChat.sendable(draft) == nil)
+                .accessibilityLabel("Send")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -229,6 +325,7 @@ struct BMChatView: View {
             loading = false
             return
         }
+        visible = true
         await refresh()
         loading = false
         while !Task.isCancelled {
@@ -239,23 +336,30 @@ struct BMChatView: View {
     }
 
     private func refresh() async {
+        // one at a time: two in flight can land out of order, and the older would overwrite the newer
+        guard !refreshing else { return }
+        refreshing = true
+        defer { refreshing = false }
+        let stamp = edits
         do {
-            let latest = try await BookMaster.shared.fetchChat()
-            guard !Task.isCancelled else { return }
+            let latest = try await BookMaster.shared.fetchChat(limit: BMChat.pageSize)
+            // a send or a take-back finished while this was out: it carries the room as it was, so it is
+            // not applied; the next poll, a few seconds on, will include the change
+            guard !Task.isCancelled, stamp == edits else { return }
             room = latest
             messages = BMChat.replacingNewest(messages, with: latest.messages)
             if messages.count == latest.messages.count { complete = latest.complete }
-            error = nil
+            loadError = nil
             await reportRead()
         } catch {
             guard !Task.isCancelled else { return }
-            if room == nil { self.error = "Couldn’t reach BookMaster. Pull down to try again." }
+            if room == nil { loadError = BMChat.explain(error) }
         }
     }
 
-    /// Looking at the room is reading it.
+    /// Looking at the room is reading it — when it is the screen in front.
     private func reportRead() async {
-        guard active, let room, let newest = messages.last?.id,
+        guard active, visible, let room, let newest = messages.last?.id,
               newest > room.read.mine, newest > reported else { return }
         reported = newest
         do { try await BookMaster.shared.markChatRead(upTo: newest) } catch { reported = 0 }
@@ -266,24 +370,26 @@ struct BMChatView: View {
         loadingOlder = true
         defer { loadingOlder = false }
         do {
-            let page = try await BookMaster.shared.fetchChat(before: first.id)
+            let page = try await BookMaster.shared.fetchChat(before: first.id, limit: BMChat.pageSize)
             messages = BMChat.merge(page.messages, messages)
             complete = page.complete
         } catch {
-            self.error = "Couldn’t load earlier messages."
+            actionError = "Couldn’t load earlier messages."
         }
     }
 
     // MARK: Writing
 
     private func send() async {
-        guard let text = BMChat.sendable(draft), !sending else { return }
+        guard let text = BMChat.sendable(draft), !sending, room != nil else { return }
         sending = true
+        actionError = nil
+        // cleared now, so what is typed while this goes is the next message and is not wiped when it lands
+        draft = ""
         defer { sending = false }
         do {
             let sent = try await BookMaster.shared.sendChat(text)
-            draft = ""
-            error = nil
+            edits += 1
             messages = BMChat.merge(messages, [sent])
             if let current = room {
                 // sending is reading: what you answer, you have seen
@@ -294,17 +400,22 @@ struct BMChatView: View {
             }
             reported = max(reported, sent.id)
         } catch {
-            // the words stay in the box
-            self.error = error.localizedDescription
+            // the words come back, unless something new has already been typed
+            if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                restoredDraft = text
+                draft = text
+            }
+            actionError = BMChat.explain(error)
         }
     }
 
     private func remove(_ m: BMChatMessage) async {
         do {
             try await BookMaster.shared.removeChat(id: m.id)
+            edits += 1
             messages.removeAll { $0.id == m.id }
         } catch {
-            self.error = error.localizedDescription
+            actionError = BMChat.explain(error)
         }
     }
 }

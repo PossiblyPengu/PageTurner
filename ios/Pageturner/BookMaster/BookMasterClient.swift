@@ -404,7 +404,7 @@ final class BookMaster {
 
     /// The suite's shared room: the newest page, or what came `after` an id,
     /// or the page `before` one.
-    func fetchChat(after: Int? = nil, before: Int? = nil, limit: Int = 60) async throws -> BMChatRoom {
+    func fetchChat(after: Int? = nil, before: Int? = nil, limit: Int = BMChat.pageSize) async throws -> BMChatRoom {
         var query = ["limit": String(limit)]
         if let after { query["after"] = String(after) }
         if let before { query["before"] = String(before) }
@@ -424,6 +424,32 @@ final class BookMaster {
     /// Take back one of your own messages.
     func removeChat(id: Int) async throws {
         try await sendJSON("chat-remove", json: ["id": id])
+    }
+
+    // MARK: Instant notifications (ntfy)
+
+    /// Whether BookMaster is sending this reader's notifications through ntfy, and to what topic.
+    func fetchNtfy() async throws -> BMNtfyStatus {
+        try await fetch("ntfy")
+    }
+
+    /// Switch it on (the first call makes the topic), or change where a tap goes, whether chat words
+    /// are sent, or replace the topic. Made from here, a tap opens Pageturner unless told otherwise.
+    func setNtfy(link: String? = nil, preview: Bool? = nil, rotate: Bool = false) async throws -> BMNtfyStatus {
+        var json: [String: Any] = [:]
+        if let link { json["link"] = link }
+        if let preview { json["preview"] = preview }
+        if rotate { json["rotate"] = true }
+        return try await sendJSON("ntfy", json: json)
+    }
+
+    /// A notification to prove the way works.
+    func testNtfy() async throws {
+        try await sendJSON("ntfy-test", json: [:])
+    }
+
+    func removeNtfy() async throws {
+        try await sendJSON("ntfy-remove", json: [:])
     }
 
     // MARK: The deeper reads

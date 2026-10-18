@@ -8,7 +8,8 @@ import UserNotifications
 /// A sideloaded app has no push entitlement, so these are *local* notifications:
 /// iOS wakes the app for a background refresh every so often (when, is its call,
 /// not ours), the app asks BookMaster what is waiting, and posts a notification
-/// for anything it hasn't already mentioned.
+/// for anything it hasn't already mentioned. (Instant ones come through ntfy instead —
+/// `BMNtfySection` — and while those are on, this stays quiet and only keeps the badge.)
 @Observable
 @MainActor
 final class Notifier {
@@ -89,7 +90,19 @@ final class Notifier {
         else { return }
         let announce = settle(together)
         await refreshAuthorization()
-        if notify, enabled, !announce.isEmpty { await post(announce) }
+        await recheckNtfy()
+        // with ntfy delivering the same things instantly, a second notification for each would be noise
+        if notify, enabled, !announce.isEmpty, !AppPrefs.ntfyActive { await post(announce) }
+    }
+
+    /// Whether BookMaster is sending this reader's notifications through ntfy — asked now and then, so
+    /// a change made on the web is noticed here too.
+    private func recheckNtfy() async {
+        guard BMNtfy.shouldRecheck(lastChecked: AppPrefs.ntfyCheckedAt),
+              let status = try? await BookMaster.shared.fetchNtfy()
+        else { return }
+        AppPrefs.ntfyActive = status.isOn
+        AppPrefs.ntfyCheckedAt = Date().timeIntervalSince1970
     }
 
     /// The Together tab loaded or changed — keep the badge and the "already told" set in step.

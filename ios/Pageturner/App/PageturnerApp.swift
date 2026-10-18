@@ -22,7 +22,10 @@ struct PageturnerApp: App {
                 // "Open in Pageturner" from Files, Mail, the share sheet…
                 // and `pageturner://link?code=…`, BookMaster's pair flow coming home.
                 .onOpenURL { url in
-                    if url.scheme == BookMasterLinker.scheme {
+                    if let target = BMDeepLink.parse(url) {
+                        // a tapped notification from ntfy: BookMaster told it to open here
+                        IntentRouter.shared.request = .openSuite(target)
+                    } else if url.scheme == BookMasterLinker.scheme {
                         // The in-app sheet normally consumes this. A code that
                         // arrives here is only good if this app started a link —
                         // otherwise a web page could link the device to its own account.

@@ -17,11 +17,21 @@ enum BMChat {
         notices.first { $0.id.hasPrefix(noticePrefix) }
     }
 
-    /// What may go up: the draft trimmed, or nil when it is blank or too long.
+    /// What may go up: the draft trimmed, or nil when it is blank or too long. The server counts
+    /// UTF-16 units (what a JavaScript string's length is), so this does too: an emoji is two, a family
+    /// emoji eleven — counting what a reader sees as one character would let through what it refuses.
     static func sendable(_ draft: String) -> String? {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty || text.count > maxLength ? nil : text
+        return text.isEmpty || text.utf16.count > maxLength ? nil : text
     }
+
+    /// Whether the draft is over the limit, for saying so (a blank one is not).
+    static func isTooLong(_ draft: String) -> Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count > maxLength
+    }
+
+    /// How many messages one request returns.
+    static let pageSize = 60
 
     /// Messages in id order, once each. Where both lists hold an id, the
     /// incoming copy wins.
@@ -35,8 +45,15 @@ enum BMChat {
     /// The newest page, fetched again: it replaces everything from its first
     /// message on — so a message the other reader took back disappears —
     /// while older messages loaded earlier stay. An empty page is an empty room.
-    static func replacingNewest(_ existing: [BMChatMessage], with page: [BMChatMessage]) -> [BMChatMessage] {
+    ///
+    /// When a whole page arrives and does not reach back to anything already held, more than a page
+    /// came in between looks (a long time away): what is held is no longer joined to it, so only the
+    /// page is kept — "Earlier messages" then pages back from there, with nothing silently missing.
+    static func replacingNewest(
+        _ existing: [BMChatMessage], with page: [BMChatMessage], pageSize: Int = BMChat.pageSize
+    ) -> [BMChatMessage] {
         guard let first = page.first else { return [] }
+        if page.count >= pageSize, let newest = existing.last, newest.id < first.id { return page }
         return existing.filter { $0.id < first.id } + page
     }
 
@@ -45,6 +62,19 @@ enum BMChat {
     static func seenLabel(lastMineId: Int?, theirsRead: Int, hasPartner: Bool) -> String? {
         guard hasPartner, let id = lastMineId else { return nil }
         return id <= theirsRead ? "Seen" : "Sent"
+    }
+
+    /// What to tell the reader when a send or a take-back fails: the server's own words where they
+    /// help, and what to do where the link itself has broken.
+    static func explain(_ error: Error) -> String {
+        if case let BMError.server(code, message) = error {
+            if code == 404, message == "Unknown reader" {
+                return "BookMaster no longer recognises this device. Link it again in Settings."
+            }
+            if let message, !message.isEmpty { return message }
+            return code == 429 ? "Slow down a little — too many messages at once." : "BookMaster answered \(code)."
+        }
+        return "Couldn’t reach BookMaster. Try again in a moment."
     }
 
     /// Where a message was written, when that is not here.
