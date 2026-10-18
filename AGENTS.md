@@ -150,7 +150,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   units like the server; a full page that reaches back to nothing held replaces it instead of leaving a hole. Quest Log's own private chat is end-to-end encrypted and is deliberately **not** in the app: it is opened from
   BookMaster's web Chat page with Quest Log's passphrase.
   The chat is also one tap from anywhere but the reader: `BMChatButtonLayer` (`BMChatButtonView.swift`) is a draggable round button laid
-  over the whole shell in `RootView`, opening the chat as a sheet (`router.showChat`). When it shows and where it rests are pure
+  over the whole shell in `RootView`, opening the chat as a full-screen page (`router.showChat`, `.fullScreenCover`) — a sheet read as a pop-up. When it shows and where it rests are pure
   (`BMChatButton`, Linux-checked); it steps aside over the reader (`router.readerOpen`) and over any screen marked `.hidesChatButton()`
   (the chat, the in-app browser); Settings → BookMaster turns it off. Its dot and the Together tab's share one state
   (`Notifier.chatUnread` / `noteChatOpened`), refreshed every minute while the button is up. Gestures and accessibility go on the small

@@ -96,7 +96,7 @@ struct RootView: View {
             .sheet(item: $r.editing) { book in editSheet(book) }
             .sheet(item: $r.shelfTarget) { ShelvesSheet(target: $0) }
             .sheet(isPresented: $r.showSettings) { SettingsView() }
-            .sheet(isPresented: $r.showChat) { BMChatSheet() }
+            .fullScreenCover(isPresented: $r.showChat) { BMChatScreen() }
             .sheet(isPresented: $r.showLink) { linkSheet }
             .fileImporter(
                 isPresented: $r.showImporter,

@@ -17,7 +17,7 @@ struct BMChatView: View {
     /// but covered (another tab, a sheet) has not been looked at.
     @State private var visible = false
     /// Where the reader was before the chat opened — put back when it closes (the Together tab, or any other
-    /// screen, when it came as a sheet).
+    /// screen, when it came as the floating button's full page).
     @State private var cameFrom = "bookmaster"
     @State private var room: BMChatRoom?
     @State private var messages: [BMChatMessage] = []

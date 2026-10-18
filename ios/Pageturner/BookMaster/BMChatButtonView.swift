@@ -125,8 +125,9 @@ struct BMChatButtonLayer: View {
     }
 }
 
-/// The chat as a sheet, for the floating button: the same screen the Together tab pushes, with a way out.
-struct BMChatSheet: View {
+/// The chat as a full page over the app, for the floating button: the same screen the Together tab pushes,
+/// with a way back. (A sheet left the page behind it showing at the top, which read as a pop-up.)
+struct BMChatScreen: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -134,7 +135,9 @@ struct BMChatSheet: View {
             BMChatView()
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Done") { dismiss() }
+                        Button { dismiss() } label: {
+                            Label("Back", systemImage: "chevron.left")
+                        }
                     }
                 }
         }

@@ -39,7 +39,7 @@ final class AppRouter {
     /// Where the Together tab should go next — the chat, or a page of one of the web apps — set by
     /// a tapped notification and cleared by the tab once it has gone there.
     var suiteTarget: BMDeepLink.Target?
-    /// The chat as a sheet over whatever is up — what the floating chat button opens.
+    /// The chat as a full page over whatever is up — what the floating chat button opens.
     var showChat = false
     /// The screens that cover the floating button's place (the chat itself, the in-app browser), by
     /// identity, so one that appears twice still counts once.
