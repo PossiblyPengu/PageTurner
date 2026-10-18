@@ -123,13 +123,14 @@ struct BookMasterAccountPage: View {
     }
 }
 
-/// Settings → Notifications: instant ones through ntfy, and the ones Pageturner posts itself.
+/// Settings → Notifications: instant ones through Bark (or ntfy), and the ones Pageturner posts itself.
 struct NotificationsSettingsPage: View {
     @AppStorage("bm-badge") private var showBadge = true
     private let notifier = Notifier.shared
 
     var body: some View {
         Form {
+            BMBarkSection()
             BMNtfySection()
             localSection
         }

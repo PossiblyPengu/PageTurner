@@ -51,6 +51,16 @@ enum AppPrefs {
         set { defaults.set(newValue, forKey: "ntfy-checked") }
     }
 
+    /// The same for Bark (see `BMBark`).
+    static var barkActive: Bool {
+        get { defaults.bool(forKey: "bark-active") }
+        set { defaults.set(newValue, forKey: "bark-active") }
+    }
+
+    /// Whether any instant channel (ntfy or Bark) is delivering this reader's notifications — when one is,
+    /// Pageturner does not also post its own.
+    static var instantActive: Bool { BMBark.instantActive(ntfy: ntfyActive, bark: barkActive) }
+
     /// When the library was last backed up (seconds since 1970), 0 for never.
     static var lastBackupAt: Double {
         get { defaults.double(forKey: "backup-last") }

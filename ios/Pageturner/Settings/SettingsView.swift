@@ -118,7 +118,7 @@ struct SettingsView: View {
     }
 
     private var notificationsDetail: String {
-        if AppPrefs.ntfyActive { return "Instant" }
+        if AppPrefs.instantActive { return "Instant" }
         return notifier.enabled ? "On" : "Off"
     }
 

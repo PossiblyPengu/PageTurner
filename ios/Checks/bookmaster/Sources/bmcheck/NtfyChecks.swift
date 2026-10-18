@@ -64,4 +64,29 @@ func runNtfyChecks() {
               }
               return true
           })
+
+    // ---- Bark, the other instant channel
+    let key = "aBcDeFgHiJkLmNoPqRsTuV"
+    let barkOn = try? JSONDecoder().decode(
+        BMBarkStatus.self,
+        from: Data(#"{"available":true,"server":"https://api.day.app","configured":true,"keyHint":"sTuV","link":"pageturner","preview":false}"#.utf8))
+    check("a Bark status decodes: on, ending in the key's last four, tapping opens Pageturner",
+          barkOn?.isOn == true && barkOn?.keyHint == "sTuV" && barkOn?.opensPageturner == true && barkOn?.preview == false, "\(String(describing: barkOn))")
+    let barkOff = try? JSONDecoder().decode(
+        BMBarkStatus.self,
+        from: Data(#"{"available":true,"server":"https://api.day.app","configured":false,"keyHint":null,"link":null,"preview":false}"#.utf8))
+    check("…and off, with no key", barkOff?.isOn == false && barkOff?.keyHint == nil && barkOff?.opensPageturner == false)
+    check("the key is found in what was pasted: the key, or the address Bark shows with it",
+          BMBark.key(from: key) == key && BMBark.key(from: "  \(key)\n") == key
+          && BMBark.key(from: "https://api.day.app/\(key)/") == key && BMBark.key(from: "https://api.day.app/\(key)/Title/Body") == key
+          && BMBark.key(from: "https://push.example.com/\(key)") == key)
+    check("…and nothing else is taken for one",
+          BMBark.key(from: "") == nil && BMBark.key(from: "hello") == nil && BMBark.key(from: "short") == nil
+          && BMBark.key(from: "https://api.day.app/") == nil && BMBark.key(from: "ftp://api.day.app/\(key)") == nil
+          && BMBark.key(from: "has spaces in the middle of it all") == nil && BMBark.key(from: "ключключключключ") == nil)
+    check("the server reads as a name", BMBark.serverLabel("https://api.day.app") == "api.day.app"
+          && BMBark.serverLabel("https://bark.example.org") == "bark.example.org" && BMBark.serverLabel(nil) == "api.day.app")
+    check("either channel stands Pageturner's own notifications down",
+          BMBark.instantActive(ntfy: true, bark: false) && BMBark.instantActive(ntfy: false, bark: true)
+          && BMBark.instantActive(ntfy: true, bark: true) && !BMBark.instantActive(ntfy: false, bark: false))
 }

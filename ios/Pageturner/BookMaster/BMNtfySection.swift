@@ -16,7 +16,7 @@ struct BMNtfySection: View {
     @State private var confirmRotate = false
 
     var body: some View {
-        Section("Instant notifications") {
+        Section("Instant notifications through ntfy (alternative)") {
             content
             if let info { Text(info).font(.footnote).foregroundStyle(.secondary) }
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }

@@ -452,6 +452,33 @@ final class BookMaster {
         try await sendJSON("ntfy-remove", json: [:])
     }
 
+    // MARK: Instant notifications (Bark)
+
+    /// Whether BookMaster is sending this reader's notifications through Bark.
+    func fetchBark() async throws -> BMBarkStatus {
+        try await fetch("bark")
+    }
+
+    /// Switch it on or replace the key (`key`: the device key, or the address Bark shows with it), or
+    /// change where a tap goes and whether chat words are sent. Made from here, a tap opens Pageturner
+    /// unless told otherwise.
+    func setBark(key: String? = nil, link: String? = nil, preview: Bool? = nil) async throws -> BMBarkStatus {
+        var json: [String: Any] = [:]
+        if let key { json["key"] = key }
+        if let link { json["link"] = link }
+        if let preview { json["preview"] = preview }
+        return try await sendJSON("bark", json: json)
+    }
+
+    /// A notification to prove the way works.
+    func testBark() async throws {
+        try await sendJSON("bark-test", json: [:])
+    }
+
+    func removeBark() async throws {
+        try await sendJSON("bark-remove", json: [:])
+    }
+
     // MARK: The deeper reads
 
     /// A decoded GET behind the link check and the refusal handling, so the

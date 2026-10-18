@@ -196,6 +196,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   `RootView` → `AppRouter.suiteTarget` → the Together tab opens it. While ntfy is on (`AppPrefs.ntfyActive`, re-asked from BookMaster every six
   hours) `Notifier` stops posting its own local copies, and keeps only the badge. Whether iOS's ntfy app opens a custom-scheme tap is unverified
   on a device, so the setting is explicit and "Send a Test Notification" proves the whole way.
+  **Bark** is the second channel and the one to prefer (`BMBark.swift` pure, `BMBarkSection.swift`, bridge routes `bark`, `bark-test`,
+  `bark-remove`): ntfy.sh limits anonymous publishers *by address* and a free account is counted by address too, so Cloudflare's shared
+  address gets 429 whatever BookMaster sends. Bark's own push service has no such limit. The reader pastes the key the Bark app shows
+  (BookMaster parses it out of a pasted address too, and `BMBark.key(from:)` does the same to enable the button); the key is stored by
+  BookMaster, used there and never sent back — the app only sees its last four characters. `AppPrefs.instantActive` (ntfy or Bark) is what
+  stands the local notifications down. A tap through Bark opening `pageturner://` is likewise unverified on a device.
 - Siri/Shortcuts (`Intents/`) and Spotlight (`Library/SpotlightIndexer.swift`) hand requests to the shell
   through `IntentRouter`, which holds them until the first screen exists.
 - Read-aloud voices (`Reader/` and `Neural/`): `SpeechVoices.swift` is Foundation-only (list, group, search, "best

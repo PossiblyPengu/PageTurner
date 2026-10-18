@@ -8,7 +8,7 @@ import UserNotifications
 /// A sideloaded app has no push entitlement, so these are *local* notifications:
 /// iOS wakes the app for a background refresh every so often (when, is its call,
 /// not ours), the app asks BookMaster what is waiting, and posts a notification
-/// for anything it hasn't already mentioned. (Instant ones come through ntfy instead —
+/// for anything it hasn't already mentioned. (Instant ones come through ntfy or Bark instead —
 /// `BMNtfySection` — and while those are on, this stays quiet and only keeps the badge.)
 @Observable
 @MainActor
@@ -109,18 +109,21 @@ final class Notifier {
         else { return }
         let announce = settle(together)
         await refreshAuthorization()
-        await recheckNtfy()
-        // with ntfy delivering the same things instantly, a second notification for each would be noise
-        if notify, enabled, !announce.isEmpty, !AppPrefs.ntfyActive { await post(announce) }
+        await recheckInstant()
+        // with ntfy or Bark delivering the same things instantly, a second notification for each would be noise
+        if notify, enabled, !announce.isEmpty, !AppPrefs.instantActive { await post(announce) }
     }
 
-    /// Whether BookMaster is sending this reader's notifications through ntfy — asked now and then, so
-    /// a change made on the web is noticed here too.
-    private func recheckNtfy() async {
-        guard BMNtfy.shouldRecheck(lastChecked: AppPrefs.ntfyCheckedAt),
-              let status = try? await BookMaster.shared.fetchNtfy()
-        else { return }
-        AppPrefs.ntfyActive = status.isOn
+    /// Whether BookMaster is sending this reader's notifications through ntfy or Bark — asked now and
+    /// then, so a change made on the web is noticed here too.
+    private func recheckInstant() async {
+        guard BMNtfy.shouldRecheck(lastChecked: AppPrefs.ntfyCheckedAt) else { return }
+        // each asked on its own: a BookMaster that has only one of them set up still answers the other
+        let ntfy = try? await BookMaster.shared.fetchNtfy()
+        let bark = try? await BookMaster.shared.fetchBark()
+        guard ntfy != nil || bark != nil else { return }
+        if let ntfy { AppPrefs.ntfyActive = ntfy.isOn }
+        if let bark { AppPrefs.barkActive = bark.isOn }
         AppPrefs.ntfyCheckedAt = Date().timeIntervalSince1970
     }
 
