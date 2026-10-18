@@ -194,7 +194,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   for a message arriving while the chat is open) when the app is active, a **local notification** when it is not (and the reader allowed
   it). Everything told is kept in the **inbox** (`BMInbox` pure and Linux-checked, `BMInboxStore` saves it per account, `BMInboxView` is
   the list: the Together tab's bell and Settings → Notifications); `AppRouter.open(_ item:)` is where an item leads (the chat, the Together
-  tab, or a page of a web app), used by banner and list alike. The Together tab badge and the app icon count the inbox's unread.
+  tab, or a page of a web app), used by banner and list alike; a tapped local notification carries its item's id (`tappedItemID`). The Together tab badge and the app icon count the inbox's unread. An item cleared while BookMaster still lists it is held back (`dismissed`, saved with the history), or the next look would bring it back unread.
   Behind the app, iOS wakes Pageturner for a background refresh when it likes; **Stay connected** (`BackgroundKeepAlive`, off by default,
   `BMKeepAlive` holds the rules) loops a silent sound so the app is kept running and looks every 30 s (90 s in Low Power Mode). It mixes
   with other sound, leaves a book's audio session alone (the category is only set when it is not already `.playback`), and stops when the

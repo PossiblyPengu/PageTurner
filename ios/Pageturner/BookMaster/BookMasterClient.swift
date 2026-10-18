@@ -555,6 +555,8 @@ final class BookMaster {
         }
         let reply = try JSONDecoder().decode(BMShelfWriteReply.self, from: data)
         announce(reply.newAchievements)
+        // unlinked while this was out: the row belongs to a reader who is gone
+        guard self.user?.username == user.username else { return reply }
         if unshelve, let pin { dropShelfRow(pin) }
         else if let row = reply.userBook { applyShelfRow(row) }
         return reply
@@ -636,6 +638,7 @@ final class BookMaster {
     @discardableResult
     func setUpNext(_ ids: [String]) async throws -> [BMUpNextBook] {
         let reply: BMUpNextReply = try await sendJSON("up-next", json: ["ids": ids])
+        guard user != nil else { return reply.books }
         // Mirror the order into the cached shelf so screens stay right
         // before the next pull — and offline too.
         let rank = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset + 1) })
@@ -834,6 +837,10 @@ final class BookMaster {
         var entry = entry
         if entry.id == nil { entry.id = UUID() }
         if entry.kind == "progress" {
+            // a rating parked with the older position rides on the newer one that replaces it
+            if let older = queue.last(where: { $0.kind == "progress" && Self.sameBook($0.body, entry.body) }) {
+                entry.body = Self.keepingRating(from: older.body, in: entry.body)
+            }
             queue.removeAll { $0.kind == "progress" && Self.sameBook($0.body, entry.body) }
         }
         queue.append(entry)
@@ -898,6 +905,16 @@ final class BookMaster {
 
     private static func owner(of body: Data) -> String? {
         (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["username"] as? String
+    }
+
+    /// `new`, with the rating `old` carried if `new` carries none.
+    private static func keepingRating(from old: Data, in new: Data) -> Data {
+        guard var fresh = (try? JSONSerialization.jsonObject(with: new)) as? [String: Any], fresh["rating"] == nil,
+              let before = (try? JSONSerialization.jsonObject(with: old)) as? [String: Any],
+              let rating = before["rating"]
+        else { return new }
+        fresh["rating"] = rating
+        return (try? JSONSerialization.data(withJSONObject: fresh)) ?? new
     }
 
     private static func sameBook(_ left: Data, _ right: Data) -> Bool {

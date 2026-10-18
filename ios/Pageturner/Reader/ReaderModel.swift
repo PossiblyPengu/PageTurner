@@ -995,7 +995,11 @@ final class ReaderModel: ObservableObject {
             await BookMaster.shared.syncProgress(
                 bookKey: book.id.uuidString, ref: ref, percent: reported, isAudio: false, force: true,
                 pinned: { [weak self] id in self?.pin(id) })
-            guard moved else { return }
+        }
+        // its own task: both are written to the queue before they are sent, but the sitting must not wait
+        // on the position's round trip — a phone locked on a slow link is suspended in the middle of it
+        guard moved else { return }
+        Task {
             await BookMaster.shared.syncSession(
                 ref: ref, percentStart: max(reported - span, 0), percentEnd: reported,
                 minutes: minutes, at: Date())

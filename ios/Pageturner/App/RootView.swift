@@ -54,6 +54,7 @@ struct RootView: View {
                 guard old, !linked else { return }
                 library.clearBookMasterFields()
                 notifier.reset()
+                BMQuestLogRoomPage.shared.forget()
             }
             .onChange(of: intents.request, initial: true) { _, request in
                 guard let request else { return }

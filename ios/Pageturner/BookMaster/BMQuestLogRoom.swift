@@ -10,6 +10,12 @@ final class BMQuestLogRoomPage {
     static let shared = BMQuestLogRoomPage()
     let page = BMWebPage(app: .bookmaster)
     private init() {}
+
+    /// Signed out or unlinked: the room is locked again (its passphrase lived in the page) and the next reader starts fresh.
+    func forget() {
+        page.unload()
+        if page.webView.window != nil { page.open(BMChat.questLogRoom) }
+    }
 }
 
 /// The room's tab and the other one: "Us" and "Quest Log" (a lock on it, and a blue square while it has
@@ -51,10 +57,12 @@ struct BMChatTabs: View {
 
 struct BMQuestLogRoomView: View {
     private let page = BMQuestLogRoomPage.shared.page
+    /// A new identity takes the shared web view back when another copy of the chat has had it meanwhile.
+    @State private var hostID = UUID()
 
     var body: some View {
         ZStack(alignment: .top) {
-            BMWebHost(page: page)
+            BMWebHost(page: page).id(hostID)
             if page.isLoading, page.progress < 1 {
                 ProgressView(value: page.progress)
                     .progressViewStyle(.linear)
@@ -69,8 +77,13 @@ struct BMQuestLogRoomView: View {
         }
         .background(Color(.systemBackground))
         .onAppear {
+            hostID = UUID()
             page.openIfNeeded(BMChat.questLogRoom)
             Notifier.shared.noteQuestLogOpened()
+        }
+        // what comes in while the room is the one in view is seen as it comes
+        .onChange(of: Notifier.shared.questLogUnread) { _, waiting in
+            if waiting { Notifier.shared.noteQuestLogOpened() }
         }
     }
 

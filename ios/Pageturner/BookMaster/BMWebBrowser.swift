@@ -173,6 +173,7 @@ final class BMWebPages {
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
         for page in pages.values { page.unload() }
         if let visible, let page = pages[visible], page.webView.window != nil { page.open() }
+        BMQuestLogRoomPage.shared.forget()
     }
 }
 

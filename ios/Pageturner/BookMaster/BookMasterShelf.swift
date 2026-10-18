@@ -193,7 +193,8 @@ extension BookMaster {
         guard let user else { return false }
         guard let (data, status) = try? await get("library", query: ["username": user.username]),
               (200..<300).contains(status),
-              let reply = try? JSONDecoder().decode(BMShelfReply.self, from: data)
+              let reply = try? JSONDecoder().decode(BMShelfReply.self, from: data),
+              self.user?.username == user.username   // unlinked, or another reader linked, while it was out
         else { return false }
         keepShelf(reply.books)
         var changes: [(UUID, (inout Book) -> Void)] = []

@@ -155,6 +155,7 @@ struct BMChatView: View {
             .onAppear {
                 atBottom = true
                 newBelow = false
+                Task { await reportRead() }
             }
             .onDisappear { atBottom = false }
     }
@@ -344,10 +345,17 @@ struct BMChatView: View {
     /// Open on the newest page, then keep up while the screen is here.
     private func run() async {
         guard BookMaster.shared.isLinked else {
+            // another reader may link next: nothing of this one's stays on the screen
+            room = nil
+            messages = []
+            complete = true
+            reported = 0
+            loadError = nil
             loading = false
             return
         }
         visible = true
+        loading = room == nil
         await refresh()
         loading = false
         while !Task.isCancelled {
@@ -382,8 +390,12 @@ struct BMChatView: View {
     /// Looking at the room is reading it — when it is the screen in front.
     private func reportRead() async {
         // reading is only reported from the shared room, while it is the one showing
-        guard active, visible, tab == .us, let room, let newest = messages.last?.id,
-              newest > room.read.mine, newest > reported else { return }
+        // and only with the newest message in view: one waiting below the fold is not read yet
+        guard active, visible, tab == .us, atBottom, let room, let newest = messages.last?.id else { return }
+        // the dot over the chat button and the Together card goes with it — also for a message that came in
+        // while the chat was open
+        Notifier.shared.noteChatOpened()
+        guard newest > room.read.mine, newest > reported else { return }
         reported = newest
         do {
             try await BookMaster.shared.markChatRead(upTo: newest)

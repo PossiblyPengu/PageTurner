@@ -72,9 +72,17 @@ final class AppRouter {
         switch BMInbox.destination(for: item) {
         case .chat:
             Notifier.shared.noteChatOpened()
+            // already in front: closing and opening it again would lose the draft, the tab and the place
+            if showChat { return }
             // whatever is up (the settings, say) is put away first; the chat follows once it is gone
+            let covered = detail != nil || editing != nil || shelfTarget != nil || showSettings
+                || showLink || showImporter
             dismissPresentations()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.showChat = true }
+            if covered {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.showChat = true }
+            } else {
+                showChat = true
+            }
         case .together:
             dismissPresentations()
             tab = .together

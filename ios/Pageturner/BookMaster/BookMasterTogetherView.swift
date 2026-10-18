@@ -11,6 +11,8 @@ struct BookMasterTogetherView: View {
     @State private var stats: BMStatBlock?
     @State private var overview: BMOverview?
     @State private var error: String?
+    /// A suggestion that could not be answered — told by an alert, since the error line is at the foot of a long page.
+    @State private var answerError: String?
     @State private var loading = true
     /// Suggestion ids with a reply in flight — both buttons wait for it.
     @State private var answering: Set<String> = []
@@ -82,6 +84,13 @@ struct BookMasterTogetherView: View {
     private func reacting<V: View>(_ content: V) -> some View {
         content
             .refreshable { await load() }
+            .alert("Couldn’t answer", isPresented: Binding(
+                get: { answerError != nil }, set: { if !$0 { answerError = nil } })
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(answerError ?? "")
+            }
             .task(id: BookMaster.shared.isLinked) { await load() }
             .onChange(of: router.suiteTarget, initial: true) { _, target in openTarget(target) }
             // the simulator run asks for the list without a tap
@@ -738,7 +747,7 @@ struct BookMasterTogetherView: View {
             together?.nudges.removeAll { $0.id == nudge.id }
             if let together { Notifier.shared.noteSeen(together) }
         } catch {
-            self.error = error.localizedDescription
+            answerError = error.localizedDescription
         }
     }
 }
