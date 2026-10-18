@@ -22,6 +22,16 @@ final class Notifier {
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
     /// Set when a notification is tapped; the shell switches to Together and clears it.
     var openTogether = false
+    /// The notice that says a chat message is waiting, as of the last look at BookMaster.
+    private(set) var chatNotice: BMNotice?
+    /// The chat notice already opened, so its dot stays out until a newer message.
+    private var chatSeenID: String?
+
+    /// A chat message waiting that has not been opened — what the Together tab and the floating button show.
+    var chatUnread: BMNotice? { BMChat.unread(chatNotice.map { [$0] } ?? [], seen: chatSeenID) }
+
+    /// The chat was opened, from wherever.
+    func noteChatOpened() { chatSeenID = chatNotice?.id }
 
     private let defaults = UserDefaults.standard
 
@@ -115,6 +125,7 @@ final class Notifier {
     /// Update the count and the remembered set; return what is new since last time.
     private func settle(_ together: BMTogether) -> [NotificationPlan.Item] {
         pendingCount = together.nudges.count
+        chatNotice = BMChat.unreadNotice(together.notices)
         guard let key = seenKey else { return [] }
         let known = defaults.stringArray(forKey: key).map { Set($0) }
         let result = NotificationPlan.plan(nudges: together.nudges, notices: together.notices, seen: known)
@@ -166,6 +177,8 @@ final class Notifier {
     /// Unlinking: forget the count and the badge.
     func reset() {
         pendingCount = 0
+        chatNotice = nil
+        chatSeenID = nil
         wasRefused = false
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.refreshTaskID)
         // banners already on the lock screen belong to the account that just went away

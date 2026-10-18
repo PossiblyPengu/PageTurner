@@ -3,7 +3,7 @@ name: Deploy to Cloudflare Pages
 # Deploys happen when CI goes green on main — never before. A commit that
 # fails lint/tests/version-check used to ship anyway because this ran on
 # every push in parallel with CI. To redeploy without a push (e.g. to bind a
-# rotated secret), run wrangler locally: wrangler pages deploy docs.
+# rotated secret), run wrangler locally: wrangler pages deploy docs --branch main.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -31,7 +31,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4.151.0"
-          command: pages deploy docs --project-name=pageturner
+          command: pages deploy docs --project-name=pageturner --branch=main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 

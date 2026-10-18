@@ -7,6 +7,7 @@ struct BookMasterSection: View {
     @AppStorage("bm-covers") private var sendCovers = true
     @AppStorage("bm-resume-ask") private var resumeAsk = true
     @AppStorage("bm-badge") private var showBadge = true
+    @AppStorage("bm-chat-button") private var chatButton = true
     @AppStorage("bm-quotes-auto") private var quotesAuto = false
     @State private var working = false
     @State private var error: String?
@@ -69,6 +70,10 @@ struct BookMasterSection: View {
                             .foregroundStyle(.secondary)
                     }
                     Toggle("Badge the BookMaster tab when suggestions wait", isOn: $showBadge)
+                    Toggle("Chat button on every screen", isOn: $chatButton)
+                    Text("A round button that opens the chat from anywhere except while you are reading a book. Drag it to the other side, or up and down.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Button("Unlink BookMaster", role: .destructive) { confirmUnlink = true }
                         .alert("Unlink BookMaster?", isPresented: $confirmUnlink) {
                             Button("Unlink", role: .destructive) {

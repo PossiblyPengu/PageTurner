@@ -17,6 +17,13 @@ enum BMChat {
         notices.first { $0.id.hasPrefix(noticePrefix) }
     }
 
+    /// The same, unless it is the one already opened: a newer message carries a new notice id, so its
+    /// dot comes back on its own.
+    static func unread(_ notices: [BMNotice], seen: String?) -> BMNotice? {
+        guard let notice = unreadNotice(notices), notice.id != seen else { return nil }
+        return notice
+    }
+
     /// What may go up: the draft trimmed, or nil when it is blank or too long. The server counts
     /// UTF-16 units (what a JavaScript string's length is), so this does too: an emoji is two, a family
     /// emoji eleven — counting what a reader sees as one character would let through what it refuses.

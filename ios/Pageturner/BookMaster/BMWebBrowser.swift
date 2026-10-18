@@ -396,7 +396,7 @@ struct BMWebBrowserView: View {
     var body: some View {
         // grouped, so no one expression is a long chain the compiler has to solve at once
         let page = BMWebPages.shared.page(for: app)
-        return lifecycle(chrome(page, content: stack(page)))
+        return lifecycle(chrome(page, content: stack(page))).hidesChatButton()
     }
 
     private func stack(_ page: BMWebPage) -> some View {

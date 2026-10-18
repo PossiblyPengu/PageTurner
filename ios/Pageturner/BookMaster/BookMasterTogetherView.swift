@@ -19,8 +19,6 @@ struct BookMasterTogetherView: View {
     @State private var showChat = false
     /// The in-app browser, when one of the suite's web apps is open.
     @State private var browser: BMWebLaunch?
-    /// The chat notice already opened from here, so its dot goes out until a newer message.
-    @State private var chatSeenNotice: String?
 
     var body: some View {
         // grouped, so no one expression is a long chain the compiler has to solve at once
@@ -144,12 +142,8 @@ struct BookMasterTogetherView: View {
 
     // MARK: Chat
 
-    /// The notice that says a message is waiting — until you have opened it.
-    private var unreadChat: BMNotice? {
-        guard let notice = BMChat.unreadNotice(together?.notices ?? []),
-              notice.id != chatSeenNotice else { return nil }
-        return notice
-    }
+    /// The notice that says a message is waiting — until you have opened it (from here or the floating button).
+    private var unreadChat: BMNotice? { Notifier.shared.chatUnread }
 
     /// Go where a tapped notification said: the native chat, or the browser at its page.
     private func openTarget(_ target: BMDeepLink.Target?) {
@@ -165,7 +159,7 @@ struct BookMasterTogetherView: View {
     }
 
     private func openChat() {
-        chatSeenNotice = BMChat.unreadNotice(together?.notices ?? [])?.id
+        Notifier.shared.noteChatOpened()
         showChat = true
     }
 

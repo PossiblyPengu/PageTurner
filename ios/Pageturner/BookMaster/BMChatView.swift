@@ -16,6 +16,9 @@ struct BMChatView: View {
     /// Whether this screen is the one in front. Reading is only reported from here: a chat that is pushed
     /// but covered (another tab, a sheet) has not been looked at.
     @State private var visible = false
+    /// Where the reader was before the chat opened — put back when it closes (the Together tab, or any other
+    /// screen, when it came as a sheet).
+    @State private var cameFrom = "bookmaster"
     @State private var room: BMChatRoom?
     @State private var messages: [BMChatMessage] = []
     @State private var complete = true
@@ -69,12 +72,14 @@ struct BMChatView: View {
         view
             .onAppear {
                 visible = true
+                if BookMaster.shared.place != "chat" { cameFrom = BookMaster.shared.place }
                 BookMaster.shared.place = "chat"
             }
             .onDisappear {
                 visible = false
-                BookMaster.shared.place = "bookmaster"
+                BookMaster.shared.place = cameFrom
             }
+            .hidesChatButton()
             .task(id: BookMaster.shared.isLinked) { await run() }
             .onChange(of: scenePhase) { _, phase in
                 active = phase == .active

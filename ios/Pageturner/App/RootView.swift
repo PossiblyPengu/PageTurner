@@ -25,7 +25,7 @@ struct RootView: View {
 
     var body: some View {
         // grouped, so no one expression is a long chain the compiler has to solve at once
-        routing(alerts(bookSheets(shell)))
+        routing(alerts(bookSheets(shell.overlay { chatButton })))
             .tint(.ptAccent)
             // the reader sets its own scheme inside; this is the preference for the rest
             .preferredColorScheme(scheme)
@@ -96,6 +96,7 @@ struct RootView: View {
             .sheet(item: $r.editing) { book in editSheet(book) }
             .sheet(item: $r.shelfTarget) { ShelvesSheet(target: $0) }
             .sheet(isPresented: $r.showSettings) { SettingsView() }
+            .sheet(isPresented: $r.showChat) { BMChatSheet() }
             .sheet(isPresented: $r.showLink) { linkSheet }
             .fileImporter(
                 isPresented: $r.showImporter,
@@ -298,6 +299,12 @@ struct RootView: View {
     }
 
     // MARK: Pieces
+
+    /// The chat button that floats over every tab but the reader. The tab bar — and the mini player
+    /// above it, when one is up — is room it keeps clear.
+    private var chatButton: some View {
+        BMChatButtonLayer(bottomReserve: showMiniPlayer ? 128 : 64)
+    }
 
     /// The mini player steps aside while the full player fills the Reading
     /// tab; reading an ebook with audio going keeps it, as the way back.

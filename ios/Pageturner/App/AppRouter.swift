@@ -39,6 +39,18 @@ final class AppRouter {
     /// Where the Together tab should go next — the chat, or a page of one of the web apps — set by
     /// a tapped notification and cleared by the tab once it has gone there.
     var suiteTarget: BMDeepLink.Target?
+    /// The chat as a sheet over whatever is up — what the floating chat button opens.
+    var showChat = false
+    /// The screens that cover the floating button's place (the chat itself, the in-app browser), by
+    /// identity, so one that appears twice still counts once.
+    private(set) var chatButtonHiders: Set<UUID> = []
+
+    /// An ebook is open in the Reading tab and that tab is up: the reader, where nothing floats.
+    var readerOpen: Bool { tab == .reading && reading != nil }
+
+    func hideChatButton(_ id: UUID, _ hide: Bool) {
+        if hide { chatButtonHiders.insert(id) } else { chatButtonHiders.remove(id) }
+    }
 
     /// Close whatever sheet is up, so a request from outside lands on screen.
     func dismissPresentations() {
@@ -48,6 +60,7 @@ final class AppRouter {
         showSettings = false
         showLink = false
         showImporter = false
+        showChat = false
         resumePrompt = nil
     }
 
