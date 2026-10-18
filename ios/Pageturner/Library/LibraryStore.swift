@@ -457,7 +457,7 @@ final class LibraryStore: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .notAnArchive: return "That zip file couldn’t be opened."
-            case .looksLikeBackup: return "That looks like a Pageturner backup — restore it from Settings → Restore Backup."
+            case .looksLikeBackup: return "That looks like a Pageturner backup — restore it from Settings → Backup → Restore Backup."
             case .nothingToImport: return "There were no books, comics or audio files inside."
             case .emptyText: return "There was no text in that file."
             case let .duplicate(title): return "“\(title)” is already in your library."

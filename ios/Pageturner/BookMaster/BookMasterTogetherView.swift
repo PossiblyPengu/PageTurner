@@ -77,11 +77,17 @@ struct BookMasterTogetherView: View {
 
     @ViewBuilder
     private var linkedBody: some View {
-        chatCard
-        appsCard
+        // what is waiting for you comes first — a suggestion to answer, something new in another app…
         if let together, !together.nudges.isEmpty {
             nudgeCard(together.nudges)
         }
+        if let together, !together.notices.isEmpty {
+            noticeCard(together.notices)
+        }
+        // …then the ways into the rest of the suite…
+        chatCard
+        appsCard
+        // …then the two of you.
         if partnerShelf?.partner != nil, overview != nil {
             comparisonCard
         }
@@ -112,9 +118,6 @@ struct BookMasterTogetherView: View {
         }
         if let together, !together.sent.isEmpty {
             sentCard(together.sent)
-        }
-        if let together, !together.notices.isEmpty {
-            noticeCard(together.notices)
         }
         if loading, together == nil {
             ProgressView().frame(maxWidth: .infinity).padding(.vertical, 30)
@@ -577,7 +580,7 @@ struct BookMasterTogetherView: View {
     /// What the rest of the suite wants this reader to see.
     private func noticeCard(_ notices: [BMNotice]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("From the other apps").font(.headline)
+            Text("Waiting for you").font(.headline)
             ForEach(notices) { notice in
                 if canOpen(notice) {
                     Button { open(notice) } label: {

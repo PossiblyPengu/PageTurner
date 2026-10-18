@@ -155,9 +155,16 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   The chat is also one tap from anywhere but the reader: `BMChatButtonLayer` (`BMChatButtonView.swift`) is a draggable round button laid
   over the whole shell in `RootView`, opening the chat as a full-screen page (`router.showChat`, `.fullScreenCover`) — a sheet read as a pop-up. When it shows and where it rests are pure
   (`BMChatButton`, Linux-checked); it steps aside over the reader (`router.readerOpen`) and over any screen marked `.hidesChatButton()`
-  (the chat, the in-app browser); Settings → BookMaster turns it off. Its dot and the Together tab's share one state
+  (the chat, the in-app browser); Settings → Chat & web apps turns it off. Its dot and the Together tab's share one state
   (`Notifier.chatUnread` / `noteChatOpened`), refreshed every minute while the button is up. Gestures and accessibility go on the small
   face *before* `.position`, or they stand over the whole screen.
+- Settings (`Settings/SettingsView.swift`) is a short list of topics, each its own page (`SettingsDestination`), not one long form: the
+  BookMaster suite (BookMaster account & what is sent, Notifications — instant through ntfy first, then Pageturner's own — and Chat &
+  web apps; unlinked, only the BookMaster row shows), Reading & listening (Reading, Read Aloud, Audiobooks, Appearance), Your library
+  (Library & import, Backup) and Support (Diagnostics, version). A new setting goes on the page for its topic; a new topic is a case in
+  the enum, a row in the list and a view in `SettingsPages.swift` (or beside the feature). The simulator run screenshots the pages
+  (`-PTDebugSettingsPush <page>`). The Together tab reads top to bottom as: what is waiting (suggestions, notices), the ways into the
+  suite (chat, the other apps), then the two of you.
 - Whose dot it is: a notice or count about Quest Log is blue and square, every other round in the accent — `BMDotTone` / `BMSuite.dotTone`
   (pure, Linux-checked) and `BMDot` (the view), used for the notices card, the apps card's tiles and the floating chat button's dot.
   BookMaster, Kindred and Quest Log draw the same rule; change all four together.
@@ -168,7 +175,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 - Web apps in the app (`BMWebApps.swift` is pure and Linux-checked; `BMWebBrowser.swift` is the WebKit layer): BookMaster, Kindred and Quest Log
   open inside Pageturner from the Together tab (an "Other apps" card, and any notice in "From the other apps" opens its page). All three live on
   `bookmaster.pages.dev` (BookMaster at the root, `/kindred/`, `/quest-log/`), so one persistent `WKWebsiteDataStore.default()` signs in once for
-  all; Settings → Web apps clears it. One `WKWebView` per app is kept alive (`BMWebPages`, shed on a memory warning). `BMWebPolicy.decide` is the
+  all; Settings → Chat & web apps clears it. One `WKWebView` per app is kept alive (`BMWebPages`, shed on a memory warning). `BMWebPolicy.decide` is the
   only rule for where a page may go: our host is shown, a link into another of the three switches the browser to that app, every other site, `mailto:`
   and `tel:` go to iOS, and `pageturner://`, `file:`, `javascript:` and plain `http` are refused. The web view needs the app to supply what Safari does:
   JS alert/confirm/prompt panels (without them `confirm()` silently answers no), `target=_blank` links, and `WKDownload` for files a page saves

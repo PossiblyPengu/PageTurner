@@ -1,22 +1,26 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// The app's one settings page, reachable from every tab: the BookMaster link
-/// and what it shares, playback and reading preferences, appearance, the
-/// read-aloud voice, the watched folder, search & stats, and backup.
+/// Where each row of the Settings list leads.
+enum SettingsDestination: String, Hashable {
+    // the suite
+    case bookmaster, notifications, chat
+    // reading and listening
+    case reading, readaloud, playback, appearance
+    // the library
+    case library, backup
+    // support
+    case diagnostics
+}
+
+/// The app's settings, reachable from every tab: a short list of topics, each its own page — the BookMaster
+/// suite (account, notifications, chat and the web apps), reading and listening, the library, and support.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var library: LibraryStore
-    @State private var shareItem: ShareItem?
-    @State private var message: String?
-    @State private var showFolderPicker = false
-    @State private var showBackupImporter = false
-    @State private var confirmResetStats = false
-    @State private var backupBusy = false
+    @State private var path: [SettingsDestination] = []
     /// Where the screen under this sheet said it was — handed back on the way out.
     @State private var prevPlace = "library"
-    @AppStorage(SpotlightIndexer.enabledKey) private var spotlight = true
-    @AppStorage("stats-tracking") private var statsTracking = true
+    private let bookMaster = BookMaster.shared
+    private let notifier = Notifier.shared
     private let watcher = FolderWatcher.shared
 
     private var version: String {
@@ -27,135 +31,58 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            debugHooks(switches(form))
+        NavigationStack(path: $path) {
+            debugHooks(list)
+                .navigationDestination(for: SettingsDestination.self) { destination($0) }
         }
     }
 
     #if DEBUG
     @State private var debugVoices = false
 
-    /// CI simulator run: open the voice list without a tap (Debug/DebugScenario.swift).
+    /// CI simulator run: open the voice list, or a settings page, without a tap (Debug/DebugScenario.swift).
     private func debugHooks<V: View>(_ content: V) -> some View {
         content
             .navigationDestination(isPresented: $debugVoices) {
                 VoiceListView(selection: .constant(nil), rate: 1)
             }
             .task {
-                guard DebugScenario.settingsPush == "voices" else { return }
+                guard let name = DebugScenario.settingsPush else { return }
                 try? await Task.sleep(nanoseconds: 700_000_000)
-                debugVoices = true
+                if name == "voices" {
+                    debugVoices = true
+                } else if let page = SettingsDestination(rawValue: name) {
+                    path = [page]
+                }
             }
     }
     #else
     private func debugHooks<V: View>(_ content: V) -> some View { content }
     #endif
 
-    /// The Spotlight switch and the reset confirmation, kept apart from the form's
-    /// own modifiers so no single chain is too long for the compiler.
-    private func switches<V: View>(_ content: V) -> some View {
-        content
-            .onChange(of: spotlight) { _, on in
-                SpotlightIndexer.shared.setEnabled(on, library: library)
-            }
-            .confirmationDialog(
-                "Reset reading stats?", isPresented: $confirmResetStats, titleVisibility: .visible
-            ) {
-                Button("Reset Stats", role: .destructive) { ReadingLog.shared.clear() }
-            } message: {
-                Text("This clears the time, streaks and charts kept on this phone. BookMaster’s own numbers aren’t touched.")
-            }
-    }
+    // MARK: The list
 
-    private var form: some View {
+    private var list: some View {
         Form {
-            BookMasterSection()
-
-            PlaybackSection()
-
-            ReadingSection()
-
-            AppearanceSection()
-
-            ReadAloudSection()
-
+            suite
+            Section("Reading & listening") {
+                row(.reading, "Reading", "book.fill", .blue)
+                row(.readaloud, "Read Aloud", "speaker.wave.2.fill", .indigo)
+                row(.playback, "Audiobooks", "headphones", .orange)
+                row(.appearance, "Appearance", "circle.lefthalf.filled", .purple)
+            }
+            Section("Your library") {
+                row(.library, "Library & import", "books.vertical.fill", .green,
+                    detail: watcher.isWatching ? "Watching a folder" : nil)
+                row(.backup, "Backup", "externaldrive.fill", .teal)
+            }
             Section {
-                if watcher.isWatching {
-                    LabeledContent("Watching", value: watcher.folderName ?? "")
-                    Button("Stop Watching", role: .destructive) { watcher.stop() }
-                } else {
-                    Button { showFolderPicker = true } label: {
-                        Label("Watch a Folder…", systemImage: "folder.badge.plus")
-                    }
-                }
-            } header: {
-                Text("Auto-import")
-            } footer: {
-                Text("New EPUB, PDF, CBZ and audio files that appear in the folder are added to your library whenever Pageturner opens.")
-            }
-            .fileImporter(isPresented: $showFolderPicker, allowedContentTypes: [.folder]) { result in
-                switch result {
-                case let .success(url): Task { await watcher.watch(url, library: library) }
-                case let .failure(error): message = error.localizedDescription
-                }
-            }
-
-            Section {
-                Toggle("Show books in Spotlight", isOn: $spotlight)
-                Toggle("Track reading stats on this iPhone", isOn: $statsTracking)
-                Button("Reset Reading Stats…", role: .destructive) { confirmResetStats = true }
-            } header: {
-                Text("Search & stats")
-            } footer: {
-                Text("Spotlight lists your titles, authors and covers using iOS’s own on-device index. Reading stats — sittings, streaks and the pace “time left” guesses from — are kept on this phone; switching tracking off keeps what is there and stops new ones, and resetting clears them either way. BookMaster’s own numbers aren’t touched.")
-            }
-
-            AutoBackupSection()
-
-            Section("Backup") {
-                Button { exportBackup() } label: {
-                    Label {
-                        HStack {
-                            Text("Export Library Backup")
-                            if backupBusy { Spacer(); ProgressView() }
-                        }
-                    } icon: {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                }
-                .disabled(backupBusy)
-                Button { showBackupImporter = true } label: {
-                    Label("Restore Backup…", systemImage: "square.and.arrow.down")
-                }
-                .disabled(backupBusy)
-            }
-            .fileImporter(isPresented: $showBackupImporter, allowedContentTypes: [.zip]) { result in
-                switch result {
-                case let .success(url): restoreBackup(url)
-                case let .failure(error): message = error.localizedDescription
-                }
-            }
-
-            Section {
-                NavigationLink("View Log") { LogView() }
-                Button { shareItem = ShareItem(url: Log.shareURL()) } label: {
-                    Label("Share Diagnostics…", systemImage: "doc.text.magnifyingglass")
-                }
-                if Log.lastRunEndedUncleanly {
-                    Label("Last run didn’t shut down cleanly — its crash log is in the diagnostics.", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                }
-            } header: {
-                Text("Diagnostics")
-            } footer: {
-                Text("Diagnostics is one file: this run’s log, the previous one, and any crash record. The same files are in Files ▸ On My iPhone ▸ Pageturner ▸ Logs.")
-            }
-
-            Section("About") {
+                row(.diagnostics, "Diagnostics", "stethoscope", .gray)
                 LabeledContent("Version", value: version)
+            } header: {
+                Text("Support")
+            } footer: {
                 Text("Reading is built on the Readium toolkit.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("Settings")
@@ -165,45 +92,59 @@ struct SettingsView: View {
         }
         .onAppear { prevPlace = BookMaster.shared.place; BookMaster.shared.place = "settings" }
         .onDisappear { BookMaster.shared.place = prevPlace }
-        .sheet(item: $shareItem) { ShareSheet(items: [$0.url]) }
-        .alert("Backup", isPresented: Binding(
-            get: { message != nil },
-            set: { if !$0 { message = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(message ?? "")
-        }
     }
 
-    private func exportBackup() {
-        message = nil
-        backupBusy = true
-        Task {
-            defer { backupBusy = false }
-            do {
-                let url = try await BackupStore(library: library).exportBackup()
-                shareItem = ShareItem(url: url)
-            } catch {
-                message = error.localizedDescription
-                Log.error("backup", "export failed: \(error.localizedDescription)")
+    /// BookMaster and everything that rides on it. Unlinked, it is the one row that leads to linking.
+    @ViewBuilder
+    private var suite: some View {
+        Section {
+            row(.bookmaster, "BookMaster", "link", .ptAccent, detail: accountDetail)
+            if bookMaster.isLinked {
+                row(.notifications, "Notifications", "bell.badge.fill", .red, detail: notificationsDetail)
+                row(.chat, "Chat & web apps", "bubble.left.and.bubble.right.fill", .blue)
+            }
+        } header: {
+            Text("BookMaster suite")
+        } footer: {
+            if !bookMaster.isLinked {
+                Text("Link BookMaster to chat with the other reader, open Kindred and Quest Log inside Pageturner, and get instant notifications.")
             }
         }
     }
 
-    private func restoreBackup(_ url: URL) {
-        message = nil
-        backupBusy = true
-        Task {
-            defer { backupBusy = false }
-            do {
-                let r = try await BackupStore(library: library).importBackup(url)
-                message = "Restored \(r.restored) book\(r.restored == 1 ? "" : "s")"
-                    + (r.skipped > 0 ? " · skipped \(r.skipped)" : "")
-            } catch {
-                message = error.localizedDescription
-                Log.error("backup", "restore failed: \(error.localizedDescription)")
-            }
+    private var accountDetail: String {
+        guard let user = bookMaster.user else { return "Not linked" }
+        return user.displayName ?? user.username
+    }
+
+    private var notificationsDetail: String {
+        if AppPrefs.ntfyActive { return "Instant" }
+        return notifier.enabled ? "On" : "Off"
+    }
+
+    private func row(
+        _ page: SettingsDestination, _ title: String, _ symbol: String, _ tint: Color, detail: String? = nil
+    ) -> some View {
+        NavigationLink(value: page) {
+            SettingsRow(title: title, symbol: symbol, tint: tint, detail: detail)
+        }
+    }
+
+    // MARK: The pages
+
+    @ViewBuilder
+    private func destination(_ page: SettingsDestination) -> some View {
+        switch page {
+        case .bookmaster: BookMasterAccountPage()
+        case .notifications: NotificationsSettingsPage()
+        case .chat: ChatAppsSettingsPage()
+        case .reading: SettingsPageForm("Reading") { ReadingSection() }
+        case .readaloud: SettingsPageForm("Read Aloud") { ReadAloudSection() }
+        case .playback: SettingsPageForm("Audiobooks") { PlaybackSection() }
+        case .appearance: SettingsPageForm("Appearance") { AppearanceSection() }
+        case .library: LibrarySettingsPage()
+        case .backup: BackupSettingsPage()
+        case .diagnostics: DiagnosticsSettingsPage()
         }
     }
 }

@@ -13,7 +13,8 @@ import UIKit
 ///     -PTDebugReaderScroll 1    with `reader`: lay the book out as one scrolling page
 ///     -PTDebugHighlights …      with readaloud: which of sentence,line,word to light (comma separated)
 ///     -PTDebugVoice neural      with readaloud: speak with the downloaded Piper voice (en_US-lessac-low)
-///     -PTDebugSettingsPush …    with `settings`: voices (open the voice list)
+///     -PTDebugSettingsPush …    with `settings`: voices (open the voice list), or a page: bookmaster, notifications,
+///                               chat, reading, readaloud, playback, appearance, library, backup, diagnostics
 ///     -PTDebugSpeechProbe 1     log the installed voices and how long speech takes at each rate
 ///     -PTDebugNeuralProbe <key> download that neural voice, speak with it, log the result (+ -PTDebugNeuralPlay 1)
 ///     -PTDebugVoiceSource neural  open the voice list on its Neural tab
@@ -57,7 +58,9 @@ enum DebugScenario {
         {"partner":{"name":"Sam","online":true,"reading":{"title":"Dune","author":"Frank Herbert","percent":41}},
          "nudges":[{"id":"n1","note":"You would love this one","fromName":"Sam","title":"Piranesi","author":"Susanna Clarke"}],
          "sent":[{"id":"s1","status":"pending","note":"Your turn","title":"Emma","toName":"Sam"}],
-         "notices":[]}
+         "notices":[{"id":"bookmaster:chat:3","app":"bookmaster","text":"Sam: how is it?","path":"/chat"},
+                    {"id":"quest-log:1","app":"quest-log","text":"Something new for you","path":"/quest-log"},
+                    {"id":"kindred:ask:a1","app":"kindred","text":"Sam asked you a question","path":"/ask"}]}
         """)
         let overview: BMOverview? = decode("""
         {"stats":{"currentStreak":12,"longestStreak":31,"booksFinished":18,"minutesRead":5230,"quotesSaved":44},

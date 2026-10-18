@@ -77,6 +77,14 @@ shot 78-bookmaster-wrapped 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmw
 shot 79-bookmaster-book 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmbook
 shot 08-search 6 -PTDebugScreen search
 shot 09-settings 6 -PTDebugScreen settings
+# the settings list as a linked reader sees it (the BookMaster suite rows), and the pages behind it
+shot 09a-settings-linked 8 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings
+shot 09b-settings-bookmaster 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush bookmaster
+shot 09c-settings-notifications 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush notifications
+shot 09d-settings-chat 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush chat
+shot 09e-settings-reading 10 -PTDebugScreen settings -PTDebugSettingsPush reading
+shot 09f-settings-library 10 -PTDebugScreen settings -PTDebugSettingsPush library
+shot 09g-settings-backup 10 -PTDebugScreen settings -PTDebugSettingsPush backup
 shot 10-player 8 -PTDebugScreen player
 shot 10b-player-chapters 12 -PTDebugScreen player -PTDebugPlayerSheet chapters
 shot 11-reader 14 -PTDebugScreen reader -PTDebugKeepChrome 1
