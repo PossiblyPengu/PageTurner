@@ -15,6 +15,13 @@ func bmLevelTitle(_ level: Int) -> String {
     }
 }
 
+/// Whose dot it is, before it is read. Everything waiting in Quest Log is blue and square — its own
+/// accent, and a shape a colour-blind reader can tell too; everything else is round and in the app's
+/// accent. BookMaster, Kindred and Quest Log keep the same rule (`suiteTone` there).
+enum BMDotTone: Equatable {
+    case regular, questLog
+}
+
 /// The suite's shared vocabulary — each app's name and what its screens are
 /// called. Mirrors presence.ts's SUITE so a beat reads the same on every app.
 enum BMSuite {
@@ -24,6 +31,14 @@ enum BMSuite {
         "kindred": "Kindred",
         "pageturner": "Pageturner",
     ]
+
+    /// The look of a dot about this app (a notice's `app`).
+    static func dotTone(forApp app: String) -> BMDotTone { app == "quest-log" ? .questLog : .regular }
+
+    /// A count of notices wears Quest Log's look only when nothing else is waiting.
+    static func dotTone(forNotices notices: [BMNotice]) -> BMDotTone {
+        !notices.isEmpty && notices.allSatisfy { dotTone(forApp: $0.app) == .questLog } ? .questLog : .regular
+    }
 
     /// Each app's screens in the words the suite shares. Unknown screens still
     /// count as "in there" — the fallback is deliberately vague, like the web's.

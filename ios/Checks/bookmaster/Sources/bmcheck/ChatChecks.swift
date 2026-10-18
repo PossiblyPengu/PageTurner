@@ -171,5 +171,14 @@ func runChatChecks() {
     let landedLow = Spot.dropped(x: 300, y: 900, width: 400, top: 100, bottom: 700, size: 50)
     check("let go, it goes to the nearer edge and the height it was left at, held inside the band",
           landed == Spot(trailing: false, y: 0) && landedLow == Spot(trailing: true, y: 1), "\(landed) \(landedLow)")
+    // ---- whose dot it is
+    let mixed = [BMNotice(id: "quest-log:1", app: "quest-log", text: "Something new"), BMNotice(id: "k:1", app: "kindred", text: "A question")]
+    check("Quest Log's dots are told apart from the rest",
+          BMSuite.dotTone(forApp: "quest-log") == .questLog && BMSuite.dotTone(forApp: "kindred") == .regular
+          && BMSuite.dotTone(forApp: "bookmaster") == .regular && BMSuite.dotTone(forApp: "pageturner") == .regular
+          && BMSuite.dotTone(forApp: "") == .regular)
+    check("a count is Quest Log's only when nothing else waits",
+          BMSuite.dotTone(forNotices: [mixed[0]]) == .questLog && BMSuite.dotTone(forNotices: mixed) == .regular
+          && BMSuite.dotTone(forNotices: [mixed[1]]) == .regular && BMSuite.dotTone(forNotices: []) == .regular)
     check("a band with no room still places it", Spot.dropped(x: 10, y: 10, width: 400, top: 700, bottom: 100, size: 50).y == Spot.standardY)
 }

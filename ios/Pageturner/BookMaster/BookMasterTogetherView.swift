@@ -589,7 +589,7 @@ struct BookMasterTogetherView: View {
                 if canOpen(notice) {
                     Button { open(notice) } label: {
                         HStack(spacing: 8) {
-                            Text(notice.text).font(.subheadline).multilineTextAlignment(.leading)
+                            noticeLine(notice)
                             Spacer(minLength: 0)
                             Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                         }
@@ -597,11 +597,41 @@ struct BookMasterTogetherView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text(notice.text).font(.subheadline)
+                    noticeLine(notice)
                 }
             }
         }
         .bmCard()
+    }
+
+    /// A dot on an app's tile while something from it is waiting — Quest Log's blue and square.
+    @ViewBuilder
+    private func waitingDot(for app: BMWebApp) -> some View {
+        if (together?.notices ?? []).contains(where: { $0.app == app.rawValue }) {
+            BMDot(
+                tone: BMSuite.dotTone(forApp: app.rawValue), size: 10,
+                ring: Color(uiColor: .tertiarySystemGroupedBackground))
+                .offset(x: 8, y: -6)
+        }
+    }
+
+    private func waitingLabel(for app: BMWebApp) -> String {
+        let n = (together?.notices ?? []).filter { $0.app == app.rawValue }.count
+        return n == 0 ? "Open \(app.name)" : "Open \(app.name), \(n) waiting"
+    }
+
+    /// A notice with its dot — Quest Log's blue and square, the others' round — and the app it is from.
+    private func noticeLine(_ notice: BMNotice) -> some View {
+        let from = BMSuite.names[notice.app] ?? notice.app
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            BMDot(tone: BMSuite.dotTone(forApp: notice.app))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(notice.text).font(.subheadline).multilineTextAlignment(.leading)
+                Text(from).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(from): \(notice.text)")
     }
 
     // MARK: The other apps
@@ -615,6 +645,7 @@ struct BookMasterTogetherView: View {
                     Button { browser = BMWebLaunch(app: app) } label: {
                         VStack(spacing: 6) {
                             Image(systemName: app.symbol).font(.title3)
+                                .overlay(alignment: .topTrailing) { waitingDot(for: app) }
                             Text(app.name).font(.footnote.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
@@ -624,7 +655,7 @@ struct BookMasterTogetherView: View {
                             in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Open \(app.name)")
+                    .accessibilityLabel(waitingLabel(for: app))
                 }
             }
             Text("They open here, signed in once for all three.")

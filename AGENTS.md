@@ -155,6 +155,9 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (the chat, the in-app browser); Settings → BookMaster turns it off. Its dot and the Together tab's share one state
   (`Notifier.chatUnread` / `noteChatOpened`), refreshed every minute while the button is up. Gestures and accessibility go on the small
   face *before* `.position`, or they stand over the whole screen.
+- Whose dot it is: a notice or count about Quest Log is blue and square, every other round in the accent — `BMDotTone` / `BMSuite.dotTone`
+  (pure, Linux-checked) and `BMDot` (the view), used for the notices card, the apps card's tiles and the floating chat button's dot.
+  BookMaster, Kindred and Quest Log draw the same rule; change all four together.
 - Deploys are not automatic for BookMaster/Kindred/Quest Log: a push to main runs CI only, and the code reaches production with
   `npm run deploy` in that repo (migrations first, `npm run db:migrate:remote`). Pageturner's own Pages deploy (the bridge function) runs
   from CI with `--branch=main`; without that the deploy lands as a *preview* and the bridge in production silently stays old — the app then

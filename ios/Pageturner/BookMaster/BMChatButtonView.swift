@@ -72,10 +72,8 @@ struct BMChatButtonLayer: View {
             .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
             .overlay(alignment: .topTrailing) {
                 if unread {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 13, height: 13)
-                        .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
+                    // the chat is the suite's, not Quest Log's: a regular dot (round, in the accent)
+                    BMDot(tone: .regular, size: 13, ring: Color(uiColor: .systemBackground))
                         .offset(x: -2, y: 2)
                 }
             }
