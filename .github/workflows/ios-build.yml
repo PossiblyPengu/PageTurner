@@ -1,9 +1,14 @@
 name: iOS build
 
 # The shared build: ios.yml calls it for every push, ios-release.yml for every
-# version tag — one definition, so a release is exactly the build CI verifies.
+# release — one definition, so a release is exactly the build CI verifies.
 on:
   workflow_call:
+    inputs:
+      ref:
+        description: "The commit to build. Blank: the caller's own (a release builds the commit it has just made)."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -13,6 +18,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: iOS build environment
         uses: ./.github/actions/ios-env

@@ -14,6 +14,13 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   builds Release unsigned (`CODE_SIGNING_ALLOWED=NO`) and uploads `Pageturner.ipa` (artifact
   `Pageturner-ipa`). Install it with AltStore/SideStore/Sideloadly. The Xcode project is generated,
   not committed: `cd ios && xcodegen`.
+- **Releasing:** Actions → *iOS release* → *Run workflow* on `main` (`.github/workflows/ios-release.yml`). Leave the
+  version blank to release the one in `package.json`, or give a new one (`2.14.0`): the workflow runs
+  `node scripts/version.js 2.14.0`, commits "Release 2.14.0" to `main`, asks for CI on that commit (a push made with the
+  workflow's own token starts nothing, and the site deploys when CI is green), builds it, makes the `v2.14.0` tag on the
+  built commit, publishes the GitHub "Latest" release with the commit subjects since the last release as notes, and
+  updates `ios-stable`. Pushing a `v*` tag by hand still works (it must equal `package.json`'s version). From this
+  machine the git proxy refuses tag pushes, so the workflow is the way: it can be started by API as well.
 - Push, then read the run's result before pushing again — the workflow cancels an in-progress run
   on the same branch, so back-to-back pushes never report. Compiler errors are in the job log
   (`grep "error: "`); the job summary also lists diagnostics.

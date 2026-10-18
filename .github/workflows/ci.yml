@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # the release workflow runs it for the version commit it makes (a push made with the workflow's own token
+  # starts nothing), and the site deploys when CI goes green
+  workflow_dispatch:
 
 permissions:
   contents: read

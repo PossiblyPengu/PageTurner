@@ -1,52 +1,128 @@
 name: iOS release
 
-# A `v*` tag cuts the real release: the tag must equal the version in
-# package.json (`npm run version` bumps it everywhere), the shared build
-# compiles the tagged commit, and the result becomes the GitHub "Latest"
-# release — plus an `ios-stable` rolling release so SideStore can follow
-# stable builds instead of nightly ones.
+# Cuts the real release. Run it from the Actions tab ("Run workflow" on main), or push a `v*` tag.
+#
+#   Run workflow, version blank   releases the version already in package.json
+#   Run workflow, version 2.14.0  sets that version first (`node scripts/version.js 2.14.0` writes it
+#                                 everywhere and bumps the build), commits "Release 2.14.0" to main and
+#                                 releases that commit
+#   a pushed v2.14.0 tag          the tag must equal the version in package.json
+#
+# Either way the shared build compiles the commit, and the result becomes the GitHub "Latest" release
+# (the tag is made here when it does not exist) — plus an `ios-stable` rolling release so SideStore can
+# follow stable builds instead of nightly ones. The notes are the commit subjects since the last release.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, like 2.14.0. Blank: the version already in package.json."
+        required: false
+        type: string
+
+concurrency:
+  group: ios-release-cut
+  cancel-in-progress: false
 
 jobs:
-  check:
+  prepare:
+    # a release is cut from main, never from a branch
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the version commit
+      actions: write    # CI for that commit
+    env:
+      GH_TOKEN: ${{ github.token }}
+      WANT: ${{ inputs.version }}
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+      sha: ${{ steps.decide.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
-      - name: The tag is the app's version
+
+      - name: Decide the version, and make its commit if it is new
+        id: decide
         run: |
-          node scripts/version.js --check
-          VER=$(node -p "require('./package.json').version")
-          TAG="${GITHUB_REF_NAME#v}"
-          echo "package.json version: $VER — tag: $TAG"
-          if [ "$VER" != "$TAG" ]; then
-            echo "::error::tag $GITHUB_REF_NAME but the version is $VER — run 'npm run version $TAG', commit, then re-tag"
-            exit 1
+          set -euo pipefail
+          HAVE=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            VER="${GITHUB_REF_NAME#v}"
+            echo "package.json version: $HAVE — tag: $VER"
+            if [ "$HAVE" != "$VER" ]; then
+              echo "::error::tag $GITHUB_REF_NAME but the version is $HAVE — run 'npm run version $VER', commit, then re-tag"
+              exit 1
+            fi
+          else
+            VER="${WANT#v}"
+            VER="${VER:-$HAVE}"
+            if ! printf '%s' "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::'$VER' is not a version like 2.14.0"
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
+              echo "::error::v$VER is already released — give a newer version"
+              exit 1
+            fi
+            if [ "$VER" != "$HAVE" ]; then
+              node scripts/version.js "$VER"
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add -A
+              git commit -m "Release $VER"
+              git push origin HEAD:main
+              # a push made with this token starts no other workflow: CI (and, on green, the site's deploy) is asked for
+              gh workflow run ci.yml --ref main
+            fi
           fi
+          node scripts/version.js --check
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: check
+    needs: prepare
     uses: ./.github/workflows/ios-build.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
 
   release:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      SHA: ${{ needs.prepare.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0   # the earlier tags, for the notes
 
       - name: Fetch the IPA
         uses: actions/download-artifact@v4
         with:
           name: Pageturner-ipa
           path: out
+
+      # What changed since the last release, in the commits' own words (the version commits and build
+      # counters are left out). No earlier release: GitHub writes the notes.
+      - name: Write the release notes
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$SHA^" 2>/dev/null || true)
+          if [ -z "$PREV" ] || [ "$PREV" = "$TAG" ]; then exit 0; fi
+          {
+            echo "## Changes since $PREV"
+            echo
+            git log --no-merges --pretty='- %s' "$PREV..$SHA" | grep -Ev '^- (Release [0-9.]+|Build [0-9]+)$' || true
+            echo
+            echo "**Full changelog:** https://github.com/$REPO/compare/$PREV...$TAG"
+          } > notes.md
+          cat notes.md
 
       # The source the release carries points at the ios-stable alias, not this
       # tag — adding it follows every stable update, not just this version.
@@ -58,8 +134,11 @@ jobs:
             gh release upload "$TAG" out/Pageturner.ipa out/altstore.json --repo "$REPO" --clobber
             gh release edit "$TAG" --repo "$REPO" --latest
           else
+            NOTES=--generate-notes
+            [ -s notes.md ] && NOTES="--notes-file notes.md"
+            # the tag is made here, on the commit that was built
             gh release create "$TAG" out/Pageturner.ipa out/altstore.json --repo "$REPO" \
-              --title "Pageturner $TAG" --generate-notes --latest
+              --target "$SHA" --title "Pageturner $TAG" $NOTES --latest
           fi
           if gh release view ios-stable --repo "$REPO" >/dev/null 2>&1; then
             gh release upload ios-stable out/Pageturner.ipa --repo "$REPO" --clobber

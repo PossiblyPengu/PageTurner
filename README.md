@@ -43,7 +43,7 @@ CarPlay (needs an Apple entitlement), real push notifications (same), MOBI/AZW3/
 
 The app isn't on the App Store. Releases on GitHub carry an unsigned `Pageturner.ipa`:
 
-- **Stable:** the [latest release](https://github.com/PossiblyPengu/PageTurner/releases/latest) — cut from a `v*` tag.
+- **Stable:** the [latest release](https://github.com/PossiblyPengu/PageTurner/releases/latest) — cut from the *iOS release* workflow (Actions → Run workflow; it makes the `v*` tag) or a pushed `v*` tag.
 - **Nightly:** the [ios-latest build](https://github.com/PossiblyPengu/PageTurner/releases/tag/ios-latest) — every green build on `main`.
 
 Install it with [AltStore](https://altstore.io), [SideStore](https://sidestore.io) or [Sideloadly](https://sideloadly.io), signing with your Apple ID. A free Apple ID signs for 7 days — keep AltStore or SideStore running to refresh it automatically.
