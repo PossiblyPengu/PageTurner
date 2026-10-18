@@ -41,6 +41,8 @@ final class AppRouter {
     var suiteTarget: BMDeepLink.Target?
     /// The chat as a full page over whatever is up — what the floating chat button opens.
     var showChat = false
+    /// The Together tab should open its notifications list (set by the simulator run; the bell does it by hand).
+    var showInbox = false
     /// The screens that cover the floating button's place (the chat itself, the in-app browser), by
     /// identity, so one that appears twice still counts once.
     private(set) var chatButtonHiders: Set<UUID> = []
@@ -62,6 +64,25 @@ final class AppRouter {
         showImporter = false
         showChat = false
         resumePrompt = nil
+    }
+
+    /// Go where a notification leads — from its banner, or from the list. It is read by then.
+    func open(_ item: BMInboxItem) {
+        BMInboxStore.shared.markRead(ids: [item.id])
+        switch BMInbox.destination(for: item) {
+        case .chat:
+            Notifier.shared.noteChatOpened()
+            // whatever is up (the settings, say) is put away first; the chat follows once it is gone
+            dismissPresentations()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.showChat = true }
+        case .together:
+            dismissPresentations()
+            tab = .together
+        case let .web(app, url):
+            dismissPresentations()
+            tab = .together
+            suiteTarget = .web(app, url)
+        }
     }
 
     func openShelves(_ ids: [UUID]) { shelfTarget = ShelfTarget(bookIDs: ids) }

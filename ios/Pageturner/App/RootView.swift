@@ -12,6 +12,7 @@ struct RootView: View {
     private let playback = PlaybackCoordinator.shared
     private let bookMaster = BookMaster.shared
     private let notifier = Notifier.shared
+    private let inbox = BMInboxStore.shared
     private let intents = IntentRouter.shared
 
     /// The app-wide scheme: "system" leaves it to iOS.
@@ -25,7 +26,7 @@ struct RootView: View {
 
     var body: some View {
         // grouped, so no one expression is a long chain the compiler has to solve at once
-        routing(alerts(bookSheets(shell.overlay { chatButton })))
+        routing(alerts(bookSheets(shell.overlay { chatButton }.overlay(alignment: .top) { BMBannerHost() })))
             .tint(.ptAccent)
             // the reader sets its own scheme inside; this is the preference for the rest
             .preferredColorScheme(scheme)
@@ -267,7 +268,7 @@ struct RootView: View {
             Tab("Together", systemImage: "person.2.fill", value: AppTab.together) {
                 BookMasterTogetherView()
             }
-            .badge(bmBadge ? notifier.pendingCount : 0)
+            .badge(bmBadge ? inbox.unreadCount : 0)
             Tab("Stats", systemImage: "chart.bar.fill", value: AppTab.stats) {
                 BookMasterStatsView()
             }
@@ -290,7 +291,7 @@ struct RootView: View {
                 .tag(AppTab.books)
             withMiniPlayer(BookMasterTogetherView())
                 .tabItem { Label("Together", systemImage: "person.2.fill") }
-                .badge(bmBadge ? notifier.pendingCount : 0)
+                .badge(bmBadge ? inbox.unreadCount : 0)
                 .tag(AppTab.together)
             withMiniPlayer(BookMasterStatsView())
                 .tabItem { Label("Stats", systemImage: "chart.bar.fill") }

@@ -5,7 +5,6 @@ import SwiftUI
 /// the in-app browser — see `BMChatButton`.)
 struct BMChatButtonLayer: View {
     @Environment(AppRouter.self) private var router
-    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("bm-chat-button") private var enabled = true
     @AppStorage("bm-chat-spot") private var storedSpot = ""
     @State private var drag: CGSize = .zero
@@ -38,7 +37,6 @@ struct BMChatButtonLayer: View {
         // does not carry the button up with it
         .ignoresSafeArea()
         .ptAnimation(.easeOut(duration: 0.2), value: shown)
-        .task(id: shown && scenePhase == .active) { await poll() }
     }
 
     // MARK: Drawing
@@ -111,17 +109,6 @@ struct BMChatButtonLayer: View {
     private func open() {
         notifier.noteChatOpened()
         router.showChat = true
-    }
-
-    /// While the button is up and the app in front, look for new messages now and then, so its dot is
-    /// current on any screen (the Together tab and a foreground refresh are the only other looks).
-    private func poll() async {
-        guard shown, scenePhase == .active else { return }
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(LowPower.on ? 120 : 60))
-            guard !Task.isCancelled else { return }
-            await notifier.refresh(notify: false)
-        }
     }
 }
 

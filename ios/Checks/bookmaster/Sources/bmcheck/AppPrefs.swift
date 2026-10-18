@@ -38,28 +38,15 @@ enum AppPrefs {
         set { defaults.set(newValue, forKey: "daily-goal-min") }
     }
 
-    /// Whether BookMaster is sending this reader's notifications through ntfy (set from what BookMaster
-    /// says; see `BMNtfy`). When it is, Pageturner does not also post its own for the same things.
-    static var ntfyActive: Bool {
-        get { defaults.bool(forKey: "ntfy-active") }
-        set { defaults.set(newValue, forKey: "ntfy-active") }
-    }
+    /// Whether a notification that arrives while Pageturner is open is told as a banner (default on).
+    static var bannersOn: Bool { enabled("bm-banners") }
 
-    /// When that was last asked of BookMaster (seconds since 1970), so it is not asked every refresh.
-    static var ntfyCheckedAt: Double {
-        get { defaults.double(forKey: "ntfy-checked") }
-        set { defaults.set(newValue, forKey: "ntfy-checked") }
+    /// Whether Pageturner keeps itself awake in the background, so it can tell the reader at once
+    /// (`BackgroundKeepAlive`). Off unless the reader asks: it costs battery.
+    static var stayConnected: Bool {
+        get { defaults.bool(forKey: "bm-stay-connected") }
+        set { defaults.set(newValue, forKey: "bm-stay-connected") }
     }
-
-    /// The same for Bark (see `BMBark`).
-    static var barkActive: Bool {
-        get { defaults.bool(forKey: "bark-active") }
-        set { defaults.set(newValue, forKey: "bark-active") }
-    }
-
-    /// Whether any instant channel (ntfy or Bark) is delivering this reader's notifications — when one is,
-    /// Pageturner does not also post its own.
-    static var instantActive: Bool { BMBark.instantActive(ntfy: ntfyActive, bark: barkActive) }
 
     /// When the library was last backed up (seconds since 1970), 0 for never.
     static var lastBackupAt: Double {

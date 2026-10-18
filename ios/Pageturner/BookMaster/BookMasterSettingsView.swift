@@ -123,16 +123,24 @@ struct BookMasterAccountPage: View {
     }
 }
 
-/// Settings → Notifications: instant ones through Bark (or ntfy), and the ones Pageturner posts itself.
+/// Settings → Notifications: how Pageturner tells you — a banner while it is open, the list to come back
+/// to, and a notification (with Pageturner's own icon) when it is not.
 struct NotificationsSettingsPage: View {
+    @AppStorage("bm-banners") private var banners = true
     @AppStorage("bm-badge") private var showBadge = true
+    @AppStorage("bm-stay-connected") private var stayConnected = false
     private let notifier = Notifier.shared
+    private let inbox = BMInboxStore.shared
 
     var body: some View {
         Form {
-            BMBarkSection()
-            BMNtfySection()
-            localSection
+            insideSection
+            outsideSection
+            Section {
+                Toggle("Badge the Together tab and the app icon", isOn: $showBadge)
+            } footer: {
+                Text("The number of notifications you haven’t looked at.")
+            }
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
@@ -141,13 +149,29 @@ struct NotificationsSettingsPage: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await notifier.refreshAuthorization() }
         }
+        .onChange(of: stayConnected) { _, _ in BackgroundKeepAlive.shared.update(background: false) }
     }
 
-    /// Notifications Pageturner posts on its own, when iOS lets it look in the background. With instant
-    /// notifications on they stand down, and only the badge is kept.
-    private var localSection: some View {
+    /// While Pageturner is open.
+    private var insideSection: some View {
         Section {
-            Toggle("Notify me about suggestions", isOn: Binding(
+            NavigationLink {
+                BMInboxView()
+            } label: {
+                LabeledContent("Notification list", value: inbox.unreadCount > 0 ? "\(inbox.unreadCount) unread" : "")
+            }
+            Toggle("Banners while Pageturner is open", isOn: $banners)
+        } header: {
+            Text("In Pageturner")
+        } footer: {
+            Text("Everything you are told is kept in the list: suggestions, chat messages, and news from Kindred and Quest Log. A banner says it as it arrives, and is left out while you are reading a book.")
+        }
+    }
+
+    /// While it is closed.
+    private var outsideSection: some View {
+        Section {
+            Toggle("Notify me when Pageturner is closed", isOn: Binding(
                 get: { notifier.enabled },
                 set: { on in Task { await notifier.setEnabled(on) } }
             ))
@@ -158,18 +182,21 @@ struct NotificationsSettingsPage: View {
                 Button("Open iOS Settings") { openIOSSettings() }
             } else {
                 if notifier.enabled, notifier.backgroundRefreshOff {
-                    Text("Background App Refresh is off, so suggestions only appear when you open Pageturner.")
+                    Text("Background App Refresh is off, so notifications only appear when you open Pageturner.")
                         .font(.footnote)
                         .foregroundStyle(.orange)
                     Button("Open iOS Settings") { openIOSSettings() }
                 }
-                Text("A suggestion from the other reader shows up as a notification. iOS decides when Pageturner may check in the background, so it can take a while — and Background App Refresh has to be on.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
-            Toggle("Badge the Together tab when suggestions wait", isOn: $showBadge)
+            if notifier.enabled {
+                Toggle("Stay connected in the background", isOn: $stayConnected)
+            }
         } header: {
-            Text("From Pageturner itself")
+            Text("Outside Pageturner")
+        } footer: {
+            Text(stayConnected && notifier.enabled
+                ? "Pageturner keeps itself running with a silent sound and looks for news every half minute, so a notification arrives within about a minute. It uses more battery, and iOS may still end the app after some hours — open Pageturner again to start it over."
+                : "A notification is posted by Pageturner itself. Without staying connected, iOS decides when Pageturner may look in the background, so one can take a while — and Background App Refresh has to be on.")
         }
     }
 

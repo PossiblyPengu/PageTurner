@@ -17,6 +17,8 @@ struct BookMasterTogetherView: View {
     /// The last refresh missed while older data is still on screen.
     @State private var refreshFailed = false
     @State private var showChat = false
+    /// The notifications list, pushed from the bell.
+    @State private var showInbox = false
     /// The in-app browser, when one of the suite's web apps is open.
     @State private var browser: BMWebLaunch?
 
@@ -52,25 +54,42 @@ struct BookMasterTogetherView: View {
     private func destinations<V: View>(_ content: V) -> some View {
         content
             .navigationDestination(isPresented: $showChat) { BMChatView() }
+            .navigationDestination(isPresented: $showInbox) { BMInboxView() }
             .navigationDestination(item: $browser) { BMWebBrowserView(launch: $0) }
             .toolbar { barItems }
     }
 
-    /// Just Settings: the chat is not up here — the floating button reaches it from every screen (and the card below).
+    /// The notifications bell and Settings. (The chat is not up here — the floating button reaches it from every
+    /// screen, and the card below does.)
     @ToolbarContentBuilder
     private var barItems: some ToolbarContent {
+        if BookMaster.shared.isLinked {
+            ToolbarItem(placement: .topBarLeading) {
+                let unread = BMInboxStore.shared.unreadCount
+                Button { showInbox = true } label: {
+                    Image(systemName: unread > 0 ? "bell.badge.fill" : "bell")
+                }
+                .accessibilityLabel(unread > 0 ? "Notifications, \(unread) unread" : "Notifications")
+            }
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
                 .accessibilityLabel("Settings")
         }
     }
 
-    /// Loading, and going where a tapped notification (ntfy's `pageturner://open`) said.
+    /// Loading, and going where a tapped notification (`pageturner://open`) said.
     private func reacting<V: View>(_ content: V) -> some View {
         content
             .refreshable { await load() }
             .task(id: BookMaster.shared.isLinked) { await load() }
             .onChange(of: router.suiteTarget, initial: true) { _, target in openTarget(target) }
+            // the simulator run asks for the list without a tap
+            .onChange(of: router.showInbox, initial: true) { _, on in
+                guard on else { return }
+                router.showInbox = false
+                showInbox = true
+            }
     }
 
     // MARK: The page

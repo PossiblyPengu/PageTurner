@@ -23,7 +23,7 @@ struct PageturnerApp: App {
                 // and `pageturner://link?code=…`, BookMaster's pair flow coming home.
                 .onOpenURL { url in
                     if let target = BMDeepLink.parse(url) {
-                        // a tapped notification from ntfy: BookMaster told it to open here
+                        // a `pageturner://open` address: the chat, or a page of one of the web apps
                         IntentRouter.shared.request = .openSuite(target)
                     } else if url.scheme == BookMasterLinker.scheme {
                         // The in-app sheet normally consumes this. A code that
@@ -50,11 +50,13 @@ struct PageturnerApp: App {
                     switch phase {
                     case .active:
                         Log.markForeground()
+                        BackgroundKeepAlive.shared.update(background: false)
                         library.refreshMissing()
                     case .background:
                         Log.markBackground()
                         Task { await BookMaster.shared.beat(leaving: true) }
                         Notifier.shared.scheduleRefresh()
+                        BackgroundKeepAlive.shared.update(background: true)
                         AutoBackup.shared.scheduleBackground()
                     default: break
                     }
@@ -75,6 +77,16 @@ struct PageturnerApp: App {
                             guard !Task.isCancelled else { return }
                             await BookMaster.shared.beat()
                         }
+                    }
+                }
+                // While the app is open, look for what is new now and then, so a banner says it at once. (Behind the
+                // app, `BackgroundKeepAlive` does the looking, when the reader has asked for it.)
+                .task(id: scenePhase == .active) {
+                    guard scenePhase == .active else { return }
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(BMKeepAlive.pollInterval(lowPower: LowPower.on)))
+                        guard !Task.isCancelled else { return }
+                        await Notifier.shared.refresh(notify: false)
                     }
                 }
                 // the one-off sync on coming to the front

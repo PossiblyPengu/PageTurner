@@ -166,6 +166,7 @@ enum DebugScenario {
         case "reading": selectTab(.reading)
         case "stats", "bmprogress", "bmwrapped": selectTab(.stats)
         case "together", "bmtogether": selectTab(.together)
+        case "inbox": selectTab(.together); router.showInbox = true
         // the Books tab hosts the shelf and pushes the rest itself
         case "shelf", "bmbook", "bmquotes", "bmdiscover", "bmsearch", "bmseries":
             selectTab(.books)

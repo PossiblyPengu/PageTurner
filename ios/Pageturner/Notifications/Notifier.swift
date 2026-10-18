@@ -3,13 +3,14 @@ import Observation
 import UIKit
 import UserNotifications
 
-/// Suggestions from the other reader as notifications, and the Together tab's badge.
+/// Pageturner's own notifications: what BookMaster says is waiting — a suggestion from the other reader, a chat
+/// message, news from Kindred or Quest Log — told as a banner while the app is open, kept in the inbox
+/// (`BMInboxStore`), and posted as a *local* notification when it is not.
 ///
-/// A sideloaded app has no push entitlement, so these are *local* notifications:
-/// iOS wakes the app for a background refresh every so often (when, is its call,
-/// not ours), the app asks BookMaster what is waiting, and posts a notification
-/// for anything it hasn't already mentioned. (Instant ones come through ntfy or Bark instead —
-/// `BMNtfySection` — and while those are on, this stays quiet and only keeps the badge.)
+/// A sideloaded app has no push entitlement, so nothing arrives by itself: the app asks BookMaster every
+/// half minute while it is open (and in the background too, when the reader has asked it to stay
+/// connected — `BackgroundKeepAlive`), and otherwise whenever iOS wakes it for a background refresh
+/// (when, is its call, not ours). Anything it hasn't already mentioned is told.
 @Observable
 @MainActor
 final class Notifier {
@@ -22,6 +23,9 @@ final class Notifier {
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
     /// Set when a notification is tapped; the shell switches to Together and clears it.
     var openTogether = false
+    /// The banner on screen, and the ones waiting behind it.
+    private(set) var banner: BMInboxItem?
+    private var bannerQueue: [BMInboxItem] = []
     /// The notice that says a chat message is waiting, as of the last look at BookMaster.
     private(set) var chatNotice: BMNotice?
     /// The chat notice already opened, so its dot stays out until a newer message.
@@ -40,7 +44,10 @@ final class Notifier {
     var chatUnread: BMNotice? { BMChat.unread(chatNotice.map { [$0] } ?? [], seen: chatSeenID) }
 
     /// The chat was opened, from wherever.
-    func noteChatOpened() { chatSeenID = chatNotice?.id }
+    func noteChatOpened() {
+        chatSeenID = chatNotice?.id
+        BMInboxStore.shared.markChatRead()
+    }
 
     private let defaults = UserDefaults.standard
 
@@ -101,30 +108,57 @@ final class Notifier {
 
     // MARK: Looking
 
-    /// Ask BookMaster what is waiting. In front of the reader, new things are only
-    /// counted (the Together tab shows them); behind the app they are announced.
+    /// Ask BookMaster what is waiting, and tell what is new: as a banner while the app is open, as a
+    /// notification when it is not (`notify`: behind the app, where the reader allowed it).
     func refresh(notify: Bool) async {
         guard BookMaster.shared.isLinked,
               let together = try? await BookMaster.shared.fetchTogether()
         else { return }
         let announce = settle(together)
         await refreshAuthorization()
-        await recheckInstant()
-        // with ntfy or Bark delivering the same things instantly, a second notification for each would be noise
-        if notify, enabled, !announce.isEmpty, !AppPrefs.instantActive { await post(announce) }
+        guard !announce.isEmpty else { return }
+        if UIApplication.shared.applicationState == .active {
+            if AppPrefs.bannersOn { show(announce) }
+        } else if notify, enabled {
+            await post(announce)
+        }
     }
 
-    /// Whether BookMaster is sending this reader's notifications through ntfy or Bark — asked now and
-    /// then, so a change made on the web is noticed here too.
-    private func recheckInstant() async {
-        guard BMNtfy.shouldRecheck(lastChecked: AppPrefs.ntfyCheckedAt) else { return }
-        // each asked on its own: a BookMaster that has only one of them set up still answers the other
-        let ntfy = try? await BookMaster.shared.fetchNtfy()
-        let bark = try? await BookMaster.shared.fetchBark()
-        guard ntfy != nil || bark != nil else { return }
-        if let ntfy { AppPrefs.ntfyActive = ntfy.isOn }
-        if let bark { AppPrefs.barkActive = bark.isOn }
-        AppPrefs.ntfyCheckedAt = Date().timeIntervalSince1970
+    // MARK: Banners
+
+    /// Queue banners for what is new — the inbox already holds each, so a banner is just a way of saying so.
+    private func show(_ items: [NotificationPlan.Item]) {
+        let inbox = BMInboxStore.shared
+        // a message arriving while the chat is open is already being read
+        let inChat = BookMaster.shared.place == "chat"
+        for item in items where !(inChat && item.id.hasPrefix("notice:" + BMChat.noticePrefix)) {
+            // a pile at once is one line, which is not in the inbox as such
+            let entry = inbox.items.first { $0.id == item.id }
+                ?? BMInboxItem(id: item.id, app: "bookmaster", title: item.title, body: item.body, path: nil,
+                               at: Date().timeIntervalSince1970, read: false)
+            bannerQueue.append(entry)
+        }
+        if banner == nil { presentNext() }
+    }
+
+    private func presentNext() {
+        guard !bannerQueue.isEmpty else {
+            banner = nil
+            return
+        }
+        let next = bannerQueue.removeFirst()
+        banner = next
+        UIAccessibility.post(notification: .announcement, argument: "\(next.title). \(next.body)")
+    }
+
+    /// The banner has been tapped, swiped away or timed out: the next one, if there is one.
+    func dismissBanner() { presentNext() }
+
+    /// The app icon's badge counts what is unread in the inbox.
+    func refreshBadge() {
+        guard enabled else { return }
+        let unread = BMInboxStore.shared.unreadCount
+        Task { await setBadge(unread) }
     }
 
     /// The Together tab loaded or changed — keep the badge and the "already told" set in step.
@@ -139,11 +173,12 @@ final class Notifier {
         pendingCount = together.nudges.count
         chatNotice = BMChat.unreadNotice(together.notices)
         questLogNotices = BMChat.questLogNotices(together.notices)
+        BMInboxStore.shared.absorb(nudges: together.nudges, notices: together.notices)
         guard let key = seenKey else { return [] }
         let known = defaults.stringArray(forKey: key).map { Set($0) }
         let result = NotificationPlan.plan(nudges: together.nudges, notices: together.notices, seen: known)
         defaults.set(Array(result.seen), forKey: key)
-        if enabled { Task { await setBadge(pendingCount) } }
+        refreshBadge()
         return result.items
     }
 
@@ -194,6 +229,9 @@ final class Notifier {
         chatSeenID = nil
         questLogNotices = []
         questLogSeen = []
+        bannerQueue = []
+        banner = nil
+        BMInboxStore.shared.reset()
         wasRefused = false
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.refreshTaskID)
         // banners already on the lock screen belong to the account that just went away

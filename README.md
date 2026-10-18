@@ -30,7 +30,7 @@ A native SwiftUI app (iOS 17+) built on the [Readium](https://readium.org) toolk
   Earlier versions (iOS 17+) get plain materials.
 - **BookMaster:** link once and your progress and finished sessions go to BookMaster as you read or listen (with a switch to pause that without unlinking);
   see the other reader, accept their suggestions, comment on a book, send a passage as a quote, and see your streaks and goals. When BookMaster has you further on
-  than this phone, opening the book asks whether to jump there. New suggestions can arrive as notifications. Books are matched by ISBN / Open Library id as well as title.
+  than this phone, opening the book asks whether to jump there. Everything the other apps tell you — a suggestion, a chat message, news from Kindred or Quest Log — comes as a **banner** while Pageturner is open and is kept in a **notification list** (the bell on the Together tab); with it closed, Pageturner posts its own notification (with its own icon), and **Stay connected** (off by default) keeps it running quietly in the background so that happens within about a minute. Books are matched by ISBN / Open Library id as well as title.
   Pushes made offline are queued and replayed in order.
 - **BookMaster tab (tracking):** time read and listened, streaks and a two-week chart from the phone itself — no account needed; when BookMaster is linked its streaks, goals, achievements, your shelf, the other reader and suggestions are on the same screen
 - **Siri, Shortcuts and Spotlight:** "Continue reading in Pageturner", "Open *Dune* in Pageturner"; every book is a Spotlight result (switch it off in Settings)

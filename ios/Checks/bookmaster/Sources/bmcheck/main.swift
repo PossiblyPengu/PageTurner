@@ -135,7 +135,8 @@ func runData() async {
     runSuiteChecks()
     runChatChecks()
     runWebAppsChecks()
-    runNtfyChecks()
+    runDeepLinkChecks()
+    runInboxChecks()
     runGoodreadsChecks()
     runPaceChecks()
     runQolChecks()
@@ -338,33 +339,6 @@ func run() async {
     // leave the room as it was found
     _ = q("delete from chat_messages")
     _ = q("delete from chat_reads")
-
-    // --------------------------------------------------------------- ntfy
-    section("Instant notifications")
-    do {
-        let before = try await bm.fetchNtfy()
-        check("off to begin with, and available here", before.available && !before.isOn && before.server == "https://ntfy.sh", "\(before)")
-        let made = try await bm.setNtfy(link: "pageturner")
-        check("switching on makes a private topic, and a tap opens Pageturner",
-              made.isOn && made.opensPageturner && made.topic?.hasPrefix("bm-") == true && (made.topic?.count ?? 0) >= 40, "\(made)")
-        let row = q("select topic, link, preview from ntfy_topics").first
-        check("it is kept for this reader, in the database", s(row, "topic") == made.topic && s(row, "link") == "pageturner" && s(row, "preview") == "0",
-              "\(String(describing: row))")
-        let again = try await bm.fetchNtfy()
-        check("asking again changes nothing", again.topic == made.topic)
-        let changed = try await bm.setNtfy(link: "web", preview: true)
-        check("a tap can open the web instead, and chat words can be sent, on the same topic",
-              changed.topic == made.topic && changed.link == "web" && changed.preview, "\(changed)")
-        let rotated = try await bm.setNtfy(rotate: true)
-        check("a new topic replaces the old one, keeping the settings",
-              rotated.topic != nil && rotated.topic != made.topic && rotated.link == "web" && rotated.preview, "\(rotated)")
-        let count = (q("select count(*) c from ntfy_topics").first?["c"] as? Int) ?? -1
-        check("…and there is still only one", count == 1, "\(count)")
-        try await bm.removeNtfy()
-        let gone = try await bm.fetchNtfy()
-        check("turning off removes it", q("select topic from ntfy_topics").isEmpty && !gone.isOn)
-    } catch { check("instant notifications", false, "\(error)") }
-    _ = q("delete from ntfy_topics")
 
     // -------------------------------------------------------------- overview
     section("Overview")

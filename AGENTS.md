@@ -156,10 +156,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   over the whole shell in `RootView`, opening the chat as a full-screen page (`router.showChat`, `.fullScreenCover`) — a sheet read as a pop-up. When it shows and where it rests are pure
   (`BMChatButton`, Linux-checked); it steps aside over the reader (`router.readerOpen`) and over any screen marked `.hidesChatButton()`
   (the chat, the in-app browser); Settings → Chat & web apps turns it off. Its dot and the Together tab's share one state
-  (`Notifier.chatUnread` / `noteChatOpened`), refreshed every minute while the button is up. Gestures and accessibility go on the small
+  (`Notifier.chatUnread` / `noteChatOpened`), refreshed by the app's 30 s look. Gestures and accessibility go on the small
   face *before* `.position`, or they stand over the whole screen.
 - Settings (`Settings/SettingsView.swift`) is a short list of topics, each its own page (`SettingsDestination`), not one long form: the
-  BookMaster suite (BookMaster account & what is sent, Notifications — instant through ntfy first, then Pageturner's own — and Chat &
+  BookMaster suite (BookMaster account & what is sent, Notifications — banners, the list, notifying when closed, staying connected — and Chat &
   web apps; unlinked, only the BookMaster row shows), Reading & listening (Reading, Read Aloud, Audiobooks, Appearance), Your library
   (Library & import, Backup) and Support (Diagnostics, version). A new setting goes on the page for its topic; a new topic is a case in
   the enum, a row in the list and a view in `SettingsPages.swift` (or beside the feature). The simulator run screenshots the pages
@@ -187,21 +187,19 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   page (`BMWebHost.updateUIView`), because a page shed for memory or reset by sign-out is replaced while a view may still be showing it.
 - Notifications are **local** (`Notifications/`): a sideloaded app has no push entitlement, so iOS's
   background refresh (best effort, its schedule) asks BookMaster for new suggestions and posts them.
-- Instant notifications (`BMNtfy.swift` and `BMDeepLink.swift` are pure and Linux-checked; `BMNtfySection.swift` is the Settings section): real
-  push is impossible without a paid developer account, so BookMaster publishes every suite notice (`pushNotice`: chat, suggestions, Kindred,
-  Quest Log) to a private **ntfy** topic and the free ntfy iOS app shows it at once. The app only sets it up (`ntfy`, `ntfy-test`, `ntfy-remove`
-  bridge routes; the topic is made by BookMaster, so the app never holds a secret of its own) and tells the reader what to type into ntfy. A tap
-  carries `pageturner://open?app=<app>&path=<path>` (a suite notice's own fields); `BMDeepLink.parse` accepts only the native chat or a page of one
-  of the three web apps on BookMaster's host, because anyone can make such an address. `PageturnerApp.onOpenURL` → `IntentRouter.openSuite` →
-  `RootView` → `AppRouter.suiteTarget` → the Together tab opens it. While ntfy is on (`AppPrefs.ntfyActive`, re-asked from BookMaster every six
-  hours) `Notifier` stops posting its own local copies, and keeps only the badge. Whether iOS's ntfy app opens a custom-scheme tap is unverified
-  on a device, so the setting is explicit and "Send a Test Notification" proves the whole way.
-  **Bark** is the second channel and the one to prefer (`BMBark.swift` pure, `BMBarkSection.swift`, bridge routes `bark`, `bark-test`,
-  `bark-remove`): ntfy.sh limits anonymous publishers *by address* and a free account is counted by address too, so Cloudflare's shared
-  address gets 429 whatever BookMaster sends. Bark's own push service has no such limit. The reader pastes the key the Bark app shows
-  (BookMaster parses it out of a pasted address too, and `BMBark.key(from:)` does the same to enable the button); the key is stored by
-  BookMaster, used there and never sent back — the app only sees its last four characters. `AppPrefs.instantActive` (ntfy or Bark) is what
-  stands the local notifications down. A tap through Bark opening `pageturner://` is likewise unverified on a device.
+- Notifications are Pageturner's own — no push service, no third-party app (a free-Apple-ID sideload has no push entitlement, and relaying
+  through ntfy.sh or Bark was tried and dropped: ntfy.sh limits Cloudflare's shared address, and a notification made by another app wears
+  *its* icon, which iOS will not let a payload replace). What there is: `Notifier` asks BookMaster what is waiting (`together`) every 30 s
+  while the app is open (`PageturnerApp`), and tells what is new — a **banner** (`BMBannerHost` over the shell, not over the reader, not
+  for a message arriving while the chat is open) when the app is active, a **local notification** when it is not (and the reader allowed
+  it). Everything told is kept in the **inbox** (`BMInbox` pure and Linux-checked, `BMInboxStore` saves it per account, `BMInboxView` is
+  the list: the Together tab's bell and Settings → Notifications); `AppRouter.open(_ item:)` is where an item leads (the chat, the Together
+  tab, or a page of a web app), used by banner and list alike. The Together tab badge and the app icon count the inbox's unread.
+  Behind the app, iOS wakes Pageturner for a background refresh when it likes; **Stay connected** (`BackgroundKeepAlive`, off by default,
+  `BMKeepAlive` holds the rules) loops a silent sound so the app is kept running and looks every 30 s (90 s in Low Power Mode). It mixes
+  with other sound, leaves a book's audio session alone (the category is only set when it is not already `.playback`), and stops when the
+  app is in front. Unverified on a device: how long iOS keeps it alive. `pageturner://open` (`BMDeepLink`) still opens the chat or a web
+  page. BookMaster's server still has ntfy and Bark delivery (and Profile settings for them), unused by the app.
 - Siri/Shortcuts (`Intents/`) and Spotlight (`Library/SpotlightIndexer.swift`) hand requests to the shell
   through `IntentRouter`, which holds them until the first screen exists.
 - Read-aloud voices (`Reader/` and `Neural/`): `SpeechVoices.swift` is Foundation-only (list, group, search, "best

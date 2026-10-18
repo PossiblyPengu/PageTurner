@@ -79,6 +79,7 @@ shot 08-search 6 -PTDebugScreen search
 shot 09-settings 6 -PTDebugScreen settings
 # the settings list as a linked reader sees it (the BookMaster suite rows), and the pages behind it
 shot 09a-settings-linked 8 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings
+shot 09h-inbox 12 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen inbox
 shot 09b-settings-bookmaster 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush bookmaster
 shot 09c-settings-notifications 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush notifications
 shot 09d-settings-chat 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush chat

@@ -385,7 +385,10 @@ struct BMChatView: View {
         guard active, visible, tab == .us, let room, let newest = messages.last?.id,
               newest > room.read.mine, newest > reported else { return }
         reported = newest
-        do { try await BookMaster.shared.markChatRead(upTo: newest) } catch { reported = 0 }
+        do {
+            try await BookMaster.shared.markChatRead(upTo: newest)
+            BMInboxStore.shared.markChatRead()
+        } catch { reported = 0 }
     }
 
     private func loadOlder() async {

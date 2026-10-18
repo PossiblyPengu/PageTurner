@@ -23,16 +23,7 @@ enum NotificationPlan {
 
         var items: [Item] = []
         for nudge in nudges where !seen.contains("nudge:\(nudge.id)") {
-            let who = nudge.fromName.trimmingCharacters(in: .whitespaces)
-            var body = nudge.title
-            if let author = nudge.author, !author.isEmpty { body += " by \(author)" }
-            if let note = nudge.note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
-                body += " — “\(note)”"
-            }
-            items.append(Item(
-                id: "nudge:\(nudge.id)",
-                title: who.isEmpty ? "A book suggestion" : "\(who) suggested a book",
-                body: body))
+            items.append(nudgeItem(nudge))
         }
         for notice in notices where !seen.contains("notice:\(notice.id)") {
             items.append(Item(id: "notice:\(notice.id)", title: appName(notice.app), body: notice.text))
@@ -46,6 +37,20 @@ enum NotificationPlan {
             return ([summary], current)
         }
         return (items, current)
+    }
+
+    /// How a suggestion is told: who suggested what, and their note.
+    static func nudgeItem(_ nudge: BMNudge) -> Item {
+        let who = nudge.fromName.trimmingCharacters(in: .whitespaces)
+        var body = nudge.title
+        if let author = nudge.author, !author.isEmpty { body += " by \(author)" }
+        if let note = nudge.note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+            body += " — “\(note)”"
+        }
+        return Item(
+            id: "nudge:\(nudge.id)",
+            title: who.isEmpty ? "A book suggestion" : "\(who) suggested a book",
+            body: body)
     }
 
     /// Everything waiting, as the keys the "already told" set is made of.
