@@ -16,6 +16,8 @@ struct BMChatView: View {
     /// Whether this screen is the one in front. Reading is only reported from here: a chat that is pushed
     /// but covered (another tab, a sheet) has not been looked at.
     @State private var visible = false
+    /// Which room is showing: the shared one (native, below), or Quest Log's own (the web's, in a page).
+    @State private var tab: BMChatTab = .us
     /// Where the reader was before the chat opened — put back when it closes (the Together tab, or any other
     /// screen, when it came as the floating button's full page).
     @State private var cameFrom = "bookmaster"
@@ -52,15 +54,25 @@ struct BMChatView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(room?.partner?.displayName ?? "Chat")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if BookMaster.shared.isLinked {
+                    ToolbarItem(placement: .principal) { BMChatTabs(tab: $tab) }
+                }
+            }
     }
 
     private var content: some View {
         Group {
             if BookMaster.shared.isLinked {
-                VStack(spacing: 0) {
-                    thread
-                    Divider()
-                    composer
+                switch tab {
+                case .us:
+                    VStack(spacing: 0) {
+                        thread
+                        Divider()
+                        composer
+                    }
+                case .questLog:
+                    BMQuestLogRoomView()
                 }
             } else {
                 ScrollView { BMLinkPrompt().padding(16) }
@@ -88,6 +100,11 @@ struct BMChatView: View {
             }
             .onChange(of: draft) { _, now in
                 if now == restoredDraft { restoredDraft = nil } else { actionError = nil }
+            }
+            .onChange(of: tab) { _, now in
+                focused = false
+                // back to the shared room: what came while the other was showing, now
+                if now == .us, active, visible { Task { await refresh() } }
             }
     }
 
@@ -364,7 +381,8 @@ struct BMChatView: View {
 
     /// Looking at the room is reading it — when it is the screen in front.
     private func reportRead() async {
-        guard active, visible, let room, let newest = messages.last?.id,
+        // reading is only reported from the shared room, while it is the one showing
+        guard active, visible, tab == .us, let room, let newest = messages.last?.id,
               newest > room.read.mine, newest > reported else { return }
         reported = newest
         do { try await BookMaster.shared.markChatRead(upTo: newest) } catch { reported = 0 }

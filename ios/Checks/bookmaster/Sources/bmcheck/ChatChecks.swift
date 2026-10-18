@@ -180,5 +180,26 @@ func runChatChecks() {
     check("a count is Quest Log's only when nothing else waits",
           BMSuite.dotTone(forNotices: [mixed[0]]) == .questLog && BMSuite.dotTone(forNotices: mixed) == .regular
           && BMSuite.dotTone(forNotices: [mixed[1]]) == .regular && BMSuite.dotTone(forNotices: []) == .regular)
+    // ---- Quest Log's room inside the chat screen
+    let roomURL = BMChat.questLogRoom
+    let roomItems = URLComponents(url: roomURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    check("Quest Log's room is BookMaster's chat page, alone, opened on the locked room",
+          roomURL.scheme == "https" && roomURL.host == BMLinkURL.bookMasterHost && roomURL.path == "/embed/chat"
+          && roomItems.contains(URLQueryItem(name: "room", value: "secret"))
+          && roomItems.contains(URLQueryItem(name: "only", value: "1")), roomURL.absoluteString)
+    check("…which the browser lets through, as a page of BookMaster's own", BMWebPolicy.decide(roomURL, mainFrame: true) == .allow)
+    check("a page is the room only while it is that page — not once sent to sign in",
+          BMChat.isQuestLogRoom(roomURL) && BMChat.isQuestLogRoom(URL(string: "https://bookmaster.pages.dev/embed/chat"))
+          && !BMChat.isQuestLogRoom(URL(string: "https://bookmaster.pages.dev/login"))
+          && !BMChat.isQuestLogRoom(URL(string: "https://evil.example/embed/chat")) && !BMChat.isQuestLogRoom(nil))
+    check("the chat screen has the two rooms, named", BMChatTab.allCases.map(\.title) == ["Us", "Quest Log"])
+    let questNote = BMNotice(id: "quest-log:1", app: "quest-log", text: "Something new")
+    let questNote2 = BMNotice(id: "quest-log:2", app: "quest-log", text: "Something new")
+    let kindredNote = BMNotice(id: "k:1", app: "kindred", text: "A question")
+    check("only Quest Log's notices are Quest Log's", BMChat.questLogNotices([kindredNote, questNote]).map(\.id) == ["quest-log:1"])
+    check("something new in Quest Log shows until its room has been opened, and a newer one brings it back",
+          BMChat.questLogUnseen([questNote, kindredNote], seen: []) && !BMChat.questLogUnseen([questNote], seen: ["quest-log:1"])
+          && BMChat.questLogUnseen([questNote2], seen: ["quest-log:1"]) && !BMChat.questLogUnseen([kindredNote], seen: []))
+
     check("a band with no room still places it", Spot.dropped(x: 10, y: 10, width: 400, top: 700, bottom: 100, size: 50).y == Spot.standardY)
 }

@@ -95,8 +95,8 @@ final class BMWebPage {
     }
 
     /// Open it the first time; leave it be after that.
-    func openIfNeeded() {
-        if !started { open() }
+    func openIfNeeded(_ url: URL? = nil) {
+        if !started { open(url) }
     }
 
     /// Again: what is on screen, or — when nothing loaded, or the last load failed — what was asked for.
@@ -505,7 +505,7 @@ struct BMWebBrowserView: View {
 /// A page's web view, as a SwiftUI view. The web view goes inside a box this view owns, and follows the
 /// page: if the page is replaced (reclaimed for memory, or started over) the new one takes its place, so
 /// what is on screen is always the page the toolbar and the failure view are talking about.
-private struct BMWebHost: UIViewRepresentable {
+struct BMWebHost: UIViewRepresentable {
     let page: BMWebPage
 
     func makeUIView(context: Context) -> UIView {

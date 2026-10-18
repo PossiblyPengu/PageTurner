@@ -26,6 +26,15 @@ final class Notifier {
     private(set) var chatNotice: BMNotice?
     /// The chat notice already opened, so its dot stays out until a newer message.
     private var chatSeenID: String?
+    /// Quest Log's notices as of the last look, and the ones already looked at (by opening its room).
+    private var questLogNotices: [BMNotice] = []
+    private var questLogSeen: Set<String> = []
+
+    /// Quest Log has something new that its room has not been opened for — the blue square on the chat's tab.
+    var questLogUnread: Bool { BMChat.questLogUnseen(questLogNotices, seen: questLogSeen) }
+
+    /// Quest Log's room was opened.
+    func noteQuestLogOpened() { questLogSeen.formUnion(questLogNotices.map(\.id)) }
 
     /// A chat message waiting that has not been opened — what the Together tab and the floating button show.
     var chatUnread: BMNotice? { BMChat.unread(chatNotice.map { [$0] } ?? [], seen: chatSeenID) }
@@ -126,6 +135,7 @@ final class Notifier {
     private func settle(_ together: BMTogether) -> [NotificationPlan.Item] {
         pendingCount = together.nudges.count
         chatNotice = BMChat.unreadNotice(together.notices)
+        questLogNotices = BMChat.questLogNotices(together.notices)
         guard let key = seenKey else { return [] }
         let known = defaults.stringArray(forKey: key).map { Set($0) }
         let result = NotificationPlan.plan(nudges: together.nudges, notices: together.notices, seen: known)
@@ -179,6 +189,8 @@ final class Notifier {
         pendingCount = 0
         chatNotice = nil
         chatSeenID = nil
+        questLogNotices = []
+        questLogSeen = []
         wasRefused = false
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.refreshTaskID)
         // banners already on the lock screen belong to the account that just went away

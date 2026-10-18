@@ -147,8 +147,11 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   feed's `bookmaster:chat:<id>` notice (`BMChat.unreadNotice`), gone once the room is opened. It polls every 5s while on screen and reports
   how far you have read. Rules learned in review: a poll that began before a send or take-back finished carries the room as it was and is
   dropped (`edits`); one refresh at a time; reading is reported only while the screen is in front (`visible`); the length limit counts UTF-16
-  units like the server; a full page that reaches back to nothing held replaces it instead of leaving a hole. Quest Log's own private chat is end-to-end encrypted and is deliberately **not** in the app: it is opened from
-  BookMaster's web Chat page with Quest Log's passphrase.
+  units like the server; a full page that reaches back to nothing held replaces it instead of leaving a hole. Quest Log's own private chat is end-to-end encrypted, so
+  its cryptography stays in one place — the web's. It is the chat screen's second tab ("🔒 Quest Log", `BMChatTab`): BookMaster's
+  `/embed/chat?room=secret&only=1` (`BMChat.questLogRoom`) in a kept-alive `BMWebPage` (`BMQuestLogRoomView`), so Pageturner never holds
+  the key or sees a word, the passphrase stays given until the app closes, and the sign-in is the in-app browser's. If the page is sent to
+  sign in, a strip offers the way back. Its blue-square dot (`Notifier.questLogUnread`) clears when the room is opened.
   The chat is also one tap from anywhere but the reader: `BMChatButtonLayer` (`BMChatButtonView.swift`) is a draggable round button laid
   over the whole shell in `RootView`, opening the chat as a full-screen page (`router.showChat`, `.fullScreenCover`) — a sheet read as a pop-up. When it shows and where it rests are pure
   (`BMChatButton`, Linux-checked); it steps aside over the reader (`router.readerOpen`) and over any screen marked `.hidesChatButton()`

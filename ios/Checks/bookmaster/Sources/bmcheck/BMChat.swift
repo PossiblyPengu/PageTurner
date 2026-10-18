@@ -1,5 +1,19 @@
 import Foundation
 
+/// The two rooms the chat screen holds: the shared one, and Quest Log's own.
+enum BMChatTab: String, CaseIterable, Identifiable {
+    case us, questLog
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .us: return "Us"
+        case .questLog: return "Quest Log"
+        }
+    }
+}
+
 /// The suite's shared chat, apart from any screen: how a run of messages is
 /// laid out, what may be sent, how a page of messages folds into what is
 /// already shown, and what "Seen" says. BookMaster's `chatView.ts` lays out
@@ -39,6 +53,28 @@ enum BMChat {
 
     /// How many messages one request returns.
     static let pageSize = 60
+
+    /// Quest Log's own room, which is end-to-end encrypted: its passphrase and its cryptography are BookMaster's
+    /// web chat (the recipe Quest Log itself uses), shown here with nothing around it. Pageturner holds no key
+    /// and never sees the words — it only frames the page.
+    static let questLogRoom = URL(string: "https://\(BMLinkURL.bookMasterHost)/embed/chat?room=secret&only=1")!
+
+    /// Whether this address is the room's page — it is not once the reader has been sent to sign in.
+    static func isQuestLogRoom(_ url: URL?) -> Bool {
+        guard let url, url.host?.lowercased() == BMLinkURL.bookMasterHost else { return false }
+        return url.path == questLogRoom.path
+    }
+
+    /// The notices that are Quest Log's.
+    static func questLogNotices(_ notices: [BMNotice]) -> [BMNotice] {
+        notices.filter { BMSuite.dotTone(forApp: $0.app) == .questLog }
+    }
+
+    /// Whether Quest Log has something not yet looked at: a notice whose id has not been seen. (Quest Log
+    /// never says what, and its room is its own, so opening the room is what counts as looking.)
+    static func questLogUnseen(_ notices: [BMNotice], seen: Set<String>) -> Bool {
+        questLogNotices(notices).contains { !seen.contains($0.id) }
+    }
 
     /// Messages in id order, once each. Where both lists hold an id, the
     /// incoming copy wins.
