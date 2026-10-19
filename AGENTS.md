@@ -134,7 +134,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   back (washed with the page's colour) is drawn whole over the front. `SKWarpGeometryGrid` positions are
   **normalized (0…1), row-major from the bottom-left** — the page math is point space, rows top-first,
   so the overlay flips both. While a curl runs, `ReaderModel.curling` holds position saves, jump
-  history and BookMaster sync; a commit replays the landed location, a cancel restores `curlBefore`.
+  history and BookMaster sync; a commit replays the landed location, a cancel restores `curlBefore`. The leaf is always the page being
+  left, peeled from the edge the finger caught (a backward turn too: the page peels away to the right over the one before it), and the
+  page beneath is the navigator moved silently to where the turn lands. A web view says it has moved before it has painted: the leaf
+  stays flat until a small photograph of the navigator (`fingerprint`) differs from the cover's (`waitForNewPage`) — lifted earlier it
+  peeled off a copy of itself — a flick that ends first waits for that (`armTask`), and a cancel keeps the cover until the original page is
+  painted again. `-PTDebugTurn curl [-PTDebugTurnBack YES]` poses a tap-turn; the log's `PTCurlReveal` lines say how long the paint took.
   highlights live on the `Book` (colour, note, chapter, progression) and are painted as decorations;
   `HighlightExport` writes them as Markdown. PDFs are searched by Readium itself (its PDF parser
   registers a content search service).

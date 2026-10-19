@@ -361,8 +361,13 @@ final class ReaderModel: ObservableObject {
               let navigator else { return }
         try? await Task.sleep(nanoseconds: 6_000_000_000)   // until the page has painted, or the turn is of a spinner
         settings.pageTurn = style
+        // -PTDebugTurnBack YES: the turn back, a tap on the left edge — the page peels away over the one before it
+        let back = UserDefaults.standard.bool(forKey: "PTDebugTurnBack")
+        tapOnLeft = back
         pageIsTurning(frozenAt: 0.5)
-        _ = await navigator.goForward(options: NavigatorGoOptions(animated: false))
+        _ = back
+            ? await navigator.goBackward(options: NavigatorGoOptions(animated: false))
+            : await navigator.goForward(options: NavigatorGoOptions(animated: false))
     }
     #endif
 

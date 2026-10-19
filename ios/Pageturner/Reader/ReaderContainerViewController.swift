@@ -163,22 +163,98 @@ final class ReaderContainerViewController: UIViewController {
     /// newest position is what the overlay shows once it exists.
     private var curlPendingTouch: CGPoint?
     private var arming = false
+    /// The navigator is being moved beneath the cover: the leaf stays flat until it has, and a finger let go
+    /// meanwhile waits for it.
+    private var armTask: Task<Void, Never>?
+    /// The finger has let go: the release animation owns the leaf from here.
+    private var releasing = false
+    /// What the cover shows, as a small photograph: the page the turn leaves, and the one to put back on a cancel.
+    private var coverPrint: [UInt8] = []
     /// Bumped each time a curl ends or starts — an `armCurl` task that wakes to
     /// a different session knows the gesture already ended and drops its work.
     private var curlSession = 0
 
-    private func snapshotPage() -> UIImage {
+    private func snapshotPage(scale: CGFloat? = nil) -> UIImage {
         // the navigator's own view — never the overlay covering it
-        UIGraphicsImageRenderer(bounds: contentController.view.bounds).image { _ in
+        let format = UIGraphicsImageRendererFormat.default()
+        if let scale { format.scale = scale }
+        return UIGraphicsImageRenderer(bounds: contentController.view.bounds, format: format).image { _ in
             contentController.view.drawHierarchy(
                 in: contentController.view.bounds, afterScreenUpdates: false)
+        }
+    }
+
+    // MARK: Telling that a page has been painted
+
+    /// A web view says it has moved a little before it shows it: `goForward` returns, and for a few frames (a
+    /// chapter's first page: a few hundred milliseconds) the view still paints the page it was on. A leaf lifted
+    /// in that gap peels off a copy of itself — so the leaf waits until the page beneath has changed, which is
+    /// told from a small photograph of the navigator (a page of text differs from the next everywhere).
+    private static let printColumns = 48
+
+    private static func fingerprint(of image: UIImage) -> [UInt8] {
+        guard let cg = image.cgImage, cg.width > 0, cg.height > 0 else { return [] }
+        let w = printColumns, h = max(1, w * cg.height / cg.width)
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        let drawn = pixels.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(
+                data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.interpolationQuality = .high
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        return drawn ? pixels : []
+    }
+
+    /// Two photographs show the same page: hardly a value in them is more than a shade apart.
+    private static func alike(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        guard a.count == b.count, !a.isEmpty else { return false }
+        var apart = 0
+        for i in 0 ..< a.count where abs(Int(a[i]) - Int(b[i])) > 12 { apart += 1 }
+        return apart < 12
+    }
+
+    private func currentPrint() -> [UInt8] { Self.fingerprint(of: snapshotPage(scale: 1)) }
+
+    /// Wait for the navigator to paint something other than `before` (the page it has just left). False when it
+    /// still looks the same after `limit` seconds — two pages can look alike, and the turn goes on regardless.
+    private func waitForNewPage(differentFrom before: [UInt8], limit: TimeInterval = 0.45) async -> Bool {
+        await waitForPrint(limit: limit) { !Self.alike($0, before) }
+    }
+
+    /// Wait for the navigator to show `page` again (a turn that was let go, and put back).
+    private func waitForPage(like page: [UInt8], limit: TimeInterval = 0.45) async -> Bool {
+        await waitForPrint(limit: limit) { Self.alike($0, page) }
+    }
+
+    private func waitForPrint(limit: TimeInterval, until done: ([UInt8]) -> Bool) async -> Bool {
+        let start = Date()
+        while true {
+            if done(currentPrint()) {
+                #if DEBUG
+                NSLog("PTCurlReveal painted after %.0f ms", Date().timeIntervalSince(start) * 1000)
+                #endif
+                return true
+            }
+            if Date().timeIntervalSince(start) >= limit || Task.isCancelled {
+                #if DEBUG
+                NSLog("PTCurlReveal not painted after %.0f ms", Date().timeIntervalSince(start) * 1000)
+                #endif
+                return false
+            }
+            try? await Task.sleep(nanoseconds: 30_000_000)
         }
     }
 
     /// A photographed page as a flat sheet — covers the navigator while the
     /// silent moves underneath happen, so the user never sees them flicker.
     private func startCurlCover(_ overlay: PageCurlOverlay, grab: PageCurl.Grab? = nil) {
-        overlay.begin(snapshotPage())
+        let photograph = snapshotPage()
+        coverPrint = Self.fingerprint(of: photograph)
+        overlay.begin(photograph)
         overlay.frame = view.bounds
         overlay.isUserInteractionEnabled = true   // touches for the leaf, not the book
         view.addSubview(overlay)
@@ -195,6 +271,9 @@ final class ReaderContainerViewController: UIViewController {
         curlGrab = nil
         curlPendingTouch = nil
         arming = false
+        releasing = false
+        armTask?.cancel()
+        armTask = nil
         curlSession += 1
     }
 
@@ -222,16 +301,18 @@ final class ReaderContainerViewController: UIViewController {
                 curlGrab = (origin: edge, forward: forward)
                 curlPendingTouch = CGPoint(x: edge.x + t.x, y: edge.y + t.y)
                 arming = true
+                releasing = false
                 curlSession += 1
                 let session = curlSession
-                Task { await armCurl(forward: forward, origin: edge, session: session) }
+                armTask = Task { await armCurl(forward: forward, origin: edge, session: session) }
                 return
             }
             guard let grab = curlGrab else { return }
             let t = pan.translation(in: view)
             let moved = CGPoint(x: grab.origin.x + t.x, y: grab.origin.y + t.y)
             curlPendingTouch = moved
-            curlOverlay?.update(origin: grab.origin, touch: moved)
+            // until the page beneath is in place the leaf lies flat: lifted now, it would peel off a copy of itself
+            if !arming { curlOverlay?.update(origin: grab.origin, touch: moved) }
         case .ended, .cancelled, .failed:
             guard let overlay = curlOverlay, let grab = curlGrab else { removeCurl(); return }
             let v = pan.velocity(in: view)
@@ -247,42 +328,45 @@ final class ReaderContainerViewController: UIViewController {
             let peelLeft = grab.forward != rightToLeft
             let fling = peelLeft ? v.x < -450 : v.x > 450
             let commit = p > 0.45 || fling
-            let forward = grab.forward
             overlay.isUserInteractionEnabled = false
-            overlay.release(origin: grab.origin, touch: touch,
-                            velocity: v, commit: commit) { [weak self] in
-                Task { [weak self] in
-                    guard let self else { return }
-                    if commit { await self.finishCurl(forward: forward) }
-                    else { await self.onCurlCancel?() }
-                    self.removeCurl()
+            releasing = true
+            let arm = armTask
+            Task { [weak self] in
+                // a flick can end before the navigator has been moved beneath the cover: the leaf lifts only once
+                // the page it uncovers is there
+                await arm?.value
+                guard let self, self.curlOverlay === overlay, self.releasing else { return }
+                overlay.release(origin: grab.origin, touch: touch,
+                                velocity: v, commit: commit) { [weak self] in
+                    Task { [weak self] in
+                        guard let self else { return }
+                        if commit {
+                            self.onCurlCommit?()
+                        } else {
+                            // the navigator goes back to the page the leaf lay on; the cover stays until it shows it
+                            await self.onCurlCancel?()
+                            _ = await self.waitForPage(like: self.coverPrint)
+                        }
+                        self.removeCurl()
+                    }
                 }
             }
         default: break
         }
     }
 
-    /// Photograph the page, park the navigator on the landing page, then let
-    /// the leaf track the finger. A backward peel lifts the leaf already lying
-    /// on the left stack — the previous page — so it is photographed by a
-    /// silent look behind (and the navigator comes straight back).
+    /// Photograph the page, park the navigator on the page the turn lands on (the next one, or the one before —
+    /// either way the leaf is the page that is being left, peeled away from the edge the finger caught), wait for
+    /// the navigator to paint it, and only then let the leaf track the finger.
     private func armCurl(forward: Bool, origin: CGPoint, session: Int) async {
         guard session == curlSession else { return }     // the finger already let go
         let overlay = PageCurlOverlay(frame: view.bounds)
-        if forward {
-            startCurlCover(overlay)                       // flat current page over the flicker
-            guard await onCurlStep?(true) == true else { failedCurl(session); return }
-        } else {
-            startCurlCover(overlay)
-            guard await onCurlStep?(false) == true else { failedCurl(session); return }
-            let arriving = snapshotPage()                  // the previous leaf
-            _ = await onCurlStep?(true)                    // back under the cover
-            guard session == curlSession else { overlay.removeFromSuperview(); return }
-            overlay.begin(arriving)
-        }
-        guard session == curlSession else { overlay.removeFromSuperview(); return }
-        overlay.update(origin: origin, touch: curlPendingTouch ?? origin)
+        startCurlCover(overlay)                           // the flat page over the flicker
+        guard await onCurlStep?(forward) == true else { failedCurl(session); return }
+        _ = await waitForNewPage(differentFrom: coverPrint)
+        guard session == curlSession else { return }
         arming = false
+        if !releasing { overlay.update(origin: origin, touch: curlPendingTouch ?? origin) }
     }
 
     private func failedCurl(_ session: Int) {
@@ -291,23 +375,26 @@ final class ReaderContainerViewController: UIViewController {
         Task { await onCurlCancel?() }
     }
 
-    private func finishCurl(forward: Bool) async {
-        if !forward { _ = await onCurlStep?(false) }       // the leaf lands on the left stack
-        onCurlCommit?()
-    }
-
     /// A tap's scripted curl: the page peels itself off on a soft arc while the
     /// navigator's own (unanimated) turn happens beneath.
     func beginCurl(towardLeft: Bool, frozenAt: Double? = nil) {
         removeCurl()   // a queued curl that never landed goes quietly
         let overlay = PageCurlOverlay(frame: view.bounds)
         startCurlCover(overlay)
-        if let frozenAt {
-            overlay.pose(frozenAt: frozenAt, towardLeft: towardLeft)
-            return
-        }
-        overlay.animateScripted(towardLeft: towardLeft) { [weak self] in
-            self?.removeCurl()
+        // the navigator moves just after this returns: the leaf starts once it has painted the page it moved to,
+        // or it would peel off a copy of itself
+        let session = curlSession
+        let before = coverPrint
+        armTask = Task { [weak self] in
+            _ = await self?.waitForNewPage(differentFrom: before)
+            guard let self, self.curlOverlay === overlay, self.curlSession == session else { return }
+            if let frozenAt {
+                overlay.pose(frozenAt: frozenAt, towardLeft: towardLeft)
+                return
+            }
+            overlay.animateScripted(towardLeft: towardLeft) { [weak self] in
+                self?.removeCurl()
+            }
         }
     }
 

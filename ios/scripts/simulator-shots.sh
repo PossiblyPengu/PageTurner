@@ -99,6 +99,13 @@ shot 14-reader-search 14 -PTDebugScreen reader -PTDebugKeepChrome 1 -PTDebugRead
 shot 80-page-flip 20 -PTDebugScreen reader -PTDebugTurn flip
 shot 81-page-curl 20 -PTDebugScreen reader -PTDebugTurn curl
 shot 82-page-curl-corner 20 -PTDebugScreen reader -PTDebugTurn curl -PTDebugCorner YES
+# the turn back: the page peels away over the one before it. The log says whether the navigator had painted the
+# page beneath before the leaf lifted (the sample book repeats its paragraphs, so two pages can look alike: a
+# "not painted" here is a timeout, not a failure)
+shot 83-page-curl-back 20 -PTDebugScreen reader -PTDebugTurn curl -PTDebugTurnBack YES
+xcrun simctl spawn "$UDID" log show --style compact --last 4m \
+  --predicate 'process == "Pageturner" AND eventMessage CONTAINS "PTCurlReveal"' > "$OUT/curl-reveal.txt" 2>/dev/null || true
+cat "$OUT/curl-reveal.txt"
 shot 15-reader-autohide 14 -PTDebugScreen reader
 shot 16-reader-jump 18 -PTDebugScreen reader -PTDebugKeepChrome 1 -PTDebugReaderSheet jump
 shot 17-reader-footnote 14 -PTDebugScreen reader -PTDebugKeepChrome 1 -PTDebugReaderSheet footnote
