@@ -71,9 +71,13 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   `StoredDate.read` (see the `Book`, `Bookmark` and `Highlight` decoders).
 - Foundation `Process` can hang on Linux; `pkill -f <pattern>` can match its own command line.
 - A `Set` literal with a repeated element traps at launch ("Duplicate elements of type … were found in a Set").
-- ReadAloud observes `AVAudioSession.interruptionNotification` itself: Readium's `AVTTSEngine` reports a cancelled
-  utterance as finished, so without it a phone call walks the synthesizer through sentences silently and the
-  failure counter drops the chosen voice.
+- ReadAloud observes `AVAudioSession.interruptionNotification` itself: the TTS engine reports a cancelled
+  utterance as finished (`SystemTTSEngine` resumes `speak` on `didCancel`, just as Readium's `AVTTSEngine`
+  did), so without it a phone call walks the synthesizer through sentences silently and the failure counter
+  drops the chosen voice.
+- Word ranges from a TTS engine index the text it was given; if that differs from `locator.text.highlight`,
+  the spoken-word locator is garbage and the page follows it to the wrong place (fuzzy text anchoring finds
+  *something*).
 - Fuzz pure helpers with random Unicode and odd numbers before trusting them (a speech-range finder crashed on a
   sample rate of 0): 200k random strings through `SpokenWords.tokens/schedule` take seconds on Linux.
 - Decoration templates (HTML + CSS for Readium highlights) can be tried without a device: Readium's compiled
@@ -229,7 +233,11 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   voice for a language", the speed scale) and checked on Linux. `SpeechText.swift` (Linux-checked) is what every
   sentence passes through before a voice: printed-line hyphens, ligatures, footnote markers, `etc.`/`e.g.`,
   en-dash ranges and roman chapter numerals, plus `shouldJoin`, which glues back sentences the tokenizer cut at a
-  title ("Dr.") or before a lower-case continuation. Device voices: `SystemVoices.swift`; the shared list
+  title ("Dr.") or before a lower-case continuation. Device voices go through `SystemTTSEngine` (ours, not
+  Readium's `AVTTSEngine`, whose utterance text can't be changed): it speaks `SpeechText.spoken(text)` and maps
+  each reported range back onto the page's text with `SpeechText.originalRange`; `NeuralTTSEngine` does the
+  same. The tokenizer never rewrites a segment's text — Readium slices `locator.text.highlight` with the
+  ranges the engine reports, so the two must be one string. Device voices: `SystemVoices.swift`; the shared list
   and the Settings/Reading-sheet rows: `VoiceListView.swift`; **always use `SpeechPreview.shared`** — an
   `AVSpeechSynthesizer` freed while iOS is still calling back into it crashes inside TextToSpeech.
   `VoiceListView` pauses every `AudioFocus` owner on appear so a sample never overlaps narration, and

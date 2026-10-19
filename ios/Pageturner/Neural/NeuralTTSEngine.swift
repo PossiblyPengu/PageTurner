@@ -24,6 +24,8 @@ extension NeuralVoice {
 /// While a sentence plays, the next one is made — the book is asked for it (`upcoming`) — so they
 /// follow each other without a wait. A neural voice says nothing about where it is in a sentence,
 /// so the word being spoken is worked out from how far the audio has played (`SpokenWords`).
+/// The engine is handed the page's own text and cleans it itself right before the voice, putting
+/// each word range back onto the original, so the ranges index the same string the locator holds.
 final class NeuralTTSEngine: TTSEngine {
     enum Failure: Error, LocalizedError {
         case notInstalled
@@ -79,25 +81,31 @@ final class NeuralTTSEngine: TTSEngine {
         guard case let .left(chosen) = utterance.voiceOrLanguage, let entry = index.entry(forID: chosen.identifier) else {
             return .failure(.other(Failure.notInstalled))
         }
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .success(()) }
+        let spoken = SpeechText.spoken(text)
+        // a segment the voice would say nothing for (a running page number) is dropped
+        guard !spoken.isEmpty else { return .success(()) }
         guard !Task.isCancelled else { return .success(()) }
         do {
-            let audio = try await sentence(text, entry: entry)
+            let audio = try await sentence(text, spoken: spoken, entry: entry)
             // paused, skipped or stopped while it was being made
             if Task.isCancelled { return .success(()) }
             let player = NeuralPlayer.shared
             player.speed = speed
             makeNext(after: text, entry: entry)
 
-            // the word being spoken, as far into the audio as the player says it has got
-            let words = reportsWords ? Self.schedule(text, audio: audio) : []
+            // the word being spoken, as far into the audio as the player says it has got —
+            // timed on the cleaned text the voice was given
+            let words = reportsWords ? Self.schedule(spoken, audio: audio) : []
             Self.log("playing \(String(format: "%.2f", Double(audio.samples.count) / audio.sampleRate)) s, \(words.count) words timed")
             var lit = -1
             let cancellation = Cancellation()
             func follow(_ seconds: TimeInterval) {
                 guard !cancellation.isSet, let next = SpokenWords.index(at: seconds, in: words), next != lit else { return }
                 lit = next
-                onSpeakRange(words[next].range)
+                // back onto the page's own text — or the whole sentence when the word
+                // has no counterpart there (the "to" of a year range, say)
+                onSpeakRange(SpeechText.originalRange(of: words[next].range, spoken: spoken, original: text)
+                    ?? text.startIndex ..< text.endIndex)
             }
             // Without words to follow (only the sentence is marked), the sentence is the range: that is
             // what has the page follow the narration, and what shows the voice works
@@ -154,7 +162,7 @@ final class NeuralTTSEngine: TTSEngine {
     // MARK: Making sentences
 
     @MainActor
-    private func sentence(_ text: String, entry: NeuralVoiceIndex.Entry) async throws -> NeuralSynth.Audio {
+    private func sentence(_ text: String, spoken: String, entry: NeuralVoiceIndex.Entry) async throws -> NeuralSynth.Audio {
         let key = Self.key(text, entry)
         if let recent, recent.key == key {
             Self.log("sentence again, from memory")
@@ -166,7 +174,7 @@ final class NeuralTTSEngine: TTSEngine {
             Self.log("sentence made ahead, waited \(Self.ms(since: started)) ms")
             return audio
         }
-        let audio = try await NeuralSynth.shared.generate(text: text, directory: entry.directory, info: entry.info)
+        let audio = try await NeuralSynth.shared.generate(text: spoken, directory: entry.directory, info: entry.info)
         recent = (key, audio)
         Self.log("sentence made on the spot in \(Self.ms(since: started)) ms")
         return audio
@@ -206,6 +214,9 @@ final class NeuralTTSEngine: TTSEngine {
     @MainActor
     private func make(_ text: String, entry: NeuralVoiceIndex.Entry) {
         let key = Self.key(text, entry)
+        let spoken = SpeechText.spoken(text)
+        // nothing a voice would say — don't make anything for it
+        guard !spoken.isEmpty else { return }
         guard made[key] == nil else { return }
         // a skip leaves sentences behind that nobody will ask for
         if made.count >= 2 {
@@ -213,7 +224,7 @@ final class NeuralTTSEngine: TTSEngine {
             made.removeAll()
         }
         made[key] = Task {
-            try await NeuralSynth.shared.generate(text: text, directory: entry.directory, info: entry.info)
+            try await NeuralSynth.shared.generate(text: spoken, directory: entry.directory, info: entry.info)
         }
     }
 
@@ -239,10 +250,10 @@ final class CompositeTTSEngine: TTSEngine {
         var errorDescription: String? { "The voice said nothing." }
     }
 
-    private let system: AVTTSEngine
+    private let system: SystemTTSEngine
     private let neural: NeuralTTSEngine
 
-    init(system: AVTTSEngine, neural: NeuralTTSEngine) {
+    init(system: SystemTTSEngine, neural: NeuralTTSEngine) {
         self.system = system
         self.neural = neural
     }
@@ -265,21 +276,26 @@ final class CompositeTTSEngine: TTSEngine {
         // a play task parked between sentences outlives the cancel pause/stop sent it — without
         // this it would still start the engine below: a sentence nobody can stop any more
         guard !Task.isCancelled else { return .success(()) }
+        let spoken = SpeechText.spoken(utterance.text)
+        // a segment the voice would say nothing for (a running page number) is dropped
+        guard !spoken.isEmpty else { return .success(()) }
         if case let .left(voice) = utterance.voiceOrLanguage, NeuralVoice.key(fromID: voice.identifier) != nil {
             return await neural.speak(utterance, onSpeakRange: onSpeakRange)
         }
         // iOS can "finish" a sentence at once without a sound (a voice that is listed but not
-        // downloaded, a lost audio session) and AVTTSEngine reports that as success. Real speech
+        // downloaded, a lost audio session) and the engine reports that as success. Real speech
         // takes far longer than this and says a word on the way; say so, so the failure counter
         // (and the fall-back to the automatic voice) can work.
         let started = Date()
         var spoke = false
+        // the original text goes in unchanged — SystemTTSEngine cleans it for the voice and
+        // puts each reported range back onto it
         let result = await system.speak(utterance) { range in
             spoke = true
             onSpeakRange(range)
         }
         if case .success = result, !spoke, !Task.isCancelled,
-           utterance.text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 12,
+           spoken.count >= 12,
            Date().timeIntervalSince(started) < 0.25
         {
             return .failure(.other(Failure.silent))

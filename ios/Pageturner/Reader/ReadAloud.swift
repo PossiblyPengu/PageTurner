@@ -5,9 +5,9 @@ import ReadiumNavigator
 import ReadiumShared
 import UIKit
 
-/// Tunes every utterance Readium's AVTTSEngine creates (its own configuration has no
-/// rate setting, and it asks iOS for "a voice for this language", which answers with the
-/// compact default even when a better one is installed).
+/// Tunes every utterance a system voice is asked to say (the engines have no rate
+/// setting, and asking iOS for "a voice for this language" answers with the compact
+/// default even when a better one is installed).
 final class SpeechTuning: AVTTSEngineDelegate {
     /// 1 = the voice's normal pace.
     var multiplier: Double = 1.0
@@ -15,7 +15,12 @@ final class SpeechTuning: AVTTSEngineDelegate {
     var chosenVoiceID: String?
     private lazy var installed = SystemVoices.installed()
 
+    /// Readium's own engine handed its utterances here; `SystemTTSEngine` calls `tune` directly.
     func avTTSEngine(_ engine: AVTTSEngine, didCreateUtterance utterance: AVSpeechUtterance) {
+        tune(utterance)
+    }
+
+    func tune(_ utterance: AVSpeechUtterance) {
         utterance.rate = SpeechRateMap.avRate(forMultiplier: multiplier)
         utterance.preUtteranceDelay = 0
         utterance.postUtteranceDelay = 0
@@ -150,7 +155,7 @@ final class ReadAloud: NSObject, ObservableObject {
         guard let synthesizer = PublicationSpeechSynthesizer(
             publication: publication,
             config: .init(voiceIdentifier: settings.voiceIdentifier),
-            engineFactory: { CompositeTTSEngine(system: AVTTSEngine(delegate: tuning), neural: neural) },
+            engineFactory: { CompositeTTSEngine(system: SystemTTSEngine(tuning: tuning), neural: neural) },
             tokenizerFactory: makeReadingTokenizer
         ) else { return nil }
 

@@ -61,6 +61,57 @@ enum SpeechText {
         return total
     }
 
+    /// Where a word the voice reported in `spoken` (what it was given, `spoken(original)`) is in
+    /// `original` (the page's text, which the locator carries). Nil when the word has no
+    /// counterpart — the "example" of an "e.g." spelled out, the "to" of a year range — and the
+    /// caller falls back to the sentence. Cheap when nothing changed, which is most sentences.
+    static func originalRange(of range: Range<String.Index>, spoken: String, original: String) -> Range<String.Index>? {
+        let spokenWords = wordRanges(in: spoken)
+        // a range that is no word (a comma, say) has no counterpart at all
+        guard let k = spokenWords.firstIndex(where: { $0.overlaps(range) }) else { return nil }
+        if spoken == original { return range }
+        let originalWords = wordRanges(in: original)
+        let target = folded(spoken[spokenWords[k]])
+        // every rule that keeps the word count (ligatures, soft hyphens, spacing) keeps the order —
+        // but only when the word itself survives ("e.g." becomes two other words by coincidence)
+        if spokenWords.count == originalWords.count,
+           folded(original[originalWords[k]]) == target { return originalWords[k] }
+        guard !originalWords.isEmpty else { return nil }
+        let guess = Int((Double(k) * Double(originalWords.count) / Double(spokenWords.count)).rounded())
+        for distance in [0, 1, -1, 2, -2, 3, -3, 4, -4] {
+            let i = guess + distance
+            guard originalWords.indices.contains(i) else { continue }
+            if folded(original[originalWords[i]]) == target { return originalWords[i] }
+        }
+        return nil
+    }
+
+    /// Runs of letters, digits and in-word apostrophes.
+    private static func wordRanges(in text: String) -> [Range<String.Index>] {
+        var out: [Range<String.Index>] = []
+        var start: String.Index?
+        var index = text.startIndex
+        while index < text.endIndex {
+            let c = text[index]
+            let inWord = c.isLetter || c.isNumber || c == "'" || c == "’" || c == "\u{00AD}"
+            if inWord, start == nil { start = index }
+            if !inWord, let from = start { out.append(from ..< index); start = nil }
+            index = text.index(after: index)
+        }
+        if let from = start { out.append(from ..< text.endIndex) }
+        return out
+    }
+
+    /// A word as it compares: lower case, ligatures opened, soft hyphens and apostrophes gone.
+    private static func folded(_ word: Substring) -> String {
+        word.lowercased()
+            .replacingOccurrences(of: "\u{00AD}", with: "")
+            .replacingOccurrences(of: "ﬀ", with: "ff").replacingOccurrences(of: "ﬁ", with: "fi")
+            .replacingOccurrences(of: "ﬂ", with: "fl").replacingOccurrences(of: "ﬃ", with: "ffi")
+            .replacingOccurrences(of: "ﬄ", with: "ffl")
+            .replacingOccurrences(of: "'", with: "").replacingOccurrences(of: "’", with: "")
+    }
+
     // MARK: Rules
 
     /// In order: a word hyphenated across a printed line is rejoined; runs of white space are one

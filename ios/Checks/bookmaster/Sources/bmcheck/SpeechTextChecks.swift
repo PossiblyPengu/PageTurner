@@ -53,4 +53,34 @@ func runSpeechTextChecks() {
           SpeechText.shouldJoin(previous: "She asked Dr.", separator: "\n", next: "Morgan to stay."))
     check("layout spaces alone do not merge sentences",
           !SpeechText.shouldJoin(previous: "It ended.", separator: "   ", next: "Another began."))
+
+    section("Read-aloud word ranges back onto the page")
+    /// The word `word` as the voice reports it in the cleaned text, found again in `original`.
+    func backOnPage(_ original: String, _ word: String) -> String? {
+        let spoken = SpeechText.spoken(original)
+        guard let r = spoken.range(of: word) else { return "<\(word) not in spoken: \(spoken)>" }
+        return SpeechText.originalRange(of: r, spoken: spoken, original: original).map { String(original[$0]) }
+    }
+    check("unchanged text maps onto itself",
+          backOnPage("Hello there, friend.", "there") == "there")
+    check("after a soft hyphen the word is still found",
+          backOnPage("The extra\u{00AD}ordinary answer came.", "answer") == "answer")
+    check("the hyphenated word itself is found whole",
+          backOnPage("The extra\u{00AD}ordinary answer came.", "extraordinary") == "extra\u{00AD}ordinary")
+    check("after a ligature the word is still found",
+          backOnPage("diﬃcult ﬂowers bloom", "bloom") == "bloom")
+    check("the ligature word maps onto its printed form",
+          backOnPage("diﬃcult ﬂowers bloom", "flowers") == "ﬂowers")
+    check("after an abbreviation spelled out the word is found",
+          backOnPage("Use it, e.g. here now", "now") == "now")
+    check("a word the page never had has no range",
+          backOnPage("Use it, e.g. here now", "example") == nil)
+    check("a year range maps its years",
+          backOnPage("the war of 1914–1918 ended", "1918") == "1918")
+    check("after a footnote marker the word is found",
+          backOnPage("It was over.¹ She left.", "left") == "left")
+    check("after a chapter numeral the word is found",
+          backOnPage("Chapter XIV Morning", "Morning") == "Morning")
+    check("punctuation alone has no range",
+          backOnPage("Well, then.", ",") == nil)
 }
