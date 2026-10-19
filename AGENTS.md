@@ -288,6 +288,20 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   export, named by day into a Files folder kept as a bookmark, oldest copies pruned. Made on opening the app when due, and by a
   `BGProcessingTask` (needs `processing` + the identifier in Info.plist; handler registered in `PageturnerApp.init`) — iOS picks
   the time, so the foreground run is the reliable one. It checks free space first: a backup is every book file.
+- **Google Drive** (`Drive/`): browse and import books, watch a Drive folder, and back up to Drive. `DriveCore` is the pure part
+  (Linux-checked: Drive v3 decoding, queries, sign-in URLs, sync plan, backup pruning, error wording); `GoogleAuth` is OAuth for an
+  installed app — `ASWebAuthenticationSession` + PKCE with an **iOS-type client ID the reader makes in their own Google Cloud project and
+  pastes in Settings → Google Drive** (no client secret exists; the ID is public; `GoogleAuth.builtInClientID` can ship one), redirect
+  scheme = the client ID reversed (`com.googleusercontent.apps.…:/oauth2redirect`, no Info.plist entry needed), the refresh token in the
+  Keychain (this device only). Scopes: `drive.readonly` (browse/download what is picked; a restricted scope, so the app is "unverified"
+  and a project in *Testing* mode expires the sign-in after a week — Publish it) and `drive.file` (write only what the app made). The
+  `drive.file` scope can write only to folders the app created, so backups go to a "Pageturner Backups" folder it makes and remembers
+  by id (`DriveClient.backupFolder`), never one found by name. `DriveClient`: 401 renews the token once, 429/5xx retry with backoff,
+  downloads check the size, uploads are chunked resumable (8 MiB pieces, offset asked for after a failure, 308 not followed). `DriveSync`
+  mirrors `FolderWatcher`: a folder id, each file's id+checksum remembered, a file touched in the last 30 s waits, at most every 10 minutes
+  on opening; downloads mirror the Drive folders in a temp folder so audiobook parts stay together, then `library.importFiles`.
+  `AutoBackup` has a destination ("backup-auto-dest": folder | drive; Drive needs the network, so the background task asks for it);
+  `DriveBackupsView` restores one. The library's + is a menu (Files / Google Drive).
 - Page-turn sound (`Reader/PageTurnSound.swift`, `Resources/Sounds/pageturn.wav`, synthesised noise): a *system* sound so it
   follows the ringer switch and never touches the audio session an audiobook is using.
 - Trends (`ReadingTrends` in `Library/ReadingStats.swift`, Linux-checked): weekly totals and the finish-date forecast, which

@@ -82,6 +82,7 @@ shot 09a-settings-linked 8 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settin
 shot 09h-inbox 12 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen inbox
 shot 09i-questlog-chat 12 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen qlchat -PTDebugChatTab questlog
 shot 09j-questlog-cipher 8 -PTDebugScreen qlvector
+shot 09k-settings-drive 10 -PTDebugSeed 1 -PTDebugScreen settings -PTDebugSettingsPush drive
 shot 09b-settings-bookmaster 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush bookmaster
 shot 09c-settings-notifications 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush notifications
 shot 09d-settings-chat 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush chat

@@ -94,6 +94,7 @@ struct PageturnerApp: App {
                     guard scenePhase != .background else { return }
                     await BookMaster.shared.flush()
                     await FolderWatcher.shared.scan(library: library)
+                    await DriveSync.shared.scanIfDue(library: library)
                     await BookMaster.shared.pullShelf(into: library)
                     await BookMaster.shared.pushCovers(from: library)
                     await Notifier.shared.refresh(notify: false)

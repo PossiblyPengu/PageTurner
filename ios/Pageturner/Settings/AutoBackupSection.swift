@@ -7,6 +7,7 @@ struct AutoBackupSection: View {
     @AppStorage("backup-auto") private var enabled = false
     @AppStorage("backup-auto-interval") private var intervalRaw = AutoBackupPlan.Interval.weekly.rawValue
     @AppStorage("backup-auto-keep") private var keep = 3
+    @AppStorage("backup-auto-dest") private var destination = "folder"
     @State private var showPicker = false
     @State private var libraryBytes: Int64?
     @State private var error: String?
@@ -16,7 +17,11 @@ struct AutoBackupSection: View {
         Section {
             Toggle("Back up automatically", isOn: $enabled)
             if enabled {
-                folderRow
+                Picker("Back up to", selection: $destination) {
+                    Text("A folder in Files").tag("folder")
+                    Text("Google Drive").tag("drive")
+                }
+                if destination == "drive" { driveRow } else { folderRow }
                 Picker("How often", selection: $intervalRaw) {
                     ForEach(AutoBackupPlan.Interval.allCases) { Text($0.label).tag($0.rawValue) }
                 }
@@ -50,8 +55,22 @@ struct AutoBackupSection: View {
             backup.scheduleBackground()
         }
         .onChange(of: enabled) { _, _ in backup.scheduleBackground() }
+        .onChange(of: destination) { _, _ in backup.scheduleBackground() }
         .onChange(of: intervalRaw) { _, _ in backup.scheduleBackground() }
         .task { libraryBytes = await AutoBackup.libraryBytes(library) }
+    }
+
+    @ViewBuilder
+    private var driveRow: some View {
+        if GoogleAuth.shared.signedIn {
+            LabeledContent("Google Drive", value: GoogleAuth.shared.account ?? "Signed in")
+            LabeledContent("Folder", value: GoogleDrive.backupFolderName)
+        } else {
+            NavigationLink(value: SettingsDestination.drive) {
+                Label("Sign in to Google Drive first", systemImage: "exclamationmark.circle")
+                    .foregroundStyle(.orange)
+            }
+        }
     }
 
     @ViewBuilder
@@ -72,7 +91,8 @@ struct AutoBackupSection: View {
             text += ", so each copy is about \(AutoBackup.sizeText(libraryBytes))"
         }
         text += ". Pageturner makes one when you open it and a backup is due, and overnight while charging when iOS allows — "
-            + "iOS decides when, so opening the app is the reliable one. A folder in iCloud Drive counts against your iCloud storage."
+            + "iOS decides when, so opening the app is the reliable one. A folder in iCloud Drive counts against your iCloud storage; "
+            + "a backup in Google Drive counts against its storage and is sent over Wi-Fi or cellular."
         return text
     }
 }

@@ -22,7 +22,8 @@ private final class BackupTimeGrant {
     }
 }
 
-/// Library backups made on a schedule, into a folder from Files (iCloud Drive, a drive…) the reader picked.
+/// Library backups made on a schedule, into a folder from Files (iCloud Drive, a drive…) the reader picked, or into
+/// the "Pageturner Backups" folder of their Google Drive (`DriveBackup`).
 ///
 /// The same zip "Export Library Backup" makes, named by day, with the oldest copies cleared away beyond the
 /// few kept. It is made when the app opens and a backup is due, and overnight while charging when iOS allows
@@ -46,6 +47,7 @@ final class AutoBackup {
     private let keepKey = "backup-auto-keep"
     private let bookmarkKey = "backup-auto-folder"
     private let lastKey = "backup-auto-last"
+    private let destinationKey = "backup-auto-dest"
     private let statusKey = "backup-auto-status"
     private var defaults: UserDefaults { .standard }
 
@@ -60,8 +62,10 @@ final class AutoBackup {
         let stored = defaults.integer(forKey: keepKey)
         return stored > 0 ? stored : 3
     }
+    /// Copies go to Google Drive rather than a folder in Files.
+    var usesDrive: Bool { defaults.string(forKey: destinationKey) == "drive" }
     /// Switched on, and somewhere to put the copies.
-    var isReady: Bool { enabled && folderName != nil }
+    var isReady: Bool { enabled && (usesDrive ? GoogleAuth.shared.signedIn : folderName != nil) }
 
     // MARK: Folder
 
@@ -107,7 +111,14 @@ final class AutoBackup {
     /// Back up now, into the chosen folder. True when a copy was made.
     @discardableResult
     func run(library: LibraryStore) async -> Bool {
-        guard !running, let folder = resolve() else { return false }
+        guard !running else { return false }
+        let toDrive = usesDrive
+        let folder = toDrive ? nil : resolve()
+        if !toDrive, folder == nil { return false }
+        if toDrive, !GoogleAuth.shared.signedIn {
+            report("Sign in to Google Drive (Settings → Google Drive) to back up there.")
+            return false
+        }
         running = true
         let grant = BackupTimeGrant()
         defer {
@@ -124,9 +135,13 @@ final class AutoBackup {
         do {
             let zip = try await BackupStore(library: library).exportBackup()
             defer { try? FileManager.default.removeItem(at: zip) }
-            try await Self.place(zip, in: folder, keep: keep)
+            if toDrive {
+                try await DriveBackup.place(zip, keep: keep)
+            } else if let folder {
+                try await Self.place(zip, in: folder, keep: keep)
+            }
             defaults.set(Date().timeIntervalSince1970, forKey: lastKey)
-            report("Backed up \(Date().formatted(date: .abbreviated, time: .shortened)).")
+            report("Backed up\(toDrive ? " to Google Drive" : "") \(Date().formatted(date: .abbreviated, time: .shortened)).")
             return true
         } catch {
             report("Backup failed: \(error.localizedDescription)")
@@ -194,7 +209,7 @@ final class AutoBackup {
         }
         let request = BGProcessingTaskRequest(identifier: Self.taskID)
         request.requiresExternalPower = true
-        request.requiresNetworkConnectivity = false
+        request.requiresNetworkConnectivity = usesDrive
         request.earliestBeginDate = AutoBackupPlan.nextRun(last: defaults.double(forKey: lastKey), now: Date(), interval: interval)
         try? scheduler.submit(request)
     }

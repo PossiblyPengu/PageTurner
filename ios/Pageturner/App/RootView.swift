@@ -118,6 +118,7 @@ struct RootView: View {
             .sheet(isPresented: $r.showSettings) { SettingsView() }
             .fullScreenCover(isPresented: $r.showChat) { BMChatScreen() }
             .sheet(isPresented: $r.showLink) { linkSheet }
+            .sheet(isPresented: $r.showDrive) { DriveBrowserView(purpose: .importBooks) }
             .fileImporter(
                 isPresented: $r.showImporter,
                 allowedContentTypes: LibraryView.pickerTypes,

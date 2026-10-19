@@ -126,6 +126,8 @@ struct BackupSettingsPage: View {
     @State private var shareItem: ShareItem?
     @State private var message: String?
     @State private var showBackupImporter = false
+    @State private var showDriveBackups = false
+    @State private var driveRestore: GoogleDrive.File?
     @State private var backupBusy = false
 
     var body: some View {
@@ -136,6 +138,15 @@ struct BackupSettingsPage: View {
         .navigationTitle("Backup")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $shareItem) { ShareSheet(items: [$0.url]) }
+        .sheet(isPresented: $showDriveBackups) { DriveBackupsView { driveRestore = $0 } }
+        .confirmationDialog(
+            "Restore from Google Drive?", isPresented: Binding(get: { driveRestore != nil }, set: { if !$0 { driveRestore = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Restore") { if let file = driveRestore { restoreFromDrive(file) } }
+        } message: {
+            Text("Books in “\(driveRestore?.name ?? "")” that are not already here are added. Nothing is removed.")
+        }
         .alert("Backup", isPresented: Binding(
             get: { message != nil },
             set: { if !$0 { message = nil } }
@@ -163,6 +174,12 @@ struct BackupSettingsPage: View {
                 Label("Restore Backup…", systemImage: "square.and.arrow.down")
             }
             .disabled(backupBusy)
+            if GoogleAuth.shared.signedIn {
+                Button { showDriveBackups = true } label: {
+                    Label("Restore from Google Drive…", systemImage: "icloud.and.arrow.down")
+                }
+                .disabled(backupBusy)
+            }
         }
         .fileImporter(isPresented: $showBackupImporter, allowedContentTypes: [.zip]) { result in
             switch result {
@@ -183,6 +200,26 @@ struct BackupSettingsPage: View {
             } catch {
                 message = error.localizedDescription
                 Log.error("backup", "export failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// A backup from the Drive: downloaded, then restored the way a file from Files is.
+    private func restoreFromDrive(_ file: GoogleDrive.File) {
+        message = nil
+        backupBusy = true
+        Task {
+            defer { backupBusy = false }
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("drive-restore-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            do {
+                let url = try await DriveClient.shared.download(file, into: directory)
+                let r = try await BackupStore(library: library).importBackup(url)
+                message = "Restored \(r.restored) book\(r.restored == 1 ? "" : "s")"
+                    + (r.skipped > 0 ? " · skipped \(r.skipped)" : "")
+            } catch {
+                message = (error as? DriveError)?.message ?? error.localizedDescription
+                Log.error("backup", "restore from Drive failed: \(error.localizedDescription)")
             }
         }
     }

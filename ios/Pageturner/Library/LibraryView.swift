@@ -289,6 +289,9 @@ struct LibraryView: View {
                 }
                 .ptButtonStyle(prominent: true)
             }
+            Button { router.showDrive = true } label: {
+                Text("Add from Google Drive")
+            }
             Button { showCatalogs = true } label: {
                 Text("Browse online catalogs")
             }
@@ -361,7 +364,10 @@ struct LibraryView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { router.showImporter = true } label: {
+                Menu {
+                    Button { router.showImporter = true } label: { Label("From Files…", systemImage: "folder") }
+                    Button { router.showDrive = true } label: { Label("From Google Drive…", systemImage: "externaldrive") }
+                } label: {
                     if library.importing { ProgressView() } else { Image(systemName: "plus") }
                 }
                 .accessibilityLabel("Add books")

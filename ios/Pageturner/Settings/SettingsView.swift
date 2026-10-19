@@ -7,7 +7,7 @@ enum SettingsDestination: String, Hashable {
     // reading and listening
     case reading, readaloud, playback, appearance
     // the library
-    case library, backup
+    case library, backup, drive
     // support
     case diagnostics
 }
@@ -74,6 +74,8 @@ struct SettingsView: View {
             Section("Your library") {
                 row(.library, "Library & import", "books.vertical.fill", .green,
                     detail: watcher.isWatching ? "Watching a folder" : nil)
+                row(.drive, "Google Drive", "icloud.and.arrow.down.fill", .blue,
+                    detail: driveDetail)
                 row(.backup, "Backup", "externaldrive.fill", .teal)
             }
             Section {
@@ -117,6 +119,12 @@ struct SettingsView: View {
         return user.displayName ?? user.username
     }
 
+    private var driveDetail: String? {
+        let auth = GoogleAuth.shared
+        if auth.signedIn { return DriveSync.shared.isWatching ? "Watching a folder" : "Signed in" }
+        return nil
+    }
+
     private var notificationsDetail: String {
         notifier.enabled ? "On" : "Off"
     }
@@ -143,6 +151,7 @@ struct SettingsView: View {
         case .appearance: SettingsPageForm("Appearance") { AppearanceSection() }
         case .library: LibrarySettingsPage()
         case .backup: BackupSettingsPage()
+        case .drive: GoogleDriveSettingsPage()
         case .diagnostics: DiagnosticsSettingsPage()
         }
     }

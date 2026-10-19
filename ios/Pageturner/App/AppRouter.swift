@@ -30,6 +30,8 @@ final class AppRouter {
     var editing: Book?
     var showSettings = false
     var showImporter = false
+    /// The Google Drive browser, for adding books from the Drive.
+    var showDrive = false
     /// BookMaster's sign-in sheet (the Together and Stats prompts open it directly).
     var showLink = false
     /// Books waiting on "Remove from Library?" — removing deletes their files.
@@ -62,6 +64,7 @@ final class AppRouter {
         showSettings = false
         showLink = false
         showImporter = false
+        showDrive = false
         showChat = false
         resumePrompt = nil
     }
@@ -76,7 +79,7 @@ final class AppRouter {
             if showChat { return }
             // whatever is up (the settings, say) is put away first; the chat follows once it is gone
             let covered = detail != nil || editing != nil || shelfTarget != nil || showSettings
-                || showLink || showImporter
+                || showLink || showImporter || showDrive
             dismissPresentations()
             if covered {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.showChat = true }

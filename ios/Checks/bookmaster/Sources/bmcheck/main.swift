@@ -138,6 +138,7 @@ func runData() async {
     runDeepLinkChecks()
     runInboxChecks()
     runQuestLogChecks()
+    runDriveChecks()
     runGoodreadsChecks()
     runPaceChecks()
     runQolChecks()
