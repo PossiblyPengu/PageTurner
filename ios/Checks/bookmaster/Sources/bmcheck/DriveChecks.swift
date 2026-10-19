@@ -126,7 +126,7 @@ func runDriveChecks() {
           GoogleDrive.explain(status: 401, body: nil).contains("Sign in again") && GoogleDrive.explain(status: 404, body: nil).contains("gone")
           && GoogleDrive.explain(status: 503, body: nil).contains("problem (503)"))
     check("a refused sign-in is explained by its code",
-          GoogleDrive.explainSignIn(errorCode: "invalid_grant").contains("Sign in again") && GoogleDrive.explainSignIn(errorCode: "invalid_client").contains("iOS one")
+          GoogleDrive.explainSignIn(errorCode: "invalid_grant").contains("Sign in again") && GoogleDrive.explainSignIn(errorCode: "invalid_client").contains("sign-in ID")
           && GoogleDrive.explainSignIn(errorCode: "access_denied").contains("Test users") && GoogleDrive.explainSignIn(errorCode: nil).contains("failed"))
     check("busy answers are asked again, with growing waits; refusals are not",
           GoogleDrive.shouldRetry(status: 429) && GoogleDrive.shouldRetry(status: 503) && !GoogleDrive.shouldRetry(status: 403) && !GoogleDrive.shouldRetry(status: 404)

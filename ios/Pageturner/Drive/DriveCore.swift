@@ -390,7 +390,7 @@ enum GoogleDrive {
         case "invalid_grant":
             return "Google no longer accepts the saved sign-in (it was revoked, or a project in Testing mode lets it last only a week). Sign in again."
         case "invalid_client", "unauthorized_client":
-            return "Google does not recognise this client ID. It must be an iOS one, made in the same project that has the Drive API on."
+            return "Google does not recognise Pageturner’s sign-in ID (it may have been deleted in Google Cloud, or this build is out of date)."
         case "access_denied":
             return "Google did not give access. If the app is in Testing mode, add your Google account under Test users."
         case "redirect_uri_mismatch", "invalid_request":

@@ -21,32 +21,18 @@ struct DriveError: LocalizedError {
 /// on a scheme made from the client ID. What comes back is kept as little as possible: the refresh token, in the
 /// Keychain (this device only), and an access token in memory for the hour it lasts.
 ///
-/// The client ID is the reader's own — an *iOS* OAuth client in their Google Cloud project, pasted in Settings →
-/// Google Drive — because Google issues tokens only to a registered client. A client ID is a public identifier,
-/// not a secret. (`builtInClientID` is where one could be compiled in, so a build can ship ready.)
+/// The client ID is Pageturner's own — the *iOS* OAuth client in its maker's Google Cloud project, built in
+/// (`GoogleDrive.defaultClientID`), because Google issues tokens only to a registered client. A client ID is a public
+/// identifier, not a secret, so a reader only ever sees "Sign in with Google".
 @Observable
 @MainActor
 final class GoogleAuth {
     static let shared = GoogleAuth()
 
-    /// The client ID built into the app. One the reader pastes in Settings (below) wins.
-    static let builtInClientID = GoogleDrive.defaultClientID
-    private static let clientKey = "drive-client-id"
     private static let accountKey = "drive-account"
 
-    /// The reader's iOS client ID, as pasted. Kept on this iPhone.
-    var clientID: String {
-        get {
-            access(keyPath: \.clientID)
-            let stored = UserDefaults.standard.string(forKey: Self.clientKey) ?? ""
-            return stored.isEmpty ? Self.builtInClientID : stored
-        }
-        set {
-            withMutation(keyPath: \.clientID) {
-                UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.clientKey)
-            }
-        }
-    }
+    /// The client ID this build signs in with.
+    var clientID: String { GoogleDrive.defaultClientID }
     /// Signed in: a refresh token is held.
     private(set) var signedIn: Bool
     /// "name@gmail.com", as Google says it, once known.
@@ -69,7 +55,7 @@ final class GoogleAuth {
         session = URLSession(configuration: config)
     }
 
-    /// A client ID that looks right, so a sign-in can be tried.
+    /// The built-in client ID is a usable one (it always is; a sign-in checks anyway).
     var isConfigured: Bool { GoogleDrive.isClientID(clientID) }
 
     // MARK: Signing in and out
@@ -77,7 +63,7 @@ final class GoogleAuth {
     func signIn() async {
         guard !busy else { return }
         guard isConfigured else {
-            error = "Paste your iOS client ID first (it ends in .apps.googleusercontent.com)."
+            error = "Pageturner’s Google sign-in ID is missing from this build."
             return
         }
         busy = true

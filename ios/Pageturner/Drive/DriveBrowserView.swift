@@ -85,7 +85,6 @@ struct DriveBrowserView: View {
     var onChoose: ((GoogleDrive.File) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(AppRouter.self) private var router
     @State private var model = DriveBrowserModel()
     private let auth = GoogleAuth.shared
 
@@ -103,16 +102,7 @@ struct DriveBrowserView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !auth.isConfigured {
-            DriveNotReady(
-                title: "Set up Google Drive first",
-                message: "Pageturner needs your own Google sign-in ID, made once in Google Cloud. Settings → Google Drive has the steps.",
-                button: "Open Settings"
-            ) {
-                dismiss()
-                router.showSettings = true
-            }
-        } else if !auth.signedIn {
+        if !auth.signedIn {
             SignInPrompt()
         } else {
             roots
@@ -162,32 +152,6 @@ private struct SignInPrompt: View {
             }
             .ptButtonStyle(prominent: true)
             .disabled(auth.busy)
-        }
-        .padding(28)
-        .frame(maxWidth: 420)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-/// A screen that says what is missing and has one button for it.
-private struct DriveNotReady: View {
-    let title: String
-    let message: String
-    let button: String
-    let action: () -> Void
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "gearshape.2")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text(title).font(.headline)
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button(button, action: action)
-                .ptButtonStyle(prominent: true)
         }
         .padding(28)
         .frame(maxWidth: 420)

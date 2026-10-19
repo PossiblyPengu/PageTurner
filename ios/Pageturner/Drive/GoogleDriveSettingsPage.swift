@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Settings → Google Drive: the sign-in, a folder to watch for new books, and the way into the browser. (Backing up to
-/// Drive is chosen under Backup, next to the other places a backup can go.)
+/// Drive is chosen under Backup, next to the other places a backup can go.) The client ID is built in: the reader just
+/// signs in.
 struct GoogleDriveSettingsPage: View {
     @EnvironmentObject private var library: LibraryStore
     @State private var showBrowser = false
@@ -19,7 +20,6 @@ struct GoogleDriveSettingsPage: View {
             } else {
                 signIn
             }
-            setup
         }
         .navigationTitle("Google Drive")
         .navigationBarTitleDisplayMode(.inline)
@@ -39,16 +39,8 @@ struct GoogleDriveSettingsPage: View {
 
     // MARK: Signed out
 
-    private var clientID: Binding<String> {
-        Binding(get: { auth.clientID }, set: { auth.clientID = $0 })
-    }
-
     private var signIn: some View {
         Section {
-            TextField("Client ID", text: clientID, axis: .vertical)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.footnote.monospaced())
             Button { Task { await auth.signIn() } } label: {
                 HStack {
                     Label("Sign In with Google", systemImage: "person.crop.circle.badge.checkmark")
@@ -62,13 +54,7 @@ struct GoogleDriveSettingsPage: View {
         } header: {
             Text("Sign-in")
         } footer: {
-            if auth.clientID.isEmpty {
-                Text("Google lets an app in only with a sign-in ID of its own, so you make one, once, for your own account — the steps are below. It is a public identifier, not a password.")
-            } else if !auth.isConfigured {
-                Text("That does not look like a client ID: it ends in .apps.googleusercontent.com.")
-            } else {
-                Text("Pageturner reads the files you pick, and writes only a “\(GoogleDrive.backupFolderName)” folder of its own.")
-            }
+            Text("Pageturner reads the files you pick, and writes only a “\(GoogleDrive.backupFolderName)” folder of its own. Nothing is sent anywhere but your own Drive.")
         }
     }
 
@@ -124,33 +110,6 @@ struct GoogleDriveSettingsPage: View {
             }
         } footer: {
             Text("Choose Google Drive under Backup → Back up to. Restoring a backup from Drive is there too.")
-        }
-    }
-
-    // MARK: Setup
-
-    private var setup: some View {
-        Section {
-            DisclosureGroup("How to get a client ID") {
-                VStack(alignment: .leading, spacing: 10) {
-                    step("1", "Open console.cloud.google.com and create a project (any name).")
-                    step("2", "APIs & Services → Library → search “Google Drive API” → Enable.")
-                    step("3", "APIs & Services → OAuth consent screen: choose External, give it a name and your email, and add your own Google account under Test users. To stop the sign-in expiring after a week, press Publish App — Google then calls the app unverified, which is fine for your own use.")
-                    step("4", "Credentials → Create Credentials → OAuth client ID → Application type iOS, with the bundle ID \(Bundle.main.bundleIdentifier ?? "io.github.possiblypengu.pageturner").")
-                    step("5", "Copy the Client ID it shows (it ends in .apps.googleusercontent.com), paste it above, and sign in.")
-                }
-                .font(.footnote)
-                .padding(.vertical, 4)
-            }
-        } footer: {
-            Text("If Google says “access blocked” or the Drive API “has not been used”, step 2 or the Test users list is the usual cause.")
-        }
-    }
-
-    private func step(_ number: String, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(number).fontWeight(.semibold).foregroundStyle(.secondary)
-            Text(text)
         }
     }
 }
