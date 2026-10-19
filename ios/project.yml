@@ -148,8 +148,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.possiblypengu.pageturner
-        MARKETING_VERSION: "2.13.0"
-        CURRENT_PROJECT_VERSION: "91"
+        MARKETING_VERSION: "2.14.0"
+        CURRENT_PROJECT_VERSION: "92"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_PREVIEWS: NO
