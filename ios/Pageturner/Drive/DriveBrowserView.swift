@@ -13,34 +13,93 @@ struct DriveLocation: Hashable {
     var asFolder: GoogleDrive.File { GoogleDrive.File(id: id, name: name, mimeType: GoogleDrive.folderMime) }
 }
 
-/// What the browser holds across its folders: the files ticked, and the progress of bringing them in.
+/// What the browser holds across its folders: the files and folders ticked (a ticked folder means every book in it
+/// and in the folders inside it), and the progress of bringing them in.
 @Observable
 @MainActor
 final class DriveBrowserModel {
     private(set) var selected: [String: GoogleDrive.File] = [:]
+    private(set) var selectedFolders: [String: DriveLocation] = [:]
     private(set) var working = false
     private(set) var progress = ""
     var error: String?
 
-    var count: Int { selected.count }
+    /// Everything ticked, files and folders.
+    var count: Int { selected.count + selectedFolders.count }
+
+    /// "2 folders and 3 books" — what the import button says.
+    var summary: String {
+        var parts: [String] = []
+        if !selectedFolders.isEmpty { parts.append("\(selectedFolders.count) folder\(selectedFolders.count == 1 ? "" : "s")") }
+        if !selected.isEmpty { parts.append("\(selected.count) book\(selected.count == 1 ? "" : "s")") }
+        return parts.joined(separator: " and ")
+    }
 
     func isSelected(_ file: GoogleDrive.File) -> Bool { selected[file.resolved.id] != nil }
+    func isSelected(folder: DriveLocation) -> Bool { selectedFolders[folder.id] != nil }
 
     func toggle(_ file: GoogleDrive.File) {
         let id = file.resolved.id
         if selected[id] != nil { selected[id] = nil } else { selected[id] = file.resolved }
     }
 
-    func select(_ files: [GoogleDrive.File]) {
-        for file in files where GoogleDrive.isImportable(file) { selected[file.resolved.id] = file.resolved }
+    func toggle(folder: DriveLocation) {
+        if selectedFolders[folder.id] != nil { selectedFolders[folder.id] = nil } else { selectedFolders[folder.id] = folder }
     }
 
-    func clear() { selected = [:] }
+    /// Every book and folder in a listing.
+    func select(_ files: [GoogleDrive.File]) {
+        for file in files {
+            if file.isFolder {
+                let target = file.resolved
+                selectedFolders[target.id] = DriveLocation(id: target.id, name: file.name)
+            } else if GoogleDrive.isImportable(file) {
+                selected[file.resolved.id] = file.resolved
+            }
+        }
+    }
 
-    /// Download what is ticked and import it. True when everything came.
+    func clear() {
+        selected = [:]
+        selectedFolders = [:]
+    }
+
+    /// Download what is ticked — the files, and every book under each ticked folder — and import it. True when
+    /// everything came.
     func importSelected(library: LibraryStore) async -> Bool {
-        let files = selected.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        return await bring(files.map { ($0, "") }, library: library)
+        var items: [String: DriveTransfer.Item] = [:]
+        let folders = selectedFolders.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if !folders.isEmpty {
+            working = true
+            error = nil
+            for folder in folders {
+                progress = "Looking through \(folder.name)…"
+                do {
+                    for found in try await DriveClient.shared.books(under: folder.id) {
+                        let path = found.folder.isEmpty ? folder.name : folder.name + "/" + found.folder
+                        items[found.file.id] = (found.file, path)
+                    }
+                } catch is CancellationError {
+                    working = false
+                    return false
+                } catch {
+                    working = false
+                    self.error = (error as? DriveError)?.message ?? error.localizedDescription
+                    return false
+                }
+            }
+            working = false
+        }
+        // a book ticked on its own that a ticked folder also holds is brought in once, with its folder
+        for file in selected.values where items[file.id] == nil { items[file.id] = (file, "") }
+        guard !items.isEmpty else {
+            error = "There are no books in what you ticked."
+            return false
+        }
+        let ordered = items.values.sorted {
+            ($0.folder + "/" + $0.file.name).localizedStandardCompare($1.folder + "/" + $1.file.name) == .orderedAscending
+        }
+        return await bring(ordered, library: library)
     }
 
     /// A folder and everything under it that is a book.
@@ -69,8 +128,12 @@ final class DriveBrowserModel {
         error = nil
         defer { working = false }
         let (came, failures) = await DriveTransfer.bring(items, into: library) { [weak self] text in self?.progress = text }
-        for file in came { selected[file.id] = nil }
-        if !failures.isEmpty { error = failures.joined(separator: "\n") }
+        if failures.isEmpty {
+            clear()
+        } else {
+            for file in came { selected[file.id] = nil }
+            error = failures.joined(separator: "\n")
+        }
         return failures.isEmpty && !came.isEmpty
     }
 }
@@ -220,9 +283,7 @@ struct DriveFolderView: View {
     @ViewBuilder
     private func row(_ file: GoogleDrive.File) -> some View {
         if file.isFolder {
-            NavigationLink(value: DriveLocation(id: file.resolved.id, name: file.name)) {
-                Label(file.name, systemImage: "folder")
-            }
+            folderRow(file)
         } else if GoogleDrive.isImportable(file) {
             Button { model.toggle(file) } label: {
                 HStack {
@@ -246,6 +307,29 @@ struct DriveFolderView: View {
         }
     }
 
+    /// A folder opens when its row is tapped; the circle ticks it — all the books in it and in the folders inside it.
+    @ViewBuilder
+    private func folderRow(_ file: GoogleDrive.File) -> some View {
+        let location = DriveLocation(id: file.resolved.id, name: file.name)
+        if purpose == .importBooks {
+            HStack(spacing: 10) {
+                Button { model.toggle(folder: location) } label: {
+                    Image(systemName: model.isSelected(folder: location) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(model.isSelected(folder: location) ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(model.isSelected(folder: location) ? "Folder ticked: \(file.name)" : "Tick folder \(file.name)")
+                NavigationLink(value: location) {
+                    Label(file.name, systemImage: "folder")
+                }
+            }
+        } else {
+            NavigationLink(value: location) {
+                Label(file.name, systemImage: "folder")
+            }
+        }
+    }
+
     // MARK: The bars
 
     @ToolbarContentBuilder
@@ -253,7 +337,7 @@ struct DriveFolderView: View {
         if purpose == .importBooks, !location.isSharedList {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button { model.select(items) } label: { Label("Select All Books Here", systemImage: "checkmark.circle") }
+                    Button { model.select(items) } label: { Label("Tick Everything Here", systemImage: "checkmark.circle") }
                     Button {
                         Task { if await model.importFolder(location, library: library) { onDone() } }
                     } label: {
@@ -292,7 +376,7 @@ struct DriveFolderView: View {
             Button {
                 Task { if await model.importSelected(library: library) { onDone() } }
             } label: {
-                Text("Import \(model.count) Book\(model.count == 1 ? "" : "s")").frame(maxWidth: .infinity)
+                Text("Import \(model.summary)").frame(maxWidth: .infinity)
             }
             .ptButtonStyle(prominent: true)
             .padding(14)

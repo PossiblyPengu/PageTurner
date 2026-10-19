@@ -299,7 +299,8 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   by id (`DriveClient.backupFolder`), never one found by name. `DriveClient`: 401 renews the token once, 429/5xx retry with backoff,
   downloads check the size, uploads are chunked resumable (8 MiB pieces, offset asked for after a failure, 308 not followed). `DriveSync`
   mirrors `FolderWatcher`: a folder id, each file's id+checksum remembered, a file touched in the last 30 s waits, at most every 10 minutes
-  on opening; downloads mirror the Drive folders in a temp folder so audiobook parts stay together, then `library.importFiles`.
+  on opening; downloads mirror the Drive folders in a temp folder so audiobook parts stay together, then `library.importFiles`. In the browser a folder can be **ticked** (a circle on its row, apart from opening it): everything under it, to
+  8 levels and 1000 books, is brought in with its folders kept (`DriveBrowserModel.importSelected`), alongside any files ticked.
   `AutoBackup` has a destination ("backup-auto-dest": folder | drive; Drive needs the network, so the background task asks for it);
   `DriveBackupsView` restores one. The library's + is a menu (Files / Google Drive).
 - Page-turn sound (`Reader/PageTurnSound.swift`, `Resources/Sounds/pageturn.wav`, synthesised noise): a *system* sound so it

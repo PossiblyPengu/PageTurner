@@ -93,7 +93,7 @@ final class DriveClient {
 
     /// Every book file under a folder, subfolders included (to a sensible depth and count), each with the folders
     /// between it and the one asked about ("Dune/CD 1"), so an audiobook's parts can be kept together.
-    func books(under folderID: String, depth: Int = 4, limit: Int = 600) async throws -> [(file: GoogleDrive.File, folder: String)] {
+    func books(under folderID: String, depth: Int = 8, limit: Int = 1000) async throws -> [(file: GoogleDrive.File, folder: String)] {
         var books: [(file: GoogleDrive.File, folder: String)] = []
         var queue: [(id: String, level: Int, path: String)] = [(folderID, 0, "")]
         var visited: Set<String> = [folderID]
