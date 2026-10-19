@@ -97,6 +97,14 @@ final class ReadAloud: NSObject, ObservableObject {
     /// can repaint without waiting for the next spoken thing.
     private var decorable: DecorableNavigator?
     private var lowPowerObserver: NSObjectProtocol?
+    /// A call or Siri taking the session makes iOS cancel the utterance — and Readium's
+    /// AVTTSEngine reports a cancel as finished, so without this the synthesizer walks
+    /// silently through sentences nobody hears, and three of those read as failures that
+    /// drop the chosen voice. The session's interruption notice is the real signal.
+    private var interruptionObserver: NSObjectProtocol?
+    /// When an interruption that paused mid-sentence narration began: `.ended` resumes
+    /// only a pause this made while speaking, and only if it wasn't an age ago.
+    private var interruptedWhilePlaying: Date?
     /// An engine failure reports `.paused` a moment before `didFailWithError` —
     /// the retry then plays on, so a "pause" shorter than a beat is never
     /// shown. A real pause outlives this and surfaces normally.
@@ -182,6 +190,39 @@ final class ReadAloud: NSObject, ObservableObject {
                     guard let self else { return }
                     self.neural.reportsWords = self.highlights.needsWords && !LowPower.on
                     self.paint(self.spoken, as: self.highlights, on: decorable)
+                }
+            }
+        }
+
+        // a call or an alarm takes the audio session: iOS cancels the utterance, which
+        // AVTTSEngine passes on as finished — hold a real pause instead, then resume
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw)
+            else { return }
+            let options = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt)
+                .map(AVAudioSession.InterruptionOptions.init(rawValue:)) ?? []
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                switch type {
+                case .began:
+                    guard self.isActive else { return }
+                    let wasPlaying = self.isPlaying
+                    self.pauseForOtherAudio()
+                    self.interruptedWhilePlaying = wasPlaying ? Date() : nil
+                    Log.event("readaloud", "interrupted" + (wasPlaying ? " while speaking" : ""))
+                case .ended:
+                    // a call, Siri or an alarm that is over: carry on, unless it has been so
+                    // long that the reader has surely moved on (or they paused meanwhile)
+                    defer { self.interruptedWhilePlaying = nil }
+                    guard self.isActive, options.contains(.shouldResume),
+                          let at = self.interruptedWhilePlaying,
+                          Date().timeIntervalSince(at) < 300 else { return }
+                    Log.event("readaloud", "interruption over — resuming")
+                    self.playPause()
+                @unknown default: break
                 }
             }
         }
@@ -296,6 +337,7 @@ final class ReadAloud: NSObject, ObservableObject {
 
     deinit {
         if let lowPowerObserver { NotificationCenter.default.removeObserver(lowPowerObserver) }
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
     }
 
     func stop() {
@@ -500,7 +542,10 @@ final class ReadAloud: NSObject, ObservableObject {
         if case .playing = synthesizer.state, let last = lastTickAt {
             playedSeconds += now.timeIntervalSince(last)
         }
-        lastTickAt = isPlaying ? now : nil
+        // key off the synthesizer, not isPlaying — a .paused delegate call arrives while
+        // isPlaying still reads true (the pauseFlash hasn't flipped it), which would
+        // count the whole pause as spoken time on the next sentence
+        if case .playing = synthesizer.state { lastTickAt = now } else { lastTickAt = nil }
         guard let prog = locator.locations.totalProgression else { return }
         if startProgression == nil { startProgression = prog }
         currentProgression = prog
