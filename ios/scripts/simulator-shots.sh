@@ -95,6 +95,7 @@ shot 14-reader-search 14 -PTDebugScreen reader -PTDebugKeepChrome 1 -PTDebugRead
 # no flag: the controls step aside on their own a few seconds after the book opens
 shot 80-page-flip 20 -PTDebugScreen reader -PTDebugTurn flip
 shot 81-page-curl 20 -PTDebugScreen reader -PTDebugTurn curl
+shot 82-page-curl-corner 20 -PTDebugScreen reader -PTDebugTurn curl -PTDebugCorner YES
 shot 15-reader-autohide 14 -PTDebugScreen reader
 shot 16-reader-jump 18 -PTDebugScreen reader -PTDebugKeepChrome 1 -PTDebugReaderSheet jump
 shot 17-reader-footnote 14 -PTDebugScreen reader -PTDebugKeepChrome 1 -PTDebugReaderSheet footnote

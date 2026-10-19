@@ -109,7 +109,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   page turns are `PageTurnStyle`: Readium's slide, a hinge `flip`, a `fade`, and `curl` — a finger-tracked
   peel. `PageCurl` is the pure geometry (fold line, cylinder roll, warped mesh — Linux-checked);
   `PageCurlOverlay` warps a photographed page with `SKWarpGeometryGrid` over the live navigator, which
-  is silently moved underneath so the reveal is real content. `SKWarpGeometryGrid` positions are
+  is silently moved underneath so the reveal is real content. The leaf is **two sprites** (`PageCurl.layers`): one warped
+  sheet folds back over itself, and the GPU draws overlapping cells in grid order, so the back and the front showed
+  through each other in stripes on a diagonal pull — split at the roll's crest each layer runs one way only, and the
+  back (washed with the page's colour) is drawn whole over the front. `SKWarpGeometryGrid` positions are
   **normalized (0…1), row-major from the bottom-left** — the page math is point space, rows top-first,
   so the overlay flips both. While a curl runs, `ReaderModel.curling` holds position saves, jump
   history and BookMaster sync; a commit replays the landed location, a cancel restores `curlBefore`.

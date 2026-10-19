@@ -70,25 +70,60 @@ enum PageCurl {
     ) -> [Point] {
         let src = source(columns: columns, rows: rows, width: width, height: height)
         guard let axis = axis(of: grab) else { return src }
-        let d = (grab.touch - grab.origin).length
-        let f = foldDepth(touchDistance: d)
-        let r = rollRadius
+        let f = foldDepth(touchDistance: (grab.touch - grab.origin).length)
 
         return src.map { p in
             let rel = p - grab.origin
             let u = rel.dot(axis.dir)    // depth toward the spine along the drag
             let v = rel.dot(axis.perp)   // across the page
-            var up = u
-            if u >= f {
-                up = u                      // flat: not reached by the fold yet
-            } else if u >= f - .pi * r {
-                let a = (u - (f - .pi * r)) / r        // 0…π around the cylinder
-                up = f - r * sin(a)                     // top-down: an arc projects to a chord
-            } else {
-                up = 2 * f - .pi * r - u                // face-down past the roll
-            }
-            return grab.origin + axis.dir * up + axis.perp * v
+            return grab.origin + axis.dir * unrolled(u, fold: f) + axis.perp * v
         }
+    }
+
+    /// Where a sheet point at depth `u` along the drag lands along it, for a crease at `f`.
+    private static func unrolled(_ u: Double, fold f: Double) -> Double {
+        let r = rollRadius
+        if u >= f { return u }                          // flat: not reached by the fold yet
+        if u >= f - .pi * r {
+            let a = (u - (f - .pi * r)) / r             // 0…π around the cylinder
+            return f - r * sin(a)                       // top-down: an arc projects to a chord
+        }
+        return 2 * f - .pi * r - u                      // face-down past the roll
+    }
+
+    /// The leaf as two layers, drawn one over the other. One warped sheet folds back over itself, and a
+    /// GPU draws overlapping cells in grid order — so the face-down half and the flat half it lies on were
+    /// interleaved row by row, the back showing through the front. Split at the roll's crest, each layer
+    /// runs one way only (no overlap inside it), and the back is simply drawn above the front.
+    /// `front`: the flat sheet and the near half of the roll — vertices past the crest rest on it.
+    /// `back`: the far half of the roll and the face-down sheet — vertices before the crest rest on it.
+    /// Both come in `source`'s order. `back` is nil while nothing has turned over yet.
+    struct Layers {
+        var front: [Point]
+        var back: [Point]?
+    }
+
+    static func layers(
+        columns: Int, rows: Int,
+        width: Double, height: Double,
+        grab: Grab
+    ) -> Layers {
+        let src = source(columns: columns, rows: rows, width: width, height: height)
+        guard let axis = axis(of: grab) else { return Layers(front: src, back: nil) }
+        let f = foldDepth(touchDistance: (grab.touch - grab.origin).length)
+        let crest = f - .pi * rollRadius / 2       // where the roll is edge-on, half way round
+        var front: [Point] = [], back: [Point] = []
+        front.reserveCapacity(src.count)
+        back.reserveCapacity(src.count)
+        var turned = false
+        for p in src {
+            let rel = p - grab.origin
+            let u = rel.dot(axis.dir), v = rel.dot(axis.perp)
+            if u < crest { turned = true }
+            front.append(grab.origin + axis.dir * unrolled(max(u, crest), fold: f) + axis.perp * v)
+            back.append(grab.origin + axis.dir * unrolled(min(u, crest), fold: f) + axis.perp * v)
+        }
+        return Layers(front: front, back: turned ? back : nil)
     }
 
     /// The crease where the sheet leaves the flat page — the two points where

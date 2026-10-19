@@ -614,4 +614,37 @@ func runCurlChecks() {
     check("a corner pull stays finite", PageCurl.positions(columns: cols, rows: rows, width: w, height: h, grab: corner)
         .allSatisfy { $0.x.isFinite && $0.y.isFinite })
     check("a corner pull has a crease", PageCurl.foldLine(width: w, height: h, grab: corner) != nil)
+
+    // the leaf's two layers: neither folds back over itself, so the back can be drawn whole over the front
+    let fineCols = 22, fineRows = 28
+    let fine = PageCurl.source(columns: fineCols, rows: fineRows, width: w, height: h)
+    let whole = PageCurl.positions(columns: fineCols, rows: fineRows, width: w, height: h, grab: corner)
+    let split = PageCurl.layers(columns: fineCols, rows: fineRows, width: w, height: h, grab: corner)
+    let cdir = (corner.touch - corner.origin).normalized
+    // each vertex's depth along the drag, and where along it each layer puts it
+    let depth = fine.map { ($0 - corner.origin).dot(cdir) }
+    let order = fine.indices.sorted { depth[$0] < depth[$1] }
+    let frontAlong = order.map { (split.front[$0] - corner.origin).dot(cdir) }
+    check("the front layer never doubles back", zip(frontAlong, frontAlong.dropFirst()).allSatisfy { $1 >= $0 - 1e-6 })
+    if let layer = split.back {
+        let backAlong = order.map { (layer[$0] - corner.origin).dot(cdir) }
+        check("the back layer never doubles back", zip(backAlong, backAlong.dropFirst()).allSatisfy { $1 <= $0 + 1e-6 })
+        // together they are the one warp: each vertex is where the whole sheet puts it, in whichever layer holds it
+        let crestDepth = PageCurl.foldDepth(touchDistance: (corner.touch - corner.origin).length) - .pi * PageCurl.rollRadius / 2
+        check("the layers are the whole warp", fine.indices.allSatisfy { i in
+            let mine = depth[i] >= crestDepth ? split.front[i] : layer[i]
+            return abs(mine.x - whole[i].x) < 1e-6 && abs(mine.y - whole[i].y) < 1e-6
+        })
+        // what a layer does not hold is gathered on the crest, where it draws nothing
+        let backGathered = fine.indices.filter { depth[$0] > crestDepth }.map { (layer[$0] - corner.origin).dot(cdir) }
+        check("the back holds still where the front is", (backGathered.max() ?? 0) - (backGathered.min() ?? 0) < 1e-6)
+    } else {
+        check("a corner pull has a back", false)
+    }
+    check("the whole warp does fold back over itself", {
+        let along = order.map { (whole[$0] - corner.origin).dot(cdir) }
+        return !zip(along, along.dropFirst()).allSatisfy { $1 >= $0 - 1e-6 }
+    }())
+    let rest = PageCurl.layers(columns: fineCols, rows: fineRows, width: w, height: h, grab: still)
+    check("nothing pulled is a flat front and no back", rest.front == fine && rest.back == nil)
 }

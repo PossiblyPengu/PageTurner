@@ -10,6 +10,9 @@ final class PageCurlOverlay: UIView {
     private let skView = SKView()
     private let scene = SKScene()
     private let page = SKSpriteNode()
+    /// The face-down half of the sheet, drawn over the front: the same photograph, mirrored by the warp and
+    /// washed with the paper's colour, so what shows through is a faint ghost of the print, not the print.
+    private let backPage = SKSpriteNode()
     /// The soft shadow the lifted sheet throws on the page it uncovers.
     private let foldShadow = SKSpriteNode()
 
@@ -36,6 +39,12 @@ final class PageCurlOverlay: UIView {
         page.position = .zero
         page.zPosition = 2
         scene.addChild(page)
+        backPage.anchorPoint = .zero
+        backPage.position = .zero
+        backPage.zPosition = 3
+        backPage.colorBlendFactor = 0.88
+        backPage.isHidden = true
+        scene.addChild(backPage)
     }
 
     @available(*, unavailable)
@@ -45,6 +54,7 @@ final class PageCurlOverlay: UIView {
         super.layoutSubviews()
         scene.size = bounds.size
         page.size = bounds.size
+        backPage.size = bounds.size
     }
 
     /// Removed mid-animation: stop driving it — nothing is left to land.
@@ -59,8 +69,12 @@ final class PageCurlOverlay: UIView {
 
     /// The photographed page stands in for the leaf until it peels away.
     func begin(_ image: UIImage) {
-        page.texture = SKTexture(image: image)
+        let texture = SKTexture(image: image)
+        page.texture = texture
         page.size = bounds.size
+        backPage.texture = texture
+        backPage.color = Self.paper(of: image)
+        backPage.size = bounds.size
         scene.size = bounds.size
         update(origin: CGPoint(x: bounds.width, y: bounds.midY), touch: CGPoint(x: bounds.width, y: bounds.midY))
     }
@@ -75,25 +89,15 @@ final class PageCurlOverlay: UIView {
             touch: .init(x: Double(touch.x), y: Double(touch.y)))
 
         let src = PageCurl.source(columns: Self.columns, rows: Self.rows, width: w, height: h)
-        let dest = PageCurl.positions(
+        let layers = PageCurl.layers(
             columns: Self.columns, rows: Self.rows, width: w, height: h, grab: grab)
-        // SpriteKit wants normalized (0…1) positions, rows bottom-first and
-        // y-up; the page math is point space, rows top-first and y-down —
-        // walk the rows backwards to reorder, and flip y while normalizing.
-        var srcSK: [vector_float2] = []
-        var dstSK: [vector_float2] = []
-        srcSK.reserveCapacity(src.count)
-        dstSK.reserveCapacity(dest.count)
-        for row in stride(from: Self.rows, through: 0, by: -1) {
-            for col in 0 ... Self.columns {
-                let i = row * (Self.columns + 1) + col
-                srcSK.append(vector_float2(Float(src[i].x / w), Float(1 - src[i].y / h)))
-                dstSK.append(vector_float2(Float(dest[i].x / w), Float(1 - dest[i].y / h)))
-            }
+        page.warpGeometry = Self.warp(from: src, to: layers.front, width: w, height: h)
+        if let back = layers.back {
+            backPage.warpGeometry = Self.warp(from: src, to: back, width: w, height: h)
+            backPage.isHidden = false
+        } else {
+            backPage.isHidden = true
         }
-        page.warpGeometry = SKWarpGeometryGrid(
-            columns: Self.columns, rows: Self.rows,
-            sourcePositions: srcSK, destinationPositions: dstSK)
 
         // the shadow lives in scene points — y-up
         if let fold = PageCurl.foldLine(width: w, height: h, grab: grab) {
@@ -107,6 +111,49 @@ final class PageCurlOverlay: UIView {
         } else {
             foldShadow.alpha = 0
         }
+    }
+
+    /// SpriteKit wants normalized (0…1) positions, rows bottom-first and y-up; the page math is point
+    /// space, rows top-first and y-down — walk the rows backwards to reorder, and flip y while normalizing.
+    private static func warp(
+        from src: [PageCurl.Point], to dest: [PageCurl.Point], width w: Double, height h: Double
+    ) -> SKWarpGeometryGrid {
+        var srcSK: [vector_float2] = []
+        var dstSK: [vector_float2] = []
+        srcSK.reserveCapacity(src.count)
+        dstSK.reserveCapacity(dest.count)
+        for row in stride(from: rows, through: 0, by: -1) {
+            for col in 0 ... columns {
+                let i = row * (columns + 1) + col
+                srcSK.append(vector_float2(Float(src[i].x / w), Float(1 - src[i].y / h)))
+                dstSK.append(vector_float2(Float(dest[i].x / w), Float(1 - dest[i].y / h)))
+            }
+        }
+        return SKWarpGeometryGrid(
+            columns: columns, rows: rows, sourcePositions: srcSK, destinationPositions: dstSK)
+    }
+
+    /// The sheet's own colour: the average of its top-left corner, where a page has margin and no print.
+    /// What the back of the leaf is washed with.
+    private static func paper(of image: UIImage) -> UIColor {
+        guard let cg = image.cgImage else { return .white }
+        let side = min(8, cg.width, cg.height)
+        guard side > 0, let corner = cg.cropping(to: CGRect(x: 0, y: 0, width: side, height: side))
+        else { return .white }
+        var pixel: [UInt8] = [255, 255, 255, 255]
+        let drawn = pixel.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(
+                data: raw.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.interpolationQuality = .medium
+            context.draw(corner, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return true
+        }
+        guard drawn else { return .white }
+        return UIColor(red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
+                       blue: CGFloat(pixel[2]) / 255, alpha: 1)
     }
 
     /// Release the leaf: it settles onto the far stack (commit — the navigator
@@ -144,8 +191,18 @@ final class PageCurlOverlay: UIView {
     }
 
     /// Hold the leaf part-turned for a simulator photograph (`-PTDebugTurn curl`).
+    /// `-PTDebugCorner YES` holds the pull from the bottom corner instead, a diagonal drag toward the top
+    /// (the case where the back of the leaf once showed the front through it).
     func pose(frozenAt progress: Double, towardLeft: Bool) {
         let w = Double(bounds.width), h = Double(bounds.height)
+        if UserDefaults.standard.bool(forKey: "PTDebugCorner") {
+            let origin = PageCurl.Point(x: towardLeft ? w - 2 : 2, y: h - 2)
+            let d = progress * (w + h * 0.3)
+            update(
+                origin: CGPoint(x: origin.x, y: origin.y),
+                touch: CGPoint(x: towardLeft ? origin.x - d * 0.9 : origin.x + d * 0.9, y: origin.y - d * 0.85))
+            return
+        }
         let origin = PageCurl.Point(x: towardLeft ? w - 2 : 2, y: h * 0.58)
         let grab = PageCurl.Grab(origin: origin, touch: origin)
         let travel = PageCurl.travel(width: w, height: h, grab: grab)
