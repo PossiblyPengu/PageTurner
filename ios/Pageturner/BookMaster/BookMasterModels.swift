@@ -362,6 +362,8 @@ struct BMChatRoom: Decodable {
     var unread: Int
     /// Whether `messages` begins at the first message there is.
     var complete: Bool
+    /// Which part of Quest Log ("giver" or "adventurer") BookMaster knows this reader plays, for its private room.
+    var questLogRole: String?
 }
 
 struct BMChatSent: Decodable {

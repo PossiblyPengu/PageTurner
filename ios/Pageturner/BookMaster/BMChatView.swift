@@ -6,9 +6,9 @@ import SwiftUI
 ///
 /// While the screen is open it asks for what is new every few seconds, and
 /// tells the server how far you have read, so the other reader's "Seen" lights
-/// and the unread dot goes out of every app. (Quest Log's private, encrypted
-/// chat is not here — it is reached from BookMaster's Chat page with its own
-/// passphrase.)
+/// and the unread dot goes out of every app. Quest Log's private, encrypted
+/// chat is the other tab (`BMQuestLogRoomView`): the same kind of screen, behind
+/// its own passphrase, opened and sealed on this iPhone.
 struct BMChatView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Kept as state: a long-running task would otherwise read the phase it started in.
@@ -16,8 +16,8 @@ struct BMChatView: View {
     /// Whether this screen is the one in front. Reading is only reported from here: a chat that is pushed
     /// but covered (another tab, a sheet) has not been looked at.
     @State private var visible = false
-    /// Which room is showing: the shared one (native, below), or Quest Log's own (the web's, in a page).
-    @State private var tab: BMChatTab = .us
+    /// Which room is showing: the shared one (below), or Quest Log's own.
+    @State private var tab: BMChatTab = BMChatView.firstTab
     /// Where the reader was before the chat opened — put back when it closes (the Together tab, or any other
     /// screen, when it came as the floating button's full page).
     @State private var cameFrom = "bookmaster"
@@ -48,6 +48,14 @@ struct BMChatView: View {
 
     private let pollSeconds: UInt64 = 5
 
+    /// Always the shared room — except in the simulator run, which photographs the other one.
+    private static var firstTab: BMChatTab {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "PTDebugChatTab") == "questlog" { return .questLog }
+        #endif
+        return .us
+    }
+
     var body: some View {
         // grouped, so no one expression is a long chain the compiler has to solve at once
         lifecycle(content)
@@ -72,7 +80,7 @@ struct BMChatView: View {
                         composer
                     }
                 case .questLog:
-                    BMQuestLogRoomView()
+                    BMQuestLogRoomView(room: room)
                 }
             } else {
                 ScrollView { BMLinkPrompt().padding(16) }

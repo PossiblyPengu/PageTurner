@@ -157,11 +157,21 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   feed's `bookmaster:chat:<id>` notice (`BMChat.unreadNotice`), gone once the room is opened. It polls every 5s while on screen and reports
   how far you have read. Rules learned in review: a poll that began before a send or take-back finished carries the room as it was and is
   dropped (`edits`); one refresh at a time; reading is reported only while the screen is in front (`visible`); the length limit counts UTF-16
-  units like the server; a full page that reaches back to nothing held replaces it instead of leaving a hole. Quest Log's own private chat is end-to-end encrypted, so
-  its cryptography stays in one place — the web's. It is the chat screen's second tab ("🔒 Quest Log", `BMChatTab`): BookMaster's
-  `/embed/chat?room=secret&only=1` (`BMChat.questLogRoom`) in a kept-alive `BMWebPage` (`BMQuestLogRoomView`), so Pageturner never holds
-  the key or sees a word, the passphrase stays given until the app closes, and the sign-in is the in-app browser's. If the page is sent to
-  sign in, a strip offers the way back. Its blue-square dot (`Notifier.questLogUnread`) clears when the room is opened.
+  units like the server; a full page that reaches back to nothing held replaces it instead of leaving a hole. Quest Log's own private chat is end-to-end encrypted, and is the chat screen's second tab
+  ("🔒 Quest Log", `BMChatTab`) — a native screen like the shared room's (`BMQuestLogRoomView`), not a framed web page. The cipher is the one in
+  Quest Log's chat.js and BookMaster's secretChat.ts, line for line: PBKDF2-SHA256 (100,000 rounds, salt `quest-log-chat-salt-v1`) → AES-GCM-256,
+  a fresh 12-byte IV, ciphertext+tag in base64 (`BMQuestLogCrypto`, CryptoKit + CommonCrypto), so a message written in any of the three
+  opens in the others — never change it in one place only. `BMQuestLog` is the pure part (Linux-checked): the stored entry, opening and
+  unwrapping (`{"text":…}`), ids Quest Log accepts, the layout (it reuses `BMChat.rows`). `BMQuestLogChat` is the connection: it talks to
+  `/quest-log/api/chat` on BookMaster's address with the passphrase as the bearer token (what Quest Log itself does), opens and seals on this
+  iPhone, polls every 5 s while the room is in front, and keeps what it sent in view until the list shows it. **Pageturner now holds the
+  passphrase** — in memory, and in the Keychain (this device only, when unlocked) unless "Keep it unlocked on this iPhone" is turned off on
+  the lock screen; locking the room, unlinking BookMaster (`RootView` → `reset()`) or signing out of the web apps erases it. Nothing it opens
+  goes to BookMaster, the inbox, a notification or the log (Quest Log's notices only ever say that something is new). The part (giver or
+  adventurer) is BookMaster's `questLogRole` on the chat answer, else the reader's choice, kept per account. A wrong passphrase is a 401 (and a
+  remembered one that stops working locks the room with a note); a 403 is "that role belongs to another device". The cipher is verified by the
+  simulator run (`-PTDebugScreen qlvector` opens two messages made by Node with the web's recipe; the app dying fails the run), and the room
+  is photographed (`09i-questlog-chat`). Its blue-square dot (`Notifier.questLogUnread`) clears when the room is opened.
   The chat is also one tap from anywhere but the reader: `BMChatButtonLayer` (`BMChatButtonView.swift`) is a draggable round button laid
   over the whole shell in `RootView`, opening the chat as a full-screen page (`router.showChat`, `.fullScreenCover`) — a sheet read as a pop-up. When it shows and where it rests are pure
   (`BMChatButton`, Linux-checked); it steps aside over the reader (`router.readerOpen`) and over any screen marked `.hidesChatButton()`

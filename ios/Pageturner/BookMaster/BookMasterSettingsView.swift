@@ -227,7 +227,7 @@ struct ChatAppsSettingsPage: View {
                         Button("Sign Out", role: .destructive) { Task { await BMWebPages.shared.clearSignIns() } }
                         Button("Cancel", role: .cancel) {}
                     } message: {
-                        Text("BookMaster, Kindred and Quest Log opened inside Pageturner forget who you are, and anything they saved here. Your accounts and everything in them are untouched.")
+                        Text("BookMaster, Kindred and Quest Log opened inside Pageturner forget who you are, and anything they saved here — and Quest Log’s private chat locks again. Your accounts and everything in them are untouched.")
                     }
             } header: {
                 Text("Web apps")

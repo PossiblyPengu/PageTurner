@@ -167,6 +167,16 @@ enum DebugScenario {
         case "stats", "bmprogress", "bmwrapped": selectTab(.stats)
         case "together", "bmtogether": selectTab(.together)
         case "inbox": selectTab(.together); router.showInbox = true
+        // Quest Log's private room, opened with a few messages (launch with -PTDebugChatTab questlog)
+        case "qlchat":
+            BMQuestLogChat.shared.debugFixture()
+            selectTab(.together)
+            router.showChat = true
+        // the cipher against messages made by the web's recipe: the app dying here fails the run
+        case "qlvector":
+            if let wrong = BMQuestLogCrypto.selfTest() { fatalError("Quest Log's cipher disagrees with the web's: \(wrong)") }
+            Log.event("qlvector", "the cipher opens what the web's recipe made")
+            selectTab(.together)
         // the Books tab hosts the shelf and pushes the rest itself
         case "shelf", "bmbook", "bmquotes", "bmdiscover", "bmsearch", "bmseries":
             selectTab(.books)

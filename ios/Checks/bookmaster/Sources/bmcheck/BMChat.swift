@@ -1,6 +1,6 @@
 import Foundation
 
-/// The two rooms the chat screen holds: the shared one, and Quest Log's own.
+/// The two rooms the chat screen holds: the shared one, and Quest Log's own (`BMQuestLog`).
 enum BMChatTab: String, CaseIterable, Identifiable {
     case us, questLog
 
@@ -53,17 +53,6 @@ enum BMChat {
 
     /// How many messages one request returns.
     static let pageSize = 60
-
-    /// Quest Log's own room, which is end-to-end encrypted: its passphrase and its cryptography are BookMaster's
-    /// web chat (the recipe Quest Log itself uses), shown here with nothing around it. Pageturner holds no key
-    /// and never sees the words — it only frames the page.
-    static let questLogRoom = URL(string: "https://\(BMLinkURL.bookMasterHost)/embed/chat?room=secret&only=1")!
-
-    /// Whether this address is the room's page — it is not once the reader has been sent to sign in.
-    static func isQuestLogRoom(_ url: URL?) -> Bool {
-        guard let url, url.host?.lowercased() == BMLinkURL.bookMasterHost else { return false }
-        return url.path == questLogRoom.path
-    }
 
     /// The notices that are Quest Log's.
     static func questLogNotices(_ notices: [BMNotice]) -> [BMNotice] {
