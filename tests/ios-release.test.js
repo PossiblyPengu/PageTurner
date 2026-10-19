@@ -32,7 +32,11 @@ const run = (extra = {}) => spawnSync("bash", [resolve("ios/scripts/publish-rele
 });
 const calls = () => readFileSync(join(dir, "commands"), "utf8").trim().split("\n").map(JSON.parse);
 
-describe("safe iOS publication", () => {
+// The script hands the AltStore source to Python, as the macOS runner has it. Where the shell has no
+// working python3 (Windows' Store alias answers but runs nothing), there is nothing here to check.
+const hasPython = spawnSync("bash", ["-c", "python3 --version"], { encoding: "utf8" }).status === 0;
+
+describe.skipIf(!hasPython)("safe iOS publication", () => {
   it("publishes a complete build before replacing the rolling aliases", () => {
     const result = run();
     expect(result.status, result.stderr).toBe(0);
