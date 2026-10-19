@@ -291,7 +291,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 - **Google Drive** (`Drive/`): browse and import books, watch a Drive folder, and back up to Drive. `DriveCore` is the pure part
   (Linux-checked: Drive v3 decoding, queries, sign-in URLs, sync plan, backup pruning, error wording); `GoogleAuth` is OAuth for an
   installed app — `ASWebAuthenticationSession` + PKCE with an **iOS-type client ID the reader makes in their own Google Cloud project and
-  pastes in Settings → Google Drive** (no client secret exists; the ID is public; `GoogleAuth.builtInClientID` can ship one), redirect
+  pastes in Settings → Google Drive** (no client secret exists; the ID is public; the build ships Pageturner's own — `GoogleDrive.defaultClientID` — and a pasted one wins), redirect
   scheme = the client ID reversed (`com.googleusercontent.apps.…:/oauth2redirect`, no Info.plist entry needed), the refresh token in the
   Keychain (this device only). Scopes: `drive.readonly` (browse/download what is picked; a restricted scope, so the app is "unverified"
   and a project in *Testing* mode expires the sign-in after a week — Publish it) and `drive.file` (write only what the app made). The

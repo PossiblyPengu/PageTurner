@@ -29,8 +29,8 @@ struct DriveError: LocalizedError {
 final class GoogleAuth {
     static let shared = GoogleAuth()
 
-    /// A client ID built into the app; blank until one is. The reader's own (below) wins.
-    static let builtInClientID = ""
+    /// The client ID built into the app. One the reader pastes in Settings (below) wins.
+    static let builtInClientID = GoogleDrive.defaultClientID
     private static let clientKey = "drive-client-id"
     private static let accountKey = "drive-account"
 

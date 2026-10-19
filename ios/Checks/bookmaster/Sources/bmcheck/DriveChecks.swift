@@ -84,6 +84,10 @@ func runDriveChecks() {
           && authItem("code_challenge_method") == "S256" && authItem("state") == "ST" && authItem("access_type") == "offline"
           && authItem("client_id") == clientID && authItem("redirect_uri") == "com.googleusercontent.apps.123456-abcdef:/oauth2redirect"
           && authItem("scope") == "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file")
+    check("the client ID this build ships with is a usable iOS one, and signs back in on its own scheme",
+          GoogleDrive.isClientID(GoogleDrive.defaultClientID)
+          && GoogleDrive.redirectURI(clientID: GoogleDrive.defaultClientID) == "com.googleusercontent.apps.79088580141-hddbc474ivueq19gutoq1f426u85j4qf:/oauth2redirect"
+          && GoogleDrive.authURL(clientID: GoogleDrive.defaultClientID, challenge: "c", state: "s") != nil)
     check("no sign-in page without a usable client ID", GoogleDrive.authURL(clientID: "nope", challenge: "c", state: "s") == nil)
     let back = URL(string: "com.googleusercontent.apps.123456-abcdef:/oauth2redirect?state=ST&code=4%2F0AbC&scope=x")!
     check("the code comes back with the state it was asked with", GoogleDrive.code(fromCallback: back, expectedState: "ST") == .success("4/0AbC"))

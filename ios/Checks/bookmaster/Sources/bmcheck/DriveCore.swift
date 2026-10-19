@@ -24,6 +24,9 @@ enum GoogleDrive {
     static let backupFolderName = "Pageturner Backups"
     /// The part of a client ID the sign-in redirect is made from.
     static let clientIDSuffix = ".apps.googleusercontent.com"
+    /// The iOS OAuth client this build signs in with: Pageturner's, in its maker's Google Cloud project. A client ID is a
+    /// public identifier, not a secret. Settings → Google Drive can still be given another one (a reader's own project).
+    static let defaultClientID = "79088580141-hddbc474ivueq19gutoq1f426u85j4qf.apps.googleusercontent.com"
 
     // MARK: Files
 
