@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pageturner — Privacy Policy</title>
+<meta name="description" content="What Pageturner keeps, what it sends, and how Google Drive is used.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { color-scheme: light dark; --bg: #fbf7f2; --fg: #231f1b; --muted: #6b6259; --accent: #a85f2c; --rule: #e7ddd2; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111110; --fg: #ece6df; --muted: #a39a90; --accent: #cd844f; --rule: #2a2724; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 42rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.15rem; margin: 2.2rem 0 .4rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); }
+  p, li { margin: .5rem 0; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: .08em .35em; border-radius: .3em; font-size: .92em; }
+</style>
+</head>
+<body>
+<main>
+  <p><a href="about.html">← Pageturner</a></p>
+  <h1>Privacy Policy</h1>
+  <p class="muted">Last updated 19 October 2026</p>
+
+  <p>Pageturner is an ebook, comic and audiobook reader for iPhone and the web, made by one person for their own use and shared as open source. This page says what it keeps, what it sends, and what it does with Google Drive if you choose to connect it.</p>
+
+  <h2>What stays on your device</h2>
+  <p>Your books and audiobooks, covers, reading positions, bookmarks, highlights and notes, reading statistics, and settings are stored on your device (in the app on iPhone, in your browser for the web version). Pageturner has no account system and no server of its own that holds your library. Deleting the app, or clearing the site's data in your browser, deletes it.</p>
+
+  <h2>Things that leave your device, only if you use them</h2>
+  <ul>
+    <li><strong>BookMaster.</strong> If you link Pageturner to a BookMaster account, your reading progress, reading sessions, ratings, quotes, shelf changes and chat messages are sent to that BookMaster service, which is run by the same developer. You choose to link it and can unlink it in Settings.</li>
+    <li><strong>Book information.</strong> Looking up a book's details sends its title, author or ISBN to BookMaster, Google Books or Open Library.</li>
+    <li><strong>Voices.</strong> Choosing a neural read-aloud voice downloads that voice's model files from Hugging Face.</li>
+    <li><strong>Catalogues.</strong> Browsing an online catalogue you add (OPDS) talks to that catalogue's server, with the username and password you give it, which are kept in the iPhone Keychain.</li>
+    <li><strong>Google Drive.</strong> See below.</li>
+  </ul>
+
+  <h2>Google Drive</h2>
+  <p>Google Drive is optional. If you sign in to Google in Pageturner on iPhone, it asks for two permissions:</p>
+  <ul>
+    <li><code>drive.readonly</code> — to show your Drive's folders and files, and to download the book files you pick (or the files in a folder you choose to watch for new books).</li>
+    <li><code>drive.file</code> — to create one folder named “Pageturner Backups” in your Drive and to store, and later delete, only the backup files that Pageturner itself put there. It does not let Pageturner change anything else in your Drive.</li>
+  </ul>
+  <p>What Pageturner does with it:</p>
+  <ul>
+    <li>Files you pick are downloaded to your phone and added to your library. Nothing is uploaded anywhere but to your own Drive.</li>
+    <li>Backups are a zip of your library, sent to your own Drive and nowhere else.</li>
+    <li>The sign-in token that keeps you signed in is stored in the iPhone Keychain, on that device only. Pageturner has no server that receives your Google data, and the developer cannot see it.</li>
+  </ul>
+  <p>Pageturner's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements. Pageturner does not use Google user data for advertising, does not sell it, and does not let people read it.</p>
+  <p>To stop: choose Sign Out in Pageturner → Settings → Google Drive, and you can also remove Pageturner at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>. Your backup folder stays in your Drive until you delete it.</p>
+
+  <h2>What Pageturner does not do</h2>
+  <p>It has no advertising, no analytics and no tracking, and it does not sell or share your data.</p>
+
+  <h2>Children</h2>
+  <p>Pageturner is not directed at children and does not knowingly collect their information.</p>
+
+  <h2>Changes and contact</h2>
+  <p>If this policy changes, the date above changes with it. Questions or requests: open an issue at <a href="https://github.com/PossiblyPengu/PageTurner/issues">github.com/PossiblyPengu/PageTurner</a>.</p>
+</main>
+</body>
+</html>
