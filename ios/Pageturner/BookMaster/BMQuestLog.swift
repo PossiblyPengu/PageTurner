@@ -5,15 +5,19 @@ import Foundation
 /// `BMQuestLogCrypto` is the cipher and `BMQuestLogChat` the connection.
 ///
 /// Quest Log keeps this conversation encrypted end to end — its server holds ciphertext, never the key —
-/// and Pageturner keeps to that: the words are opened on this iPhone, and the passphrase goes where it
-/// always went, to Quest Log as the bearer token (through BookMaster's same-address forward), and nowhere else.
-/// The recipe is the one in Quest Log's chat.js and BookMaster's secretChat.ts, so a message written in any
-/// of the three opens in the others.
+/// and Pageturner keeps to that: the words are opened on this iPhone. The passphrase makes two keys, each by
+/// PBKDF2 with a salt of its own: the chat's encryption key, which stays here, and the sign-in token, which
+/// is all Quest Log (and BookMaster's same-address forward) is ever shown, as the bearer. Nothing that opens
+/// a message can be made from the token, and the passphrase itself is neither sent nor kept.
+/// The recipe is the one in Quest Log's chat.js and utils.js and BookMaster's secretChat.ts, so a message
+/// written in any of the three opens in the others, and a token from any of them is accepted.
 enum BMQuestLog {
     /// Where Quest Log's chat endpoint is served, on BookMaster's address (the forward to Quest Log's own deployment).
     static let path = "/quest-log/api/chat"
-    /// The key a passphrase makes: PBKDF2 (SHA-256) over it with this salt, AES-GCM-256 with it.
+    /// The chat key a passphrase makes: PBKDF2 (SHA-256) over it with this salt, AES-GCM-256 with it.
     static let salt = "quest-log-chat-salt-v1"
+    /// The sign-in token it makes, in hex — what the server's APP_AUTH_TOKEN holds: the same PBKDF2 with a salt of its own.
+    static let authSalt = "quest-log-auth-v1"
     static let iterations = 100_000
     static let keyBytes = 32
     static let ivBytes = 12
@@ -170,6 +174,8 @@ enum BMQuestLog {
         case wrongPassphrase
         /// 403: that role belongs to another device.
         case roleTaken
+        /// 429: too many wrong passphrases from here lately (10 in 15 minutes); try again later.
+        case tooManyGuesses
         /// Anything else Quest Log answered.
         case server(Int)
         /// No answer at all.
@@ -180,6 +186,7 @@ enum BMQuestLog {
         switch failure {
         case .wrongPassphrase: return "That is not the Quest Log passphrase."
         case .roleTaken: return "Quest Log says that role belongs to another device."
+        case .tooManyGuesses: return "Too many wrong passphrases. Try again in a little while."
         case let .server(code): return "Quest Log did not answer (\(code))."
         case .unreachable: return sending ? "That did not send. Try again." : "Could not reach Quest Log. Nothing is lost; try again in a moment."
         }
@@ -191,6 +198,7 @@ enum BMQuestLog {
         case 200 ..< 300: return nil
         case 401: return .wrongPassphrase
         case 403: return .roleTaken
+        case 429: return .tooManyGuesses
         default: return .server(status)
         }
     }

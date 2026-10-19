@@ -9,7 +9,8 @@ func runQuestLogChecks() {
 
     // ---- the recipe is the web's (Quest Log's chat.js, BookMaster's secretChat.ts)
     check("the key is made as Quest Log makes it",
-          BMQuestLog.salt == "quest-log-chat-salt-v1" && BMQuestLog.iterations == 100_000
+          BMQuestLog.salt == "quest-log-chat-salt-v1" && BMQuestLog.authSalt == "quest-log-auth-v1"
+          && BMQuestLog.salt != BMQuestLog.authSalt && BMQuestLog.iterations == 100_000
           && BMQuestLog.keyBytes == 32 && BMQuestLog.ivBytes == 12 && BMQuestLog.tagBytes == 16)
     check("the endpoint is Quest Log's, forwarded on BookMaster's address", BMQuestLog.path == "/quest-log/api/chat")
     check("a message is up to the shared room's length", BMQuestLog.maxLength == 2000
@@ -61,9 +62,11 @@ func runQuestLogChecks() {
     // ---- failures
     check("a status is a failure or none",
           BMQuestLog.failure(forStatus: 200) == nil && BMQuestLog.failure(forStatus: 401) == .wrongPassphrase
-          && BMQuestLog.failure(forStatus: 403) == .roleTaken && BMQuestLog.failure(forStatus: 502) == .server(502))
+          && BMQuestLog.failure(forStatus: 403) == .roleTaken && BMQuestLog.failure(forStatus: 429) == .tooManyGuesses
+          && BMQuestLog.failure(forStatus: 502) == .server(502))
     check("each is told in words", BMQuestLog.explain(.wrongPassphrase).contains("not the Quest Log passphrase")
           && BMQuestLog.explain(.roleTaken).contains("another device")
+          && BMQuestLog.explain(.tooManyGuesses).contains("Too many wrong passphrases")
           && BMQuestLog.explain(.unreachable, sending: true).contains("did not send"))
     check("the other part of the story", BMQuestLog.Role.giver.other == .adventurer && BMQuestLog.Role.adventurer.other == .giver
           && BMQuestLog.Role.allCases.map(\.rawValue) == ["giver", "adventurer"])

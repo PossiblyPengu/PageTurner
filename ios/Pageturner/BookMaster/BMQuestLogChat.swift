@@ -4,19 +4,20 @@ import Observation
 import Security
 
 /// Quest Log's private room, opened on this iPhone. It talks to Quest Log's chat endpoint on BookMaster's
-/// address (which forwards to Quest Log's own deployment) with the passphrase as the bearer token — what
-/// Quest Log itself does — and opens and seals every message here, so neither BookMaster nor anything on
-/// the way ever holds the words or the key. The key is made from the passphrase and kept in memory only.
+/// address (which forwards to Quest Log's own deployment) with the sign-in token the passphrase makes as the
+/// bearer — what Quest Log's own pages send — and opens and seals every message here, so neither Quest Log's
+/// server nor BookMaster nor anything on the way ever holds the words or what opens them.
 ///
-/// The passphrase itself is kept in this iPhone's Keychain (this device only, while it is unlocked) when
-/// the reader leaves "Keep it unlocked on this iPhone" on, so it need not be typed again; locking the room,
-/// unlinking BookMaster, or signing out of the web apps erases it.
+/// The passphrase is used once, to make the two keys, and is neither sent nor kept. What is kept is the keys —
+/// in memory, and in this iPhone's Keychain (this device only, while it is unlocked) when the reader leaves
+/// "Keep it unlocked on this iPhone" on, so the passphrase need not be typed again; locking the room,
+/// unlinking BookMaster, or signing out of the web apps erases them.
 @Observable
 @MainActor
 final class BMQuestLogChat {
     static let shared = BMQuestLogChat()
 
-    /// The room has been opened with a passphrase Quest Log accepted.
+    /// The room has been opened with a passphrase Quest Log accepted (or the keys it made, remembered).
     private(set) var unlocked = false
     /// The first answer has been read — until then an empty list would look like a wiped history.
     private(set) var ready = false
@@ -31,7 +32,8 @@ final class BMQuestLogChat {
     /// The passphrase was changed in Quest Log: said on the lock screen after the room locks itself.
     private(set) var lockNotice: String?
 
-    private var passphrase: String?
+    /// The sign-in token (the bearer) and the chat key, made from the passphrase.
+    private var credentials: BMQuestLogCrypto.Credentials?
     private var key: SymmetricKey?
     /// Messages already opened, so a poll opens only what is new.
     private var opened: [String: BMQuestLog.Entry] = [:]
@@ -47,54 +49,65 @@ final class BMQuestLogChat {
 
     private var username: String? { BookMaster.shared.user?.username }
 
-    /// Pick up a remembered passphrase for the linked reader, once for each account.
+    /// Pick up the remembered keys for the linked reader, once for each account.
     func loadIfNeeded() {
         let current = username
         guard current != loadedFor else { return }
         loadedFor = current
         wipeMemory()
         guard let current, let saved = BMQuestLogVault.read(account: current) else { return }
-        // trusted until Quest Log says otherwise: the first poll answers 401 to a passphrase that was changed
-        Task { await open(with: saved, remember: true, verify: false) }
+        if let data = saved.data(using: .utf8), let keys = try? JSONDecoder().decode(BMQuestLogCrypto.Credentials.self, from: data) {
+            // trusted until Quest Log says otherwise: the first poll answers 401 to a passphrase that was changed
+            Task { await open(with: keys, remember: true, verify: false) }
+        } else {
+            // kept by an earlier build as the passphrase itself: made into keys now, and only they are kept
+            Task { await unlock(saved, remember: true) }
+        }
     }
 
     // MARK: Unlocking
 
-    /// Open the room with a passphrase: made into a key, and Quest Log asked whether it is the one (a wrong
-    /// one is a 401). Nothing is kept unless Quest Log accepts it. Returns why not, or nil.
+    /// Open the room with a passphrase: made into the two keys, and Quest Log asked whether its token is the
+    /// right one (a wrong passphrase is a 401). Nothing is kept unless Quest Log accepts it, and the passphrase
+    /// itself never is. Returns why not, or nil.
     @discardableResult
     func unlock(_ passphrase: String, remember: Bool) async -> String? {
-        await open(with: passphrase, remember: remember, verify: true)
+        guard let keys = await Self.makeKeys(passphrase) else { return "That is not the Quest Log passphrase." }
+        return await open(with: keys, remember: remember, verify: true)
     }
 
     @discardableResult
-    private func open(with passphrase: String, remember: Bool, verify: Bool) async -> String? {
-        guard let key = await Self.makeKey(passphrase) else { return "That is not the Quest Log passphrase." }
+    private func open(with keys: BMQuestLogCrypto.Credentials, remember: Bool, verify: Bool) async -> String? {
         if verify {
             do {
-                _ = try await call("GET", passphrase: passphrase)
+                _ = try await call("GET", token: keys.token)
             } catch let failure as BMQuestLog.Failure {
                 return BMQuestLog.explain(failure)
             } catch {
                 return BMQuestLog.explain(.unreachable)
             }
         }
-        self.passphrase = passphrase
-        self.key = key
+        credentials = keys
+        key = keys.symmetricKey
         lockNotice = nil
         unlocked = true
-        if remember, let username { BMQuestLogVault.write(passphrase, account: username) }
-        else if let username { BMQuestLogVault.remove(account: username) }
+        if let username {
+            if remember, let data = try? JSONEncoder().encode(keys), let text = String(data: data, encoding: .utf8) {
+                BMQuestLogVault.write(text, account: username)
+            } else {
+                BMQuestLogVault.remove(account: username)
+            }
+        }
         await refresh()
         return nil
     }
 
-    /// The key a passphrase makes, off the main thread: a hundred thousand rounds of hashing.
-    private nonisolated static func makeKey(_ passphrase: String) async -> SymmetricKey? {
-        await Task.detached(priority: .userInitiated) { BMQuestLogCrypto.deriveKey(passphrase) }.value
+    /// The two keys a passphrase makes, off the main thread: two hundred thousand rounds of hashing.
+    private nonisolated static func makeKeys(_ passphrase: String) async -> BMQuestLogCrypto.Credentials? {
+        await Task.detached(priority: .userInitiated) { BMQuestLogCrypto.credentials(for: passphrase) }.value
     }
 
-    /// Close the room: the passphrase, the key and every message are forgotten, here and in the Keychain.
+    /// Close the room: the keys and every message are forgotten, here and in the Keychain.
     func lock(notice: String? = nil) {
         if let username { BMQuestLogVault.remove(account: username) }
         wipeMemory()
@@ -112,7 +125,7 @@ final class BMQuestLogChat {
     }
 
     private func wipeMemory() {
-        passphrase = nil
+        credentials = nil
         key = nil
         unlocked = false
         ready = false
@@ -154,13 +167,13 @@ final class BMQuestLogChat {
 
     func refresh() async {
         // one at a time: two in flight can land out of order, and the older would overwrite the newer
-        guard unlocked, !offline, !refreshing, let passphrase, let key else { return }
+        guard unlocked, !offline, !refreshing, let token = credentials?.token, let key else { return }
         refreshing = true
         defer { refreshing = false }
         do {
-            let data = try await call("GET", passphrase: passphrase)
-            // locked, or another passphrase in, while this was out
-            guard unlocked, self.passphrase == passphrase else { return }
+            let data = try await call("GET", token: token)
+            // locked, or other keys in, while this was out
+            guard unlocked, credentials?.token == token else { return }
             var list: [BMQuestLog.Entry] = []
             let stored = BMQuestLog.once(BMQuestLog.decode(data))
             for raw in stored {
@@ -195,7 +208,7 @@ final class BMQuestLogChat {
             sent += 1
             return true
         }
-        guard unlocked, let passphrase, let key, let sealed = BMQuestLogCrypto.seal(key, text) else {
+        guard unlocked, let token = credentials?.token, let key, let sealed = BMQuestLogCrypto.seal(key, text) else {
             actionError = BMQuestLog.explain(.unreachable, sending: true)
             return false
         }
@@ -204,7 +217,7 @@ final class BMQuestLogChat {
         let body: [String: String] = ["id": id, "ciphertext": sealed.ciphertext, "iv": sealed.iv, "role": role.rawValue]
         do {
             guard let json = try? JSONSerialization.data(withJSONObject: body) else { throw BMQuestLog.Failure.unreachable }
-            _ = try await call("POST", body: json, passphrase: passphrase)
+            _ = try await call("POST", body: json, token: token)
         } catch BMQuestLog.Failure.wrongPassphrase {
             lock(notice: "The Quest Log passphrase has changed. Enter the new one.")
             return false
@@ -224,10 +237,10 @@ final class BMQuestLogChat {
 
     /// Take back one of your own messages.
     func remove(_ entry: BMQuestLog.Entry) async {
-        guard unlocked, !offline, let passphrase else { return }
+        guard unlocked, !offline, let token = credentials?.token else { return }
         actionError = nil
         do {
-            _ = try await call("DELETE", id: entry.id, passphrase: passphrase)
+            _ = try await call("DELETE", id: entry.id, token: token)
         } catch BMQuestLog.Failure.wrongPassphrase {
             lock(notice: "The Quest Log passphrase has changed. Enter the new one.")
             return
@@ -244,7 +257,7 @@ final class BMQuestLogChat {
     // MARK: The wire
 
     /// One request to Quest Log's chat endpoint. Throws a `BMQuestLog.Failure`.
-    private func call(_ method: String, id: String? = nil, body: Data? = nil, passphrase: String) async throws -> Data {
+    private func call(_ method: String, id: String? = nil, body: Data? = nil, token: String) async throws -> Data {
         guard var parts = URLComponents(string: "https://\(BMLinkURL.bookMasterHost)\(BMQuestLog.path)") else {
             throw BMQuestLog.Failure.unreachable
         }
@@ -254,7 +267,7 @@ final class BMQuestLogChat {
         request.httpMethod = method
         request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("Bearer \(passphrase)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -281,7 +294,7 @@ final class BMQuestLogChat {
         wipeMemory()
         loadedFor = username          // the screen's first look must not wipe it
         offline = true
-        passphrase = "debug"
+        credentials = BMQuestLogCrypto.Credentials(token: "debug", key: Data(repeating: 7, count: 32))
         key = SymmetricKey(size: .bits256)
         unlocked = true
         ready = true
@@ -298,8 +311,9 @@ final class BMQuestLogChat {
     #endif
 }
 
-/// The passphrase, kept in this iPhone's Keychain for the reader who asked for it: this device only, and only while
-/// it is unlocked.
+/// The keys the passphrase made (as JSON), kept in this iPhone's Keychain for the reader who asked for it: this device
+/// only, and only while it is unlocked. (An earlier build kept the passphrase itself in the same place; it is read
+/// once and replaced.)
 enum BMQuestLogVault {
     private static let service = "io.github.possiblypengu.pageturner.questlog"
 
@@ -318,10 +332,10 @@ enum BMQuestLogVault {
         return String(data: data, encoding: .utf8)
     }
 
-    static func write(_ passphrase: String, account: String) {
+    static func write(_ secret: String, account: String) {
         remove(account: account)
         var add = query(account)
-        add[kSecValueData as String] = Data(passphrase.utf8)
+        add[kSecValueData as String] = Data(secret.utf8)
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }

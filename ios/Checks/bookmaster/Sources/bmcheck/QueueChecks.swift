@@ -76,10 +76,11 @@ func runQueueChecks() async {
     }
     BridgeProtocol.state.reset(holdFirst: true)
     let old = Task { await progress(0.1, ref: ref) }
-    for _ in 0..<200 where !BridgeProtocol.state.isHolding { try? await Task.sleep(nanoseconds: 1_000_000) }
+    // waits as long as the machine needs (a busy one — a build running beside — made 200 ms too short), and no longer than it must
+    for _ in 0..<10_000 where !BridgeProtocol.state.isHolding { try? await Task.sleep(nanoseconds: 1_000_000) }
     check("older push is in flight", BridgeProtocol.state.isHolding)
     let new = Task { await progress(0.5, ref: ref) }
-    for _ in 0..<200 where body(entries().first ?? [:])["percent"] as? Double != 50 { await Task.yield() }
+    for _ in 0..<10_000 where body(entries().first ?? [:])["percent"] as? Double != 50 { try? await Task.sleep(nanoseconds: 1_000_000) }
     check("newer progress is persisted before transport", body(entries().first ?? [:])["percent"] as? Double == 50)
     check("fresh pushes do not overtake the active request", BridgeProtocol.state.requests.count == 1)
     BridgeProtocol.state.release(503)

@@ -2,24 +2,51 @@ import CommonCrypto
 import CryptoKit
 import Foundation
 
-/// Quest Log's cipher, the one in its chat.js and BookMaster's secretChat.ts: PBKDF2 (SHA-256, 100,000 rounds,
-/// a fixed salt) over the passphrase makes an AES-GCM-256 key; each message gets a fresh 12-byte IV; the
-/// ciphertext is sealed text then the 16-byte tag, in base64, as WebCrypto writes it. A message made by any
-/// of the three opens in the others, so nothing here may drift: `selfTest` holds two messages made by the
-/// web's recipe (Node) and the key it makes, and the simulator run fails if this cannot open them.
+/// Quest Log's cipher, the one in its chat.js and utils.js and BookMaster's secretChat.ts: PBKDF2 (SHA-256, 100,000
+/// rounds) over the passphrase makes two keys, each with a salt of its own — an AES-GCM-256 chat key, and a
+/// sign-in token (hex) that is all the server is shown. Each message gets a fresh 12-byte IV; the ciphertext
+/// is sealed text then the 16-byte tag, in base64, as WebCrypto writes it. A message made by any of the three
+/// opens in the others, and a token from any of them is accepted, so nothing here may drift: `selfTest` holds
+/// two messages and the keys the web's recipe makes (Node; the same answers Quest Log's own tests check), and
+/// the simulator run fails if this cannot reproduce them.
 enum BMQuestLogCrypto {
-    /// The key a passphrase makes — the same one on every device that knows it. Slow on purpose (100,000
-    /// rounds): call it off the main thread. Nil for an empty passphrase.
-    static func deriveKey(_ passphrase: String) -> SymmetricKey? {
+    /// What a passphrase makes, and all that is kept of it: the chat key, which opens messages and never leaves this
+    /// iPhone, and the sign-in token Quest Log is shown. Neither opens the other.
+    struct Credentials: Codable, Equatable {
+        var token: String
+        var key: Data
+
+        var symmetricKey: SymmetricKey { SymmetricKey(data: key) }
+    }
+
+    /// PBKDF2 (SHA-256, 100,000 rounds) over the passphrase with `salt`. Slow on purpose: call it off the main
+    /// thread. Nil for an empty passphrase.
+    private static func pbkdf2(_ passphrase: String, salt: String) -> [UInt8]? {
         guard !passphrase.isEmpty else { return nil }
-        let salt = Array(BMQuestLog.salt.utf8)
+        let salt = Array(salt.utf8)
         var derived = [UInt8](repeating: 0, count: BMQuestLog.keyBytes)
         let status = CCKeyDerivationPBKDF(
             CCPBKDFAlgorithm(kCCPBKDF2), passphrase, passphrase.utf8.count,
             salt, salt.count,
             CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), UInt32(BMQuestLog.iterations),
             &derived, derived.count)
-        return status == Int32(kCCSuccess) ? SymmetricKey(data: derived) : nil
+        return status == Int32(kCCSuccess) ? derived : nil
+    }
+
+    /// The key a passphrase makes for the chat — the same one on every device that knows it.
+    static func deriveKey(_ passphrase: String) -> SymmetricKey? {
+        pbkdf2(passphrase, salt: BMQuestLog.salt).map { SymmetricKey(data: $0) }
+    }
+
+    /// The sign-in token a passphrase makes, in lower-case hex: what Quest Log's APP_AUTH_TOKEN holds.
+    static func deriveAuthToken(_ passphrase: String) -> String? {
+        pbkdf2(passphrase, salt: BMQuestLog.authSalt).map { $0.map { String(format: "%02x", $0) }.joined() }
+    }
+
+    /// Both, from the passphrase.
+    static func credentials(for passphrase: String) -> Credentials? {
+        guard let token = deriveAuthToken(passphrase), let key = pbkdf2(passphrase, salt: BMQuestLog.salt) else { return nil }
+        return Credentials(token: token, key: Data(key))
     }
 
     /// The text, or nil when this key does not open it.
@@ -57,6 +84,14 @@ enum BMQuestLogCrypto {
         guard let key = deriveKey(passphrase) else { return "no key" }
         let hex = key.withUnsafeBytes { $0.map { String(format: "%02x", $0) }.joined() }
         guard hex == "9b86e93e1221e5cb8ee6e54b5514b566a6493daae03fe56eecf6a57c47c6d6eb" else { return "key \(hex)" }
+        // the sign-in token: the answers Quest Log's own tests (tests/auth-token.test.mjs) hold
+        let token = deriveAuthToken(passphrase)
+        guard token == "c2834e97ebc29b53220ada973bc91961897df59fc339b9bc8709c29dbe17e949" else { return "token \(token ?? "nil")" }
+        let plainToken = deriveAuthToken("pass")
+        guard plainToken == "4926a8ec0a3bc5f3b381a2f8d593648ff025f9f4a0b9944e110f63e4f0bc46ba" else { return "token for pass \(plainToken ?? "nil")" }
+        guard let made = credentials(for: passphrase), made.token == token, made.key == key.withUnsafeBytes({ Data($0) }),
+              made.token != hex
+        else { return "credentials" }
         let plain = open(
             key, ciphertext: "ZS/9RtpCJO3nzvIqcSVGRyn4SVenx7z79Of1WyvOUKQQBllb9lGXyw0sNzJzqP+V0GGa/6Jp6q6SH/6B75U=",
             iv: "AAECAwQFBgcICQoL")

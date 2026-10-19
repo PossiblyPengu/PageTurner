@@ -166,14 +166,18 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   dropped (`edits`); one refresh at a time; reading is reported only while the screen is in front (`visible`); the length limit counts UTF-16
   units like the server; a full page that reaches back to nothing held replaces it instead of leaving a hole. Quest Log's own private chat is end-to-end encrypted, and is the chat screen's second tab
   ("🔒 Quest Log", `BMChatTab`) — a native screen like the shared room's (`BMQuestLogRoomView`), not a framed web page. The cipher is the one in
-  Quest Log's chat.js and BookMaster's secretChat.ts, line for line: PBKDF2-SHA256 (100,000 rounds, salt `quest-log-chat-salt-v1`) → AES-GCM-256,
-  a fresh 12-byte IV, ciphertext+tag in base64 (`BMQuestLogCrypto`, CryptoKit + CommonCrypto), so a message written in any of the three
-  opens in the others — never change it in one place only. `BMQuestLog` is the pure part (Linux-checked): the stored entry, opening and
+  Quest Log's chat.js / utils.js and BookMaster's secretChat.ts, line for line: PBKDF2-SHA256 (100,000 rounds) over the passphrase makes two
+  keys — the chat key (salt `quest-log-chat-salt-v1`) → AES-GCM-256, a fresh 12-byte IV, ciphertext+tag in base64, and the **sign-in token**
+  (salt `quest-log-auth-v1`, 32 bytes as hex) that is the bearer and all Quest Log / BookMaster's forward is ever shown (`BMQuestLogCrypto`,
+  CryptoKit + CommonCrypto), so a message written in any of the three opens in the others and the server's `APP_AUTH_TOKEN` accepts the
+  token — never change it in one place only (Quest Log's tests/auth-token.test.mjs holds the same known answers as `selfTest`). `BMQuestLog` is the pure part (Linux-checked): the stored entry, opening and
   unwrapping (`{"text":…}`), ids Quest Log accepts, the layout (it reuses `BMChat.rows`). `BMQuestLogChat` is the connection: it talks to
-  `/quest-log/api/chat` on BookMaster's address with the passphrase as the bearer token (what Quest Log itself does), opens and seals on this
-  iPhone, polls every 5 s while the room is in front, and keeps what it sent in view until the list shows it. **Pageturner now holds the
-  passphrase** — in memory, and in the Keychain (this device only, when unlocked) unless "Keep it unlocked on this iPhone" is turned off on
-  the lock screen; locking the room, unlinking BookMaster (`RootView` → `reset()`) or signing out of the web apps erases it. Nothing it opens
+  `/quest-log/api/chat` on BookMaster's address with the sign-in token as the bearer (what Quest Log's own pages send), opens and seals on this
+  iPhone, polls every 5 s while the room is in front, and keeps what it sent in view until the list shows it. **Pageturner holds the two
+  keys, never the passphrase**: it is used once to make them and neither sent nor stored; the keys live in memory, and in the Keychain (this
+  device only, when unlocked) as JSON unless "Keep it unlocked on this iPhone" is turned off on the lock screen (an earlier build's stored
+  passphrase is read once and replaced). Locking the room, unlinking BookMaster (`RootView` → `reset()`) or signing out of the web apps
+  erases them. A 429 is "too many wrong passphrases" (10 in 15 minutes per caller). Nothing it opens
   goes to BookMaster, the inbox, a notification or the log (Quest Log's notices only ever say that something is new). The part (giver or
   adventurer) is BookMaster's `questLogRole` on the chat answer, else the reader's choice, kept per account. A wrong passphrase is a 401 (and a
   remembered one that stops working locks the room with a note); a 403 is "that role belongs to another device". The cipher is verified by the
