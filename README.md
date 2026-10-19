@@ -14,6 +14,7 @@ A native SwiftUI app (iOS 17+) built on the [Readium](https://readium.org) toolk
   exported as Markdown; select text → Look Up / Translate / Share like any iOS reader
 - **Listening:** multi-file audiobooks (M4B/M4A/MP3/FLAC/OGG/OPUS/WAV) with chapters (an m4b's embedded markers, or a file each), a chapter list,
   previous/next chapter, time left in the chapter, speed, sleep timer and lock-screen controls. Read-aloud and an audiobook never talk over each other
+- **Read aloud keeps going when you leave the book:** go to the library or another tab and the voice carries on, with a now-playing strip above the tab bar (the audiobook's place) — previous/play/next sentence, tap to open the book at the sentence being said, hold for the sleep timer or Stop. Your place and BookMaster progress follow the voice.
 - **Read aloud, in your choice of voice:** Settings → Read Aloud (and the voice button on the read-aloud bar) — every voice installed on the iPhone by language with a sample button
   on each (Automatic picks the best Enhanced/Premium voice for the book's language; add them in Settings → Accessibility → Spoken Content), or **neural voices** —
   Piper's, the same ones as the web app, 170 of them in 50 languages. A neural voice downloads once (20–140 MB, most about 63), is checked, and lives on the iPhone, so it works offline and with the

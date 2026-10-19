@@ -135,6 +135,13 @@ final class ReadAloud: NSObject, ObservableObject {
     /// Called when a chosen voice proved unusable and was dropped for the
     /// automatic one — the caller should clear its persisted voice setting.
     var onVoiceFallback: (() -> Void)?
+    /// Called for each sentence begun while the page is not on screen — the narration has carried the reader's
+    /// place to it, and nothing else will say so.
+    var onNarrated: ((Locator) -> Void)?
+    /// The page is in front of the reader. Left (to another tab, or the library) the narration goes on, but
+    /// nothing is chased, painted or measured per word on a page nobody sees; coming back catches the page up.
+    private(set) var onScreen = true
+    private var lastNarrated: Locator?
 
     static func canSpeak(_ publication: Publication) -> Bool {
         PublicationSpeechSynthesizer.canSpeak(publication: publication)
@@ -183,7 +190,8 @@ final class ReadAloud: NSObject, ObservableObject {
             Publishers.CombineLatest($spoken, $highlights)
                 .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
                 .sink { [weak self] spoken, highlights in
-                    self?.paint(spoken, as: highlights, on: decorable)
+                    guard let self, self.onScreen else { return }
+                    self.paint(spoken, as: highlights, on: decorable)
                 }
                 .store(in: &subscriptions)
             // iOS toggling Low Power Mode mid-book adds or drops the word marks
@@ -193,8 +201,8 @@ final class ReadAloud: NSObject, ObservableObject {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.neural.reportsWords = self.highlights.needsWords && !LowPower.on
-                    self.paint(self.spoken, as: self.highlights, on: decorable)
+                    self.updateWordReporting()
+                    if self.onScreen { self.paint(self.spoken, as: self.highlights, on: decorable) }
                 }
             }
         }
@@ -237,7 +245,7 @@ final class ReadAloud: NSObject, ObservableObject {
             .removeDuplicates()
             .throttle(for: .seconds(1), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] locator in
-                guard let self else { return }
+                guard let self, self.onScreen else { return }
                 self.pendingFollow = locator
                 self.follow()
             }
@@ -402,7 +410,32 @@ final class ReadAloud: NSObject, ObservableObject {
     func setHighlights(_ value: ReadAloudHighlights) {
         guard value != highlights else { return }
         highlights = value
-        neural.reportsWords = value.needsWords && !LowPower.on
+        updateWordReporting()
+    }
+
+    /// Per-word work is for a page that is looked at: not in Low Power Mode, and not with the reader left.
+    private func updateWordReporting() {
+        neural.reportsWords = onScreen && highlights.needsWords && !LowPower.on
+    }
+
+    /// The reader was left with the narration going on, or came back to it.
+    func setOnScreen(_ shown: Bool) {
+        guard shown != onScreen else { return }
+        onScreen = shown
+        updateWordReporting()
+        if !shown {
+            // a jump in flight is a jump nobody will see
+            pendingFollow = nil
+            lastNarrated = nil
+            return
+        }
+        guard isActive else { return }
+        // the marks and the page catch up to what is being said now
+        if let decorable { paint(spoken, as: highlights, on: decorable) }
+        if let target = scrolls ? spoken.sentence : (spoken.word ?? spoken.sentence) {
+            pendingFollow = target.anchorable
+            follow()
+        }
     }
 
     var availableVoices: [TTSVoice] { synthesizer.availableVoices }
@@ -627,7 +660,13 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             } else {
                 waitForAWord(in: utterance.locator)
             }
-            if scrolls {
+            if !onScreen {
+                // the state comes with every word: the reader's place moves with the sentence
+                if utterance.locator != lastNarrated {
+                    lastNarrated = utterance.locator
+                    onNarrated?(utterance.locator)
+                }
+            } else if scrolls {
                 followTarget.send(utterance.locator.anchorable)
             } else if let word {
                 followTarget.send(word.anchorable)

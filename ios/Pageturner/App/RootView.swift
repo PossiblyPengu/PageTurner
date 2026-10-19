@@ -10,6 +10,8 @@ struct RootView: View {
     @AppStorage("bm-badge") private var bmBadge = true
     @State private var router = AppRouter()
     private let playback = PlaybackCoordinator.shared
+    private let speech = ReadAloudHost.shared
+    private let focus = AudioFocus.shared
     private let bookMaster = BookMaster.shared
     private let notifier = Notifier.shared
     private let inbox = BMInboxStore.shared
@@ -227,6 +229,7 @@ struct RootView: View {
                 Button(books.count == 1 ? "Remove from Library" : "Remove \(books.count) Books", role: .destructive) {
                     for book in books {
                         if playback.bookID == book.id { playback.stop() }
+                        ReadAloudHost.shared.stop(bookID: book.id)
                         if router.reading?.id == book.id { router.reading = nil }
                         if router.detail?.id == book.id { router.detail = nil }
                         if router.editing?.id == book.id { router.editing = nil }
@@ -327,25 +330,42 @@ struct RootView: View {
         BMChatButtonLayer(bottomReserve: showMiniPlayer ? 128 : 64)
     }
 
-    /// The mini player steps aside while the full player fills the Reading
-    /// tab; reading an ebook with audio going keeps it, as the way back.
-    private var showMiniPlayer: Bool {
-        playback.player != nil && !(router.tab == .reading && router.reading == nil)
+    /// The strip that is docked: the audiobook in the player, or a book being read aloud whose reader was left
+    /// (`ReadAloudHost`) — whichever took the stage last when both are there. The audiobook's steps aside while its
+    /// full player fills the Reading tab; reading an ebook with audio going keeps it, as the way back.
+    private var nowPlaying: NowPlayingBar? {
+        NowPlayingBar.choose(
+            audiobook: playback.player != nil && !(router.tab == .reading && router.reading == nil),
+            narration: speech.held?.readAloud != nil,
+            holder: focus.holder)
     }
+
+    private var showMiniPlayer: Bool { nowPlaying != nil }
 
     @ViewBuilder
     private var miniPlayer: some View {
-        if let player = playback.player {
-            MiniPlayer(player: player) { router.reading = nil; router.tab = .reading }
+        switch nowPlaying {
+        case .audiobook:
+            if let player = playback.player {
+                MiniPlayer(player: player) { router.reading = nil; router.tab = .reading }
+            }
+        case .narration:
+            if let held = speech.held, let readAloud = held.readAloud {
+                NarrationMiniPlayer(
+                    model: held, readAloud: readAloud, cover: library.coverThumbnail(for: held.book, maxPixels: 120)
+                ) { router.openNarration() }
+            }
+        case nil:
+            EmptyView()
         }
     }
 
-    /// Before iOS 26 there is no bottom accessory, so the mini player rides
+    /// Before iOS 26 there is no bottom accessory, so the strip rides
     /// above the tab bar as an inset of each tab.
     private func withMiniPlayer<V: View>(_ content: V) -> some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if showMiniPlayer, let player = playback.player {
-                MiniPlayer(player: player) { router.reading = nil; router.tab = .reading }
+            if showMiniPlayer {
+                miniPlayer
                     .padding(.vertical, 8)
                     .background(.bar)
             }

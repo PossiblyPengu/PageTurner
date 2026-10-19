@@ -106,6 +106,18 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   chapter-end fires exactly on the boundary (a paused player keeps the bell set for `play()` to
   re-aim). A player paused ten minutes gives the audio session back, but only when
   `AudioFocus.soleOwner` says the session is really its own.
+- Read-aloud outlives the reader (`Reader/ReadAloudHost.swift`, `Audio/NarrationMiniPlayer.swift`, `Audio/NowPlayingBar.swift`): leaving the
+  reader (a tab switch, the Back button) used to stop the voice. Now `ReaderView.onDisappear` hands the `ReaderModel` to `ReadAloudHost`
+  while narration is under way (`leave`), so the navigator, the publication and the voice stay alive, and the now-playing strip — the same
+  bottom-accessory slot as `MiniPlayer`, with the book, chapter, previous/play/next sentence, and Stop + sleep timer on a long press — is
+  shown for `host.held`. Tapping it (`AppRouter.openNarration`) opens the book again and the same reader is taken back (`take(for:)`). While
+  the reader is away `ReadAloud.onScreen` is false: nothing is followed, painted or measured per word; each new sentence is reported
+  (`onNarrated` → `ReaderModel.narrated(to:)`) so the saved place, the BookMaster progress and the sitting move with the voice, the navigator's
+  own (stale) location is ignored and never saved (`narrationAhead`), and when the reader is back (`show`) the page catches up to the
+  sentence being said. One voice: showing a reader for another book stops what is held; deleting a book stops its narration. Which strip
+  shows when an audiobook is loaded too is `NowPlayingBar.choose` (pure, Linux-checked): whichever last took the stage, i.e.
+  `AudioFocus.holder` (now `@Observable`; it mirrors `RemoteControls.activeOwner`). The simulator run (`-PTDebugReaderSheet readaloudaway`)
+  starts the voice, leaves the reader and fails if no `PTNarrated` line follows; `68-readaloud-strip` is the photograph.
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the

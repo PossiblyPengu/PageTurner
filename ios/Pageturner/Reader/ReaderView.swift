@@ -23,7 +23,8 @@ struct ReaderView: View {
     private let onBack: () -> Void
 
     init(book: Book, library: LibraryStore, onBack: @escaping () -> Void) {
-        _model = StateObject(wrappedValue: ReaderModel(book: book, library: library))
+        // a book still being read aloud after its reader was left comes back as the same reader
+        _model = StateObject(wrappedValue: ReadAloudHost.shared.take(for: book) ?? ReaderModel(book: book, library: library))
         self.onBack = onBack
     }
 
@@ -102,12 +103,17 @@ struct ReaderView: View {
             .onChange(of: model.settings.keepAwake) { _, _ in keepAwake(true) }
             // a theme that follows the clock: look again every few minutes
             .onReceive(Timer.publish(every: 300, on: .main, in: .common).autoconnect()) { _ in model.refreshNight() }
-            .onAppear { BookMaster.shared.place = "reader"; keepAwake(true) }
+            .onAppear {
+                BookMaster.shared.place = "reader"
+                keepAwake(true)
+                ReadAloudHost.shared.show(model)
+            }
             .onDisappear {
                 keepAwake(false)
                 model.flushSave()
                 model.endSession()
-                model.stopReadAloud()
+                // narration under way goes on, with the now-playing strip to control it; anything else stops
+                ReadAloudHost.shared.leave(model)
                 BookMaster.shared.place = "library"
             }
             // a sitting ends when the app leaves the screen — not whenever it is next opened.
@@ -131,7 +137,7 @@ struct ReaderView: View {
             .task {
                 guard let sheet = DebugScenario.readerSheet else { return }
                 // the ones that act on the open book wait for it to open
-                let needsBook = ["jump", "pdfsearch", "readaloud"].contains(sheet)
+                let needsBook = ["jump", "pdfsearch", "readaloud", "readaloudaway"].contains(sheet)
                 try? await Task.sleep(nanoseconds: needsBook ? 7_000_000_000 : 3_000_000_000)
                 switch sheet {
                 case "pdfsearch":
@@ -147,6 +153,13 @@ struct ReaderView: View {
                     DebugScenario.configureReadAloud(&model.settings)
                     model.applySettings()   // pushes a debug scroll-mode switch into the navigator
                     model.toggleReadAloud()
+                // read aloud, then leave the reader: the voice must go on, with the now-playing strip over the library
+                case "readaloudaway":
+                    DebugScenario.configureReadAloud(&model.settings)
+                    model.applySettings()
+                    model.toggleReadAloud()
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    onBack()
                 // a jump far ahead: the Back chip should appear
                 case "jump": model.go(toProgression: 0.8)
                 case "footnote":

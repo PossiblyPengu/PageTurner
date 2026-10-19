@@ -76,6 +76,9 @@ final class ReaderModel: ObservableObject {
     /// JSON — a disk write per page. Coalesced here and flushed on close.
     private var saveTask: Task<Void, Never>?
     private var currentLocator: Locator?
+    /// Where read-aloud has carried the book while the reader was away: the page is behind it until the reader is
+    /// back and has caught up, so the navigator's own location is not the place to save.
+    private var narrationAhead: Locator?
     /// Where and when this sitting began, for the BookMaster session push.
     private var sessionStart: (at: Date, progression: Double)?
     /// The last page turn or return to the book — a book left open on a table stops counting five minutes after it.
@@ -868,6 +871,8 @@ final class ReaderModel: ObservableObject {
     }
 
     private func startReadAloud() {
+        // one voice: a book still being read aloud with its reader left gives way
+        ReadAloudHost.shared.show(self)
         guard let publication, let navigator,
               let readAloud = ReadAloud(
                   publication: publication,
@@ -882,7 +887,9 @@ final class ReaderModel: ObservableObject {
         readAloud.onStopped = { [weak self, weak readAloud] in
             guard let self, let readAloud, self.readAloud === readAloud else { return }
             self.readAloud = nil
+            ReadAloudHost.shared.narrationEnded(self)
         }
+        readAloud.onNarrated = { [weak self] locator in self?.narrated(to: locator) }
         readAloud.onVoiceFallback = { [weak self] in
             guard let self else { return }
             settings.voiceIdentifier = nil
@@ -899,6 +906,42 @@ final class ReaderModel: ObservableObject {
     func stopReadAloud() {
         readAloud?.stop()
         readAloud = nil
+    }
+
+    // MARK: - Read aloud with the reader away (`ReadAloudHost`)
+
+    /// The reader is in front: the voice marks and follows the page again, catching it up first.
+    func readerShown() { readAloud?.setOnScreen(true) }
+
+    /// The reader was left with the voice still going: nothing is chased or painted until it is back.
+    func readerHidden() { readAloud?.setOnScreen(false) }
+
+    /// The narration of a book whose reader was away has ended: its place and its sitting are written down now.
+    func readerLetGo() {
+        saveTask?.cancel()
+        saveTask = nil
+        library.update(book)
+        endSession()
+    }
+
+    /// Read-aloud carried on with the reader away: where the voice is, is where the reader is — saved, and told to
+    /// BookMaster as a page turn would be. The page catches up when the reader is back.
+    func narrated(to locator: Locator) {
+        currentLocator = locator
+        narrationAhead = locator
+        lastActivityAt = Date()
+        book.locatorJSON = try? locator.jsonString()
+        if let progression = locator.locations.totalProgression { book.progression = progression }
+        let entry = chapterEntry(for: locator)
+        chapterTitle = entry?.link.title
+        currentChapterID = entry?.id
+        scheduleSave()
+        beginSession()
+        reading.moved(to: locator.locations.totalProgression)
+        pushProgress()
+        #if DEBUG
+        NSLog("PTNarrated %@ %.4f", entry?.link.title ?? "?", locator.locations.totalProgression ?? -1)
+        #endif
     }
 
     func cycleRate() {
@@ -929,7 +972,7 @@ final class ReaderModel: ObservableObject {
     func flushSave() {
         saveTask?.cancel()
         saveTask = nil
-        if !curling, let locator = navigator?.currentLocation {
+        if !curling, narrationAhead == nil, let locator = navigator?.currentLocation {
             book.locatorJSON = try? locator.jsonString()
             book.progression = locator.locations.totalProgression
         }
@@ -1041,8 +1084,11 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         guard !curling else { return }   // the curl replays it on commit
+        // the reader is away with the voice going on: the page behind it is stale, whatever it reports
+        guard readAloud?.onScreen != false else { return }
         previousLocator = currentLocator
         currentLocator = locator
+        narrationAhead = nil   // the page is where the voice was, or the reader moved it
         lastActivityAt = Date()
         // reading on from where a jump landed lets the way back go
         if history.back != nil { history.readOn(to: locator.locations.totalProgression ?? book.progression ?? 0) }
@@ -1055,6 +1101,11 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
         scheduleSave()
         beginSession()
         reading.moved(to: locator.locations.totalProgression)
+        pushProgress()
+    }
+
+    /// Tell BookMaster how far the book has got, when that has changed enough to be worth a call.
+    fileprivate func pushProgress() {
         let ref = book.bookMasterRef
         let progression = reading.reportable(book.progression ?? 0)
         // the push's own dedup still decides inside the task; this just skips

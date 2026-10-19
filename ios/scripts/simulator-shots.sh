@@ -164,6 +164,13 @@ shot 66-readaloud-autohide 20 -PTDebugScreen reader -PTDebugReaderSheet readalou
 # the scrolling layout's follow: the spoken line should sit mid-screen, not at the chapter's end
 shot 67-readaloud-scroll 20 $RA -PTDebugReaderScroll 1 -PTDebugHighlights sentence,line,word
 
+# read-aloud with the reader left: the voice must go on (the model logs each sentence begun while away) and the
+# now-playing strip is up over the library
+shot 68-readaloud-strip 26 -PTDebugScreen reader -PTDebugReaderSheet readaloudaway -PTDebugHighlights sentence
+xcrun simctl spawn "$UDID" log show --style compact --last 2m \
+  --predicate 'process == "Pageturner" AND eventMessage CONTAINS "PTNarrated"' > "$OUT/readaloud-away.txt" 2>/dev/null || true
+grep -q "PTNarrated" "$OUT/readaloud-away.txt" || { echo "::error::read-aloud did not go on after the reader was left"; FAILED=1; }
+
 # crash reports from the host (the simulator writes them there)
 mkdir -p "$OUT/crashes"
 find ~/Library/Logs/DiagnosticReports -name 'Pageturner*' -newer "$APP" -exec cp {} "$OUT/crashes/" \; 2>/dev/null || true

@@ -124,6 +124,13 @@ final class AppRouter {
         launch(library.books.first { $0.id == prompt.book.id } ?? prompt.book, library: library)
     }
 
+    /// The now-playing strip for a book being read aloud was tapped: the book, at the place the voice has reached.
+    func openNarration() {
+        guard let book = ReadAloudHost.shared.held?.book else { return }
+        reading = book
+        tab = .reading
+    }
+
     /// Leaving an open book: back to the library, with the position kept so the
     /// Reading tab's list can offer it again.
     func leaveReading() {

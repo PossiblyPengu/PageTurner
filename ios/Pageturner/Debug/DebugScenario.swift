@@ -9,7 +9,7 @@ import UIKit
 ///
 ///     -PTDebugSeed 1            fill an empty library with sample books, a listen and some history
 ///     -PTDebugScreen library    which screen to put up (see `run`)
-///     -PTDebugReaderSheet …     with `reader`: contents | settings | search | voices | readaloud
+///     -PTDebugReaderSheet …     with `reader`: contents | settings | search | voices | readaloud | readaloudaway
 ///     -PTDebugReaderScroll 1    with `reader`: lay the book out as one scrolling page
 ///     -PTDebugHighlights …      with readaloud: which of sentence,line,word to light (comma separated)
 ///     -PTDebugVoice neural      with readaloud: speak with the downloaded Piper voice (en_US-lessac-low)

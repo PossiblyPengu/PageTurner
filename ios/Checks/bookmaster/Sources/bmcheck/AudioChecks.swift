@@ -32,6 +32,33 @@ func runAudioChecks() async {
     check("restarted narration regains focus and remotes", !focus.isIdle && RemoteControls.shared.activeOwner == "readaloud")
     focus.unregister("readaloud")
 
+    section("Now-playing strip")
+    check("nothing loaded: no strip", NowPlayingBar.choose(audiobook: false, narration: false, holder: nil) == nil)
+    check("an audiobook alone is the audiobook strip", NowPlayingBar.choose(audiobook: true, narration: false, holder: nil) == .audiobook)
+    check("narration alone is the narration strip, whoever held the buttons last",
+          NowPlayingBar.choose(audiobook: false, narration: true, holder: "audiobook") == .narration)
+    check("both loaded: the one that took the stage last", NowPlayingBar.choose(audiobook: true, narration: true, holder: "readaloud") == .narration
+          && NowPlayingBar.choose(audiobook: true, narration: true, holder: "audiobook") == .audiobook)
+    check("both loaded and nobody claimed: the audiobook", NowPlayingBar.choose(audiobook: true, narration: true, holder: nil) == .audiobook)
+    check("a chapter title leads the line", NowPlayingBar.subtitle(chapter: "  Chapter 3 ", author: "Herbert") == "Chapter 3")
+    check("no chapter: the author", NowPlayingBar.subtitle(chapter: nil, author: "Herbert") == "Herbert"
+          && NowPlayingBar.subtitle(chapter: "  ", author: "Herbert") == "Herbert")
+    check("neither: no line", NowPlayingBar.subtitle(chapter: nil, author: " ") == nil)
+
+    focus.register("audiobook", pause: {}, remote: .init())
+    focus.register("readaloud", pause: {}, remote: .init())
+    focus.claim("readaloud")
+    check("the stage's holder is whoever claimed it", focus.holder == "readaloud")
+    focus.claim("audiobook")
+    check("and changes hands with the claim", focus.holder == "audiobook")
+    focus.register("preview", pause: {})
+    focus.claim("preview")
+    check("a voice sample has no buttons, so never holds the stage", focus.holder == "audiobook")
+    focus.unregister("preview")
+    focus.unregister("readaloud")
+    focus.unregister("audiobook")
+    check("nothing registered, nothing held", focus.isIdle && focus.holder == nil)
+
     let startup = AudioStartup()
     var waiting: CheckedContinuation<Int, Never>?
     var plays: [Int] = []
