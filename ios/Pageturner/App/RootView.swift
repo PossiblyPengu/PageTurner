@@ -194,7 +194,8 @@ struct RootView: View {
             onRemoveDownload: {
                 router.detail = nil
                 router.removeDownload(book, library: library)
-            })
+            },
+            onLookup: { await MetadataLookup.enrichDriveBooks([book.id], library: library) })
     }
 
     private func editSheet(_ book: Book) -> some View {

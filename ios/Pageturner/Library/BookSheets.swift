@@ -18,6 +18,9 @@ struct BookDetailSheet: View {
     var onDownload: () -> Void = {}
     var onCancelDownload: () -> Void = {}
     var onRemoveDownload: () -> Void = {}
+    /// Looks the book up online (a Drive book has only a name until it is downloaded); true when something was found.
+    var onLookup: (() async -> Void)? = nil
+    @State private var lookingUp = false
     @State private var picked: Int?
     @State private var showNotes = false
     @State private var tint: Color = .ptAccent
@@ -171,7 +174,14 @@ struct BookDetailSheet: View {
                         }
                     }
                 }
-                if book.author.isEmpty {
+                if lookingUp {
+                    Section {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Looking up details…").foregroundStyle(.secondary)
+                        }
+                    }
+                } else if book.author.isEmpty {
                     Section {
                         Label("The author is missing.", systemImage: "info.circle")
                             .foregroundStyle(.secondary)
@@ -265,6 +275,13 @@ struct BookDetailSheet: View {
             .scrollContentBackground(.hidden)
             .background(backdrop)
             .task { if let color = cover?.averageColor { tint = Color(color) } }
+            // a book still in the Drive: ask the catalogues what they know of it, once, as the page opens
+            .task(id: book.id) {
+                guard cloud != nil, book.bookDescription == nil || book.author.isEmpty, let onLookup else { return }
+                lookingUp = true
+                await onLookup()
+                lookingUp = false
+            }
             .sheet(isPresented: $showNotes) { BookNotesView(book: book) }
         }
         .presentationDetents([.medium, .large])
