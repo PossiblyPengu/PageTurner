@@ -433,8 +433,10 @@ final class ReadAloud: NSObject, ObservableObject {
         // the marks and the page catch up to what is being said now
         if let decorable { paint(spoken, as: highlights, on: decorable) }
         if let target = scrolls ? spoken.sentence : (spoken.word ?? spoken.sentence) {
-            pendingFollow = target.followable
-            follow()
+            if let place = target.followable {
+                pendingFollow = place
+                follow()
+            }
         }
     }
 
@@ -530,7 +532,7 @@ final class ReadAloud: NSObject, ObservableObject {
     private func paint(_ spoken: Spoken, as highlights: ReadAloudHighlights, on navigator: DecorableNavigator) {
         var sentence: [Decoration] = [], line: [Decoration] = [], word: [Decoration] = []
         if highlights.sentence, let locator = spoken.sentence {
-            sentence = [Decoration(id: markID("tts", locator), locator: locator.anchorable, style: .highlight(tint: .systemOrange))]
+            sentence = [Decoration(id: markID("tts", locator), locator: locator.paintable, style: .highlight(tint: .systemOrange))]
         }
         // Low Power Mode: the marks that move for every word — the word itself
         // and the line band it sits on — are the per-word cost; drop them both.
@@ -539,10 +541,10 @@ final class ReadAloud: NSObject, ObservableObject {
                 // a navigator that doesn't know the stronger mark gets the plain highlight
                 let style: Decoration.Style = navigator.supports(decorationStyle: .spokenWord)
                     ? .spokenWord(tint: .systemOrange) : .highlight(tint: .systemOrange)
-                word = [Decoration(id: markID("tts-word", locator), locator: locator.anchorable, style: style)]
+                word = [Decoration(id: markID("tts-word", locator), locator: locator.paintable, style: style)]
             }
             if highlights.line, navigator.supports(decorationStyle: .spokenLine) {
-                line = [Decoration(id: markID("tts-line", locator), locator: locator.anchorable, style: .spokenLine)]
+                line = [Decoration(id: markID("tts-line", locator), locator: locator.paintable, style: .spokenLine)]
             }
         }
         if sentence != painted.sentence {
@@ -667,9 +669,9 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
                     onNarrated?(utterance.locator)
                 }
             } else if scrolls {
-                followTarget.send(utterance.locator.followable)
+                if let place = utterance.locator.followable { followTarget.send(place) }
             } else if let word {
-                followTarget.send(word.followable)
+                if let place = word.followable { followTarget.send(place) }
             }
             // the state is published before every sentence, spoken or not — only a word being
             // spoken proves the voice works
@@ -742,14 +744,23 @@ extension Locator {
     /// querySelector throw, so nothing is marked or scrolled to. The text anchor's before/after
     /// context finds the spot without it. Locators the page itself produces (selections, the
     /// first-visible-element locator) carry a proper JS-generated selector and keep it.
-    /// What the page is taken to. A word or sentence with nothing of its own text around it ("No." on a line by
-    /// itself) is found by its text alone, and the first "No." of the chapter is what the page jumps back to — then
-    /// forward again to the next sentence. Without its text, the place the iterator gave (how far through the
-    /// chapter) is all that is used, which is exact enough for a page.
-    var followable: Locator {
-        let anchored = anchorable
-        let lonely = (anchored.text.before ?? "").isEmpty && (anchored.text.after ?? "").isEmpty
-        return lonely ? anchored.copy(text: { $0 = Locator.Text() }) : anchored
+    /// A word or sentence with nothing of its own text around it — a speaker's name on a line by itself, "No." — is
+    /// found by its text alone, and the first one of those in the chapter is where a text search lands.
+    var isLonely: Bool {
+        (text.before ?? "").isEmpty && (text.after ?? "").isEmpty
+    }
+
+    /// What the page is taken to, or nil to leave it where it is: a lonely locator would take the page back to the
+    /// first place that text appears in the chapter (and the next sentence takes it on from there). A lone line is
+    /// all but always on the page already.
+    var followable: Locator? {
+        isLonely ? nil : anchorable
+    }
+
+    /// What a mark is painted at. A lonely locator keeps its selector (precise where the selector works, and
+    /// nothing at all — rather than the wrong place — where it cannot); the rest are anchored by their text.
+    var paintable: Locator {
+        isLonely ? self : anchorable
     }
 
     var anchorable: Locator {
