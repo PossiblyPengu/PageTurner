@@ -212,7 +212,14 @@ enum GoogleDrive {
 
     static func downloadURL(id: String) -> URL? {
         var parts = URLComponents(string: "\(apiBase)/files/\(id)")
-        parts?.queryItems = [URLQueryItem(name: "alt", value: "media"), URLQueryItem(name: "supportsAllDrives", value: "true")]
+        // acknowledgeAbuse: without it a file too big for Drive's virus scan answers
+        // with a warning page (HTTP 200, HTML) instead of the bytes — which players
+        // and importers then read as a broken book
+        parts?.queryItems = [
+            URLQueryItem(name: "alt", value: "media"),
+            URLQueryItem(name: "supportsAllDrives", value: "true"),
+            URLQueryItem(name: "acknowledgeAbuse", value: "true"),
+        ]
         return parts?.url
     }
 

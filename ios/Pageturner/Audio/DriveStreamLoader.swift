@@ -127,7 +127,11 @@ final class DriveStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @uncheck
                 if let fresh = await refresh() { setToken(fresh); continue }
                 return nil
             }
-            guard http.statusCode == 206 || http.statusCode == 200 else { return nil }
+            guard http.statusCode == 206 || http.statusCode == 200,
+                  // Drive's error and virus-scan pages come back 200 with HTML — feeding them to
+                  // the player makes it report "Cannot Open" on a file that is really unreachable
+                  !(http.value(forHTTPHeaderField: "Content-Type") ?? "").contains("text/html")
+            else { return nil }
             // a server that ignored the range sent the whole file: the part wanted is cut from it
             if http.statusCode == 200, from > 0 || Int64(data.count) > to - from + 1 {
                 let lower = Int(min(Int64(data.count), from)), upper = Int(min(Int64(data.count), to + 1))

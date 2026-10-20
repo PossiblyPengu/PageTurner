@@ -81,12 +81,20 @@ final class AudioPlayer: ObservableObject {
     init(book: Book, library: LibraryStore) {
         self.book = book
         self.library = library
-        // a Drive book that has not come down plays from the Drive: each part not on the phone is streamed
+        // a Drive book that has not come down plays from the Drive: each part not on the phone is
+        // streamed. The match is by index, not the whole count — a book whose parts and names ever
+        // disagree must still stream what it lacks instead of asking AVFoundation for a dead file.
         let local = library.fileURLs(for: book)
-        if let source = book.drive, source.parts.count == local.count {
-            urls = zip(local, source.parts).map { file, part in
-                FileManager.default.fileExists(atPath: file.path)
-                    ? file : (DriveStreamLoader.url(file: part.id, size: part.size ?? 0, name: part.name) ?? file)
+        if let source = book.drive {
+            urls = local.enumerated().map { index, file in
+                if FileManager.default.fileExists(atPath: file.path), !Self.isWebPage(file) { return file }
+                guard index < source.parts.count,
+                      let stream = DriveStreamLoader.url(
+                          file: source.parts[index].id,
+                          size: source.parts[index].size ?? 0,
+                          name: source.parts[index].name)
+                else { return file }
+                return stream
             }
         } else {
             urls = local
@@ -116,6 +124,17 @@ final class AudioPlayer: ObservableObject {
                 return try? await GoogleAuth.shared.accessToken()
             })
         }
+    }
+
+    /// A file that begins "<" is a saved web page (a Drive warning page written
+    /// as the book once), not audio — no real format starts that way (m4b/mp4
+    /// open with `ftyp`, mp3 with `ID3` or a frame sync, wav `RIFF`, flac `fLaC`).
+    nonisolated private static func isWebPage(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url),
+              let head = try? handle.read(upToCount: 16), !head.isEmpty
+        else { return false }
+        try? handle.close()
+        return head.first == UInt8(ascii: "<")
     }
 
     /// An asset for a track: a file on the phone as it is, a Drive file through the loader that serves it.

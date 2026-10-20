@@ -367,6 +367,15 @@ final class DriveDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchec
             Task { @MainActor in DriveDownloads.shared.failed(ticket, status: status, body: body) }
             return
         }
+        // a virus-scan or quota page answers 200 with HTML: saving it makes the book "Cannot Open"
+        if (downloadTask.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")?.contains("text/html") == true {
+            let body = try? Data(contentsOf: location)
+            try? fm.removeItem(at: location)
+            Task { @MainActor in
+                DriveDownloads.shared.failed(ticket, status: status, body: body, message: "Drive answered with a page, not the file — the file may need the owner to allow downloads.")
+            }
+            return
+        }
         let got = (try? location.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init)
         if ticket.size > 0, let got, got != ticket.size {
             try? fm.removeItem(at: location)
