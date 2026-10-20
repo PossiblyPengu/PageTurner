@@ -441,6 +441,11 @@ struct BookEditSheet: View {
 
     /// The cover on its own: from the photos, from another match's art, or none (the plain jacket) — whatever a
     /// wrong lookup put there.
+    /// Whether a jacket file is on disk now — a path check, not a decode: the form redraws on every keystroke.
+    private var hasStoredCover: Bool {
+        FileManager.default.fileExists(atPath: library.coverURL(for: original).path)
+    }
+
     private var coverSection: some View {
         Section {
             HStack {
@@ -449,8 +454,10 @@ struct BookEditSheet: View {
                         .frame(width: 70, height: 105)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 } else {
+                    // the thumbnail is cached; cover(for:) would decode the full jacket per redraw
                     BookCoverView(
-                        book: original, cover: removeCover ? nil : (pickedImage ?? library.cover(for: original)),
+                        book: original,
+                        cover: removeCover ? nil : (pickedImage ?? library.coverThumbnail(for: original, maxPixels: 300)),
                         showsBadges: false, corner: 8)
                         .frame(width: 70)
                 }
@@ -464,7 +471,7 @@ struct BookEditSheet: View {
             } label: {
                 Label("Find Another Cover…", systemImage: "magnifyingglass")
             }
-            if library.cover(for: original) != nil || pickedImage != nil || !pickedCovers.isEmpty {
+            if (hasStoredCover && !removeCover) || pickedImage != nil || !pickedCovers.isEmpty {
                 Button("Remove Cover", role: .destructive) {
                     removeCover = true
                     pickedImage = nil
@@ -496,7 +503,13 @@ struct BookEditSheet: View {
         if let olid = candidate.openLibraryId { openLibraryId = olid }
         // a shelf row the match names is the one to push to — never a guess
         if let id = candidate.bookmasterId { pin = id }
-        pickedCovers = candidate.coverURLs
+        // the match's jacket comes with it, over a photo or a removal chosen
+        // earlier; a match without one leaves the cover choice as it stood
+        if !candidate.coverURLs.isEmpty {
+            pickedCovers = candidate.coverURLs
+            pickedImage = nil
+            removeCover = false
+        }
     }
 
     private func save() {
@@ -565,6 +578,8 @@ struct BookLookupSheet: View {
                         .keyboardType(.numbersAndPunctuation)
                         .autocorrectionDisabled()
                 }
+                .submitLabel(.search)
+                .onSubmit { search() }
                 Section {
                     if searching {
                         HStack {
@@ -628,7 +643,8 @@ struct BookLookupSheet: View {
             }
             .task { search() }
         }
-        .presentationDetents([.medium, .large])
+        // a grid of jackets wants the height: at the medium stop one row shows under the fields
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
 

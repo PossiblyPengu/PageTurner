@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -17,11 +18,16 @@ enum CoverFetch {
         return URLSession(configuration: config)
     }()
 
-    private static let memory = NSCache<NSURL, UIImage>()
+    private static let memory: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.totalCostLimit = 48 << 20
+        return cache
+    }()
     private static let lock = NSLock()
-    /// URLs that failed this run — without it a dead jacket is re-asked on
-    /// every redraw of a shelf. Kept in memory only: a network hiccup clears
-    /// on relaunch.
+    /// URLs the server said no to (a 404, a stand-in) this run — without it a
+    /// dead jacket is re-asked on every redraw of a shelf. A fetch that never
+    /// reached the server (offline, a timeout) is *not* a miss: it is asked
+    /// again the next time the cover comes on screen.
     private static var misses: Set<URL> = []
     /// Fetches already under way — a grid asking for the same jacket makes
     /// one request, not one per cell.
@@ -29,6 +35,10 @@ enum CoverFetch {
     /// Below this the "cover" is a stand-in (a 1×1 tracking gif, an error
     /// image): counted as a miss so the next URL in the chain is tried.
     private static let minPixels: CGFloat = 40
+    /// Jackets are drawn at most a few hundred points wide; a 1500px Open
+    /// Library "-L" decoded whole is 6 MB a cell. ImageIO downsamples from the
+    /// encoded bytes, so the full decode never happens.
+    private static let maxPixels = 800
 
     static func image(from url: URL) async -> UIImage? {
         if let hit = memory.object(forKey: url as NSURL) { return hit }
@@ -49,19 +59,34 @@ enum CoverFetch {
     }
 
     private static func fetch(_ url: URL) async -> UIImage? {
-        guard let (data, response) = try? await session.data(from: url),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let image = UIImage(data: data),
-              let size = image.cgImage.map({ CGSize(width: $0.width, height: $0.height) }),
-              size.width >= minPixels, size.height >= minPixels
+        // no reply at all: nothing learned about the jacket, so nothing remembered
+        guard let (data, response) = try? await session.data(from: url) else { return nil }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let image = decode(data)
         else {
             lock.lock()
             misses.insert(url)
             lock.unlock()
             return nil
         }
-        memory.setObject(image, forKey: url as NSURL)
+        memory.setObject(image, forKey: url as NSURL, cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
         return image
+    }
+
+    /// A downsampled decode, or nil for a stand-in too small to be a cover.
+    private static func decode(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let header = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = header[kCGImagePropertyPixelWidth] as? CGFloat,
+              let height = header[kCGImagePropertyPixelHeight] as? CGFloat,
+              width >= minPixels, height >= minPixels,
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+              ] as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     /// The first URL that answers with a real picture.
@@ -93,26 +118,27 @@ struct RemoteCover: View {
     }
 
     var body: some View {
-        ZStack {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Color.secondary.opacity(0.15)
-                if finished {
+        // The flat colour is the base and the art an overlay on it: an overlay never changes its base's
+        // size, so a jacket that is not quite 2:3 is cropped to the box instead of pushing the box
+        // wider — a `scaledToFill` image on its own reports its overflowing size to a grid.
+        Color.secondary.opacity(0.15)
+            .overlay {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else if finished {
                     Image(systemName: icon).foregroundStyle(.secondary)
                 } else {
                     ProgressView().controlSize(.small)
                 }
             }
-        }
-        .clipped()
-        .task(id: urls) {
-            finished = false
-            image = await CoverFetch.firstImage(in: urls)
-            finished = true
-        }
-        .accessibilityHidden(true)
+            .clipped()
+            .task(id: urls) {
+                finished = false
+                image = await CoverFetch.firstImage(in: urls)
+                finished = true
+            }
+            .accessibilityHidden(true)
     }
 }

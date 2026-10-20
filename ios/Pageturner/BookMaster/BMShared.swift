@@ -126,14 +126,10 @@ struct BMMetric: View {
 struct BMCover: View {
     let row: BMShelfRow
     var body: some View {
-        // The box is decided here (2:3 of the width offered); the art only ever
-        // fills it — a loaded file's intrinsic size must not leak into the
-        // grid's row heights, or covers land different sizes.
-        GeometryReader { geo in
-            RemoteCover(urls: row.coverURLs, icon: row.isAudio ? "headphones" : "book.closed")
-            .frame(width: geo.size.width, height: geo.size.height)
-            .clipped()
-        }
+        // The box is decided here (2:3 of the width offered); RemoteCover only
+        // ever fills what it is given, so a jacket's own size never leaks into
+        // the grid's row heights.
+        RemoteCover(urls: row.coverURLs, icon: row.isAudio ? "headphones" : "book.closed")
         .aspectRatio(2/3, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
