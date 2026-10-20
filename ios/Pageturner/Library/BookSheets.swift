@@ -958,7 +958,7 @@ private struct CoverPreviewSheet: View {
         return CGSize(width: image.size.width * s, height: image.size.height * s)
     }
 
-    private var body: some View {
+    var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
                 ZStack {
