@@ -1,14 +1,30 @@
 import CoreSpotlight
 import SwiftUI
+import UIKit
 import UserNotifications
+
+/// Where iOS hands the app a background session's events — Drive downloads that finished while it was not running.
+@MainActor
+final class PageturnerAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        guard identifier == DriveDownloads.identifier else { completionHandler(); return }
+        DriveDownloads.shared.holdBackgroundCompletion(completionHandler)
+    }
+}
 
 @main
 struct PageturnerApp: App {
+    @UIApplicationDelegateAdaptor(PageturnerAppDelegate.self) private var appDelegate
     @StateObject private var library = LibraryStore()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         Log.install()
+        // downloads iOS finished (or is still running) for books from Google Drive
+        DriveDownloads.shared.reconnect()
         // taps on a suggestion notification come back through here
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         // iOS wants a background task's handler registered before launch ends
@@ -92,6 +108,7 @@ struct PageturnerApp: App {
                 // the one-off sync on coming to the front
                 .task(id: scenePhase != .background) {
                     guard scenePhase != .background else { return }
+                    DriveDownloads.shared.attach(library)
                     await BookMaster.shared.flush()
                     await FolderWatcher.shared.scan(library: library)
                     await DriveSync.shared.scanIfDue(library: library)

@@ -11,6 +11,13 @@ struct BookDetailSheet: View {
     let onRestart: () -> Void
     /// Rating, when the book can be rated on BookMaster (it is linked).
     var onRate: ((Int) -> Void)? = nil
+    /// A book from Google Drive that is not on the phone (nil for any other): waiting, coming down, or stuck — and
+    /// how far it has got.
+    var cloud: DriveDownloads.Badge? = nil
+    var downloadState: DriveDownloads.State? = nil
+    var onDownload: () -> Void = {}
+    var onCancelDownload: () -> Void = {}
+    var onRemoveDownload: () -> Void = {}
     @State private var picked: Int?
     @State private var showNotes = false
     @State private var tint: Color = .ptAccent
@@ -24,6 +31,83 @@ struct BookDetailSheet: View {
         if isFinished { return book.isAudio ? "Listen Again" : "Read Again" }
         if p > 0.001 { return book.isAudio ? "Continue Listening" : "Continue Reading" }
         return book.isAudio ? "Listen" : "Read"
+    }
+
+    /// The place of the Read button for a book that is still in the Drive: Download, its progress, or why it stopped.
+    @ViewBuilder
+    private var cloudControl: some View {
+        switch cloud {
+        case .downloading:
+            VStack(spacing: 8) {
+                if let fraction = downloadState?.fraction {
+                    ProgressView(value: fraction)
+                } else {
+                    ProgressView()
+                }
+                Text(progressText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Button("Cancel Download", action: onCancelDownload)
+                    .font(.footnote)
+                    .buttonStyle(.borderless)
+            }
+            .frame(maxWidth: .infinity)
+        case .failed:
+            VStack(spacing: 10) {
+                Text(downloadState?.failure ?? "The download did not finish.")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                Button(action: onDownload) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Try Again")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .ptButtonStyle(prominent: true)
+                .controlSize(.large)
+            }
+        default:
+            VStack(spacing: 6) {
+                Button(action: onDownload) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "icloud.and.arrow.down")
+                        Text("Download")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .ptButtonStyle(prominent: true)
+                .controlSize(.large)
+                if let line = downloadSizeLine {
+                    Text(line).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// "412 MB · 12 files": what a download will cost.
+    private var downloadSizeLine: String? {
+        guard let source = book.drive else { return nil }
+        var parts: [String] = []
+        let size = GoogleDrive.sizeText(source.bytes)
+        if !size.isEmpty { parts.append(size) }
+        if source.parts.count > 1 { parts.append("\(source.parts.count) files") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// "412 MB of 1.2 GB · file 3 of 12".
+    private var progressText: String {
+        guard let state = downloadState else { return "Starting…" }
+        var parts: [String] = []
+        if state.total > 0 {
+            parts.append("\(GoogleDrive.sizeText(state.received)) of \(GoogleDrive.sizeText(state.total))")
+        } else if state.received > 0 {
+            parts.append(GoogleDrive.sizeText(state.received))
+        }
+        if state.parts > 1 { parts.append("\(min(state.partsDone + 1, state.parts)) of \(state.parts) files") }
+        return parts.isEmpty ? "Starting…" : parts.joined(separator: " · ")
     }
 
     /// The cover's colour fading into the sheet, so the page belongs to the book.
@@ -52,17 +136,21 @@ struct BookDetailSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        Button(action: onOpen) {
-                            // not a Label: inside a List it tints its icon with the accent colour,
-                            // which vanishes on the accent-filled button
-                            HStack(spacing: 8) {
-                                Image(systemName: book.isAudio ? "play.fill" : "book.fill")
-                                Text(openLabel)
+                        if cloud != nil {
+                            cloudControl
+                        } else {
+                            Button(action: onOpen) {
+                                // not a Label: inside a List it tints its icon with the accent colour,
+                                // which vanishes on the accent-filled button
+                                HStack(spacing: 8) {
+                                    Image(systemName: book.isAudio ? "play.fill" : "book.fill")
+                                    Text(openLabel)
+                                }
+                                .frame(maxWidth: .infinity)
                             }
-                            .frame(maxWidth: .infinity)
+                            .ptButtonStyle(prominent: true)
+                            .controlSize(.large)
                         }
-                        .ptButtonStyle(prominent: true)
-                        .controlSize(.large)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
@@ -139,6 +227,12 @@ struct BookDetailSheet: View {
                     if book.isAudio, book.fileNames.count > 1 {
                         LabeledContent("Tracks", value: "\(book.fileNames.count)")
                     }
+                    if let source = book.drive, source.bytes > 0 {
+                        LabeledContent("Size", value: GoogleDrive.sizeText(source.bytes))
+                    }
+                    if book.drive != nil {
+                        LabeledContent("Stored in", value: cloud == nil ? "This iPhone and Google Drive" : "Google Drive")
+                    }
                     if !book.isAudio {
                         LabeledContent("Bookmarks", value: "\(book.bookmarks.count)")
                     }
@@ -157,6 +251,9 @@ struct BookDetailSheet: View {
                     }
                     Button(book.collections.isEmpty ? "Add to a Shelf…" : "Shelves: \(book.collections.joined(separator: ", "))", action: onShelves)
                     Button("Edit Details", action: onEdit)
+                    if book.drive != nil, cloud == nil {
+                        Button("Remove Download", action: onRemoveDownload)
+                    }
                     if BookMaster.shared.isLinked {
                         Button("Comments & Suggestions") { showNotes = true }
                     }

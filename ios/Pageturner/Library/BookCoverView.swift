@@ -12,6 +12,8 @@ struct BookCoverView: View {
     var selected: Bool?
     /// The book's file has gone from the device.
     var missing = false
+    /// A book from Google Drive that has not come down (or is on its way): nil for any other.
+    var cloud: DriveDownloads.Badge?
 
     var body: some View {
         // The 2:3 box is a clear base and the art an overlay on it: an overlay never changes its
@@ -70,6 +72,9 @@ struct BookCoverView: View {
 
     private var badges: some View {
         HStack(alignment: .bottom) {
+            if let cloud {
+                CloudBadge(badge: cloud)
+            }
             if missing {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.caption2.weight(.bold))
@@ -106,6 +111,51 @@ struct BookCoverView: View {
     }
 }
 
+/// What a cover says about a Drive book that is not on the phone: waiting to be downloaded, coming down, or stuck.
+struct CloudBadge: View {
+    let badge: DriveDownloads.Badge
+
+    var body: some View {
+        content
+            .font(.caption2.weight(.bold))
+            .frame(width: 14, height: 14)
+            .padding(6)
+            .background(.ultraThinMaterial, in: Circle())
+            .accessibilityLabel(label)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch badge {
+        case .available:
+            Image(systemName: "icloud.and.arrow.down")
+        case let .downloading(fraction):
+            ZStack {
+                if let fraction {
+                    Circle().stroke(Color.primary.opacity(0.18), lineWidth: 2.5)
+                    Circle()
+                        .trim(from: 0, to: max(0.04, fraction))
+                        .stroke(Color.ptAccent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                } else {
+                    ProgressView().controlSize(.mini)
+                }
+                Image(systemName: "arrow.down").font(.system(size: 7, weight: .heavy))
+            }
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
+    }
+
+    private var label: String {
+        switch badge {
+        case .available: return "In Google Drive, not downloaded"
+        case let .downloading(fraction): return fraction.map { "Downloading, \(Int(($0 * 100).rounded())) percent" } ?? "Downloading"
+        case .failed: return "Download failed"
+        }
+    }
+}
+
 /// The cover grid shared by the library and search.
 struct BookGrid: View {
     let books: [Book]
@@ -114,6 +164,7 @@ struct BookGrid: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(AppRouter.self) private var router
     @Environment(\.dynamicTypeSize) private var typeSize
+    private let downloads = DriveDownloads.shared
     /// Starting over throws the place away, so it asks first.
     @State private var restarting: Book?
 
@@ -139,7 +190,8 @@ struct BookGrid: View {
                         BookCoverView(
                             book: book, cover: library.coverThumbnail(for: book, maxPixels: 640),
                             selected: selection.map { $0.wrappedValue.contains(book.id) },
-                            missing: library.missing.contains(book.id))
+                            missing: library.missing.contains(book.id),
+                            cloud: downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id)))
                         Text(book.title)
                             .font(.footnote.weight(.semibold))
                             .lineLimit(2)
@@ -157,13 +209,25 @@ struct BookGrid: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(accessibilityLabel(for: book))
                 .accessibilityAddTraits(selection?.wrappedValue.contains(book.id) == true ? .isSelected : [])
-                .accessibilityHint(selection == nil ? "Opens the book"
+                .accessibilityHint(selection == nil ? (library.inCloud.contains(book.id) ? "Opens the book’s page, where it can be downloaded" : "Opens the book")
                     : (selection?.wrappedValue.contains(book.id) == true ? "Double tap to deselect" : "Double tap to select"))
                 .contextMenu {
                     // no menu while ticking books
                     if selection == nil {
-                        Button { router.open(book, library: library) } label: {
-                            Label(book.isAudio ? "Play" : "Read", systemImage: book.isAudio ? "play.fill" : "book.fill")
+                        if library.inCloud.contains(book.id) {
+                            if downloads.isRunning(book.id) {
+                                Button { downloads.cancel(book.id) } label: {
+                                    Label("Cancel Download", systemImage: "xmark.circle")
+                                }
+                            } else {
+                                Button { downloads.start(book, library: library) } label: {
+                                    Label("Download", systemImage: "icloud.and.arrow.down")
+                                }
+                            }
+                        } else {
+                            Button { router.open(book, library: library) } label: {
+                                Label(book.isAudio ? "Play" : "Read", systemImage: book.isAudio ? "play.fill" : "book.fill")
+                            }
                         }
                         if (book.progression ?? 0) < 0.995 {
                             Button { library.markFinished(book.id) } label: {
@@ -186,6 +250,11 @@ struct BookGrid: View {
                             Label("Edit Details", systemImage: "pencil")
                         }
                         Divider()
+                        if book.drive != nil, !library.inCloud.contains(book.id) {
+                            Button { router.removeDownload(book, library: library) } label: {
+                                Label("Remove Download", systemImage: "icloud.and.arrow.up")
+                            }
+                        }
                         Button(role: .destructive) { router.askDelete([book]) } label: {
                             Label("Remove from Library", systemImage: "trash")
                         }
@@ -215,6 +284,7 @@ struct BookGrid: View {
         if book.isAudio { parts.append("audiobook") }
         if let p = book.progression, p > 0 { parts.append("\(Int((p * 100).rounded())) percent") }
         if library.missing.contains(book.id) { parts.append("file missing") }
+        if library.inCloud.contains(book.id) { parts.append("in Google Drive, not downloaded") }
         return parts.joined(separator: ", ")
     }
 }

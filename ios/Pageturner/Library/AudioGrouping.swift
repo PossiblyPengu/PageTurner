@@ -80,6 +80,30 @@ enum AudioGrouping {
         "file", "part", "track", "trk", "vol", "volume",
     ]
 
+    /// Folder names that hold whatever was dumped into them — never a title.
+    private static let dumpFolders: Set<String> = [
+        "inbox", "documents", "downloads", "desktop", "tmp", "temp",
+    ]
+
+    /// What the folder the files sit in says the book is called: the folder, or for "CD 1"/"CD 2" folders their
+    /// common parent. Only when there are several files (a lone file in a folder is probably one of several in a
+    /// shared folder: its own name says more) and the folder is one somebody named, not a dump ("Downloads", the
+    /// share sheet's "Inbox").
+    static func folderTitle(for urls: [URL]) -> String? {
+        guard urls.count > 1 else { return nil }
+        let dirs = Set(urls.map { $0.deletingLastPathComponent().path })
+        let leaf: String
+        if dirs.count == 1 {
+            leaf = urls[0].deletingLastPathComponent().lastPathComponent
+        } else {
+            // tracks from sibling "CD n" folders take their common parent's
+            let parents = Set(dirs.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path })
+            leaf = parents.count == 1 ? URL(fileURLWithPath: parents.first!).lastPathComponent : ""
+        }
+        guard !leaf.isEmpty, leaf != "/", !dumpFolders.contains(leaf.lowercased()) else { return nil }
+        return leaf
+    }
+
     /// "CD 1", "Disc 02", "Part 3" — one stretch of a book, not a book itself.
     static func isDisc(_ dirName: String) -> Bool {
         dirName.range(

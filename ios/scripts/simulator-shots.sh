@@ -61,6 +61,9 @@ shot 01-empty 6
 # seeded library (the first launch with -PTDebugSeed fills it; later launches reuse it)
 shot 02-library 26 -PTDebugSeed 1 -PTDebugScreen library
 shot 03-detail 6 -PTDebugScreen detail
+# books waiting in Google Drive: the page of one not started, and of one part way down (the library, 02, shows both badges)
+shot 03a-detail-cloud 6 -PTDebugScreen clouddetail
+shot 03b-detail-downloading 6 -PTDebugScreen clouddetail -PTDebugCloudState downloading
 shot 04-edit 6 -PTDebugScreen edit
 shot 05-shelves 6 -PTDebugScreen shelves
 shot 06-stats 6 -PTDebugScreen stats

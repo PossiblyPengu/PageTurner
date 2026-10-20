@@ -140,6 +140,44 @@ enum GoogleDrive {
         !file.isFolder && !file.isGoogleApp && isImportableName(file.name)
     }
 
+    // MARK: Books that live in the Drive
+
+    /// A Drive file a library book is made of.
+    struct FileRef: Codable, Hashable {
+        var id: String
+        /// The name Drive gives it: the local copy's extension comes from it.
+        var name: String
+        var size: Int64?
+        var md5: String?
+
+        init(_ file: File) {
+            id = file.id
+            name = file.name
+            size = file.size
+            md5 = file.md5Checksum
+        }
+
+        init(id: String, name: String, size: Int64? = nil, md5: String? = nil) {
+            self.id = id
+            self.name = name
+            self.size = size
+            self.md5 = md5
+        }
+    }
+
+    /// Where a library book comes from when it was added from the Drive without being downloaded: the files it is
+    /// made of, in play order. The book exists in the library at once; its files come down one book at a time, when asked.
+    struct Source: Codable, Hashable {
+        var parts: [FileRef]
+        /// The title the library gave it from the file and folder names. Once the file is open its own title replaces
+        /// this — unless the reader has changed it meanwhile.
+        var guessedTitle: String
+        /// What the downloaded files say about the book (title, author, cover…) has been read.
+        var finished = false
+
+        var bytes: Int64 { parts.reduce(0) { $0 + ($1.size ?? 0) } }
+    }
+
     // MARK: Queries
 
     /// A value inside a query's single quotes.

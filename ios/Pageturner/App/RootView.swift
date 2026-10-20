@@ -11,6 +11,7 @@ struct RootView: View {
     @State private var router = AppRouter()
     private let playback = PlaybackCoordinator.shared
     private let speech = ReadAloudHost.shared
+    private let downloads = DriveDownloads.shared
     private let focus = AudioFocus.shared
     private let bookMaster = BookMaster.shared
     private let notifier = Notifier.shared
@@ -150,31 +151,50 @@ struct RootView: View {
             onCancel: { router.showLink = false })
     }
 
-    private func detailSheet(_ book: Book) -> some View {
-        BookDetailSheet(book: book, cover: library.cover(for: book)) {
-            router.detail = nil
-            // "Read again" starts from the beginning, not the last page
-            if (book.progression ?? 0) >= 0.995 { library.restart(book.id) }
-            router.open(library.books.first { $0.id == book.id } ?? book, library: library)
-        } onEdit: {
-            router.detail = nil
-            // present the edit sheet after this one is fully dismissed
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.editing = book }
-        } onDelete: {
-            router.detail = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.askDelete([book]) }
-        } onShelves: {
-            router.detail = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.openShelves([book.id]) }
-        } onFinish: {
-            library.markFinished(book.id)
-            router.detail = nil
-        } onRestart: {
-            library.restart(book.id)
-            router.detail = nil
-        } onRate: { stars in
-            library.rate(book.id, stars: stars)
-        }
+    private func detailSheet(_ shown: Book) -> some View {
+        // what the library holds now: a download that finished has given the book its real title and cover
+        let book = library.books.first { $0.id == shown.id } ?? shown
+        let cloud = downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id))
+        return BookDetailSheet(
+            book: book, cover: library.cover(for: book),
+            onOpen: {
+                router.detail = nil
+                // "Read again" starts from the beginning, not the last page
+                if (book.progression ?? 0) >= 0.995 { library.restart(book.id) }
+                router.open(library.books.first { $0.id == book.id } ?? book, library: library)
+            },
+            onEdit: {
+                router.detail = nil
+                // present the edit sheet after this one is fully dismissed
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.editing = book }
+            },
+            onDelete: {
+                router.detail = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.askDelete([book]) }
+            },
+            onShelves: {
+                router.detail = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.openShelves([book.id]) }
+            },
+            onFinish: {
+                library.markFinished(book.id)
+                router.detail = nil
+            },
+            onRestart: {
+                library.restart(book.id)
+                router.detail = nil
+            },
+            onRate: { stars in
+                library.rate(book.id, stars: stars)
+            },
+            cloud: cloud,
+            downloadState: downloads.states[book.id],
+            onDownload: { downloads.start(book, library: library) },
+            onCancelDownload: { downloads.cancel(book.id) },
+            onRemoveDownload: {
+                router.detail = nil
+                router.removeDownload(book, library: library)
+            })
     }
 
     private func editSheet(_ book: Book) -> some View {

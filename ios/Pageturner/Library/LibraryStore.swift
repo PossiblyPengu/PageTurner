@@ -130,6 +130,9 @@ struct Book: Identifiable, Codable, Hashable {
     var audioClips: [AudioClip] = []
     /// Words and phrases saved from the book to look up later.
     var words: [SavedWord] = []
+    /// Set when the book was added from Google Drive: the Drive files it is made of. Its files come down when asked
+    /// for (`DriveDownloads`), and the book stays in the library, with its place, whether they are on the device or not.
+    var drive: GoogleDrive.Source?
 
     var ext: String { fileName.split(separator: ".").last.map(String.init)?.lowercased() ?? "" }
     var isAudio: Bool { Self.audioExtensions.contains(ext) }
@@ -291,6 +294,7 @@ extension Book {
         audioRate = try c.decodeIfPresent(Double.self, forKey: .audioRate)
         audioClips = (try? c.decodeIfPresent([AudioClip].self, forKey: .audioClips)) ?? []
         words = (try? c.decodeIfPresent([SavedWord].self, forKey: .words)) ?? []
+        drive = try? c.decodeIfPresent(GoogleDrive.Source.self, forKey: .drive)
     }
 
     /// How a BookMaster push names this book.
@@ -349,6 +353,8 @@ final class LibraryStore: ObservableObject {
     @Published var importing = false
     /// Books whose file is no longer on the device (deleted in the Files app): marked, and they do not open.
     @Published private(set) var missing: Set<UUID> = []
+    /// Books from Google Drive whose files have not (all) come down: in the library, waiting to be downloaded.
+    @Published private(set) var inCloud: Set<UUID> = []
     @Published var lastError: String?
 
     private let fm = FileManager.default
@@ -388,17 +394,21 @@ final class LibraryStore: ObservableObject {
         refreshMissing()
     }
 
-    /// Look for books whose file has gone, off the main thread — at launch and when the app returns.
+    /// Look for books whose file has gone, off the main thread — at launch and when the app returns. A book from
+    /// Google Drive without its files is not missing: it is waiting to be downloaded (`inCloud`).
     func refreshMissing() {
-        let snapshot = books.map { (id: $0.id, urls: fileURLs(for: $0)) }
+        let snapshot = books.map { (id: $0.id, urls: fileURLs(for: $0), cloud: $0.drive != nil) }
         Task {
-            let gone = await Task.detached(priority: .utility) { () -> Set<UUID> in
+            let (gone, cloud) = await Task.detached(priority: .utility) { () -> (Set<UUID>, Set<UUID>) in
                 let fm = FileManager.default
-                return Set(snapshot.filter { entry in
-                    entry.urls.contains { url in !fm.fileExists(atPath: url.path) }
-                }.map(\.id))
+                var gone = Set<UUID>(), cloud = Set<UUID>()
+                for entry in snapshot where entry.urls.contains(where: { !fm.fileExists(atPath: $0.path) }) {
+                    if entry.cloud { cloud.insert(entry.id) } else { gone.insert(entry.id) }
+                }
+                return (gone, cloud)
             }.value
             if missing != gone { missing = gone }
+            if inCloud != cloud { inCloud = cloud }
         }
     }
 
@@ -407,6 +417,16 @@ final class LibraryStore: ObservableObject {
         books
             .filter { ($0.progression ?? 0) > 0.001 && ($0.progression ?? 0) < 0.995 }
             .max { ($0.lastOpenedAt ?? .distantPast) < ($1.lastOpenedAt ?? .distantPast) }
+    }
+
+    /// The Books folder (in Documents, visible in the Files app) — where a Drive download is put.
+    nonisolated static var booksFolder: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Books", isDirectory: true)
+    }
+
+    /// How big the file called `name` in the Books folder is, nil when there is none.
+    func localSize(of name: String) -> Int64? {
+        Self.fileSize(booksDir.appendingPathComponent(name)).map(Int64.init)
     }
 
     func fileURL(for book: Book) -> URL { booksDir.appendingPathComponent(book.fileName) }
@@ -640,11 +660,6 @@ final class LibraryStore: ObservableObject {
         try await register(id: id, fileName: fileName, fallbackTitle: converted.title)
     }
 
-    /// Folder names that hold whatever was dumped into them — never a title.
-    private static let dumpFolders: Set<String> = [
-        "inbox", "documents", "downloads", "desktop", "tmp", "temp",
-    ]
-
     private func importAudiobook(_ sources: [URL]) async throws {
         // full paths, not basenames: sibling "CD 1"/"CD 2" parts can share a
         // name, and only their folders keep them apart and in order
@@ -697,17 +712,8 @@ final class LibraryStore: ObservableObject {
         func meta(_ key: AVMetadataKey) -> AVMetadataItem? {
             metadata.first { $0.commonKey == key }
         }
-        // tracks from one folder take that folder's name; tracks from sibling
-        // "CD n" folders take their common parent's
-        let leaf: String = {
-            if dirs.count == 1 { return sorted[0].deletingLastPathComponent().lastPathComponent }
-            let parents = Set(dirs.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path })
-            return parents.count == 1 ? URL(fileURLWithPath: parents.first!).lastPathComponent : ""
-        }()
-        // a dump folder ("Downloads", the share sheet's "Inbox") names where
-        // files sat, not the book — only a folder the reader named counts
-        // A lone file in a folder is probably one of several in a shared folder: its own name says more.
-        let dirTitle = sorted.count > 1 && !leaf.isEmpty && !Self.dumpFolders.contains(leaf.lowercased()) ? leaf : nil
+        // the folder the files sit in (see `AudioGrouping.folderTitle`)
+        let dirTitle = AudioGrouping.folderTitle(for: sorted)
         if let album = meta(.commonKeyAlbumName)?.stringValue, !album.isEmpty {
             book.title = album
         } else if let dirTitle {
@@ -757,32 +763,7 @@ final class LibraryStore: ObservableObject {
             addedAt: Date()
         )
         do {
-            let publication = try await Readium.shared.open(url: dest)
-            if let title = publication.metadata.title, !title.isEmpty { book.title = title }
-            // " & ", not ", ": a comma reads as "Last, First" to BookMaster
-            book.author = publication.metadata.authors.map(\.name).joined(separator: " & ")
-            if let blurb = publication.metadata.description, !blurb.isEmpty {
-                let text = BookText.plain(fromHTML: blurb)
-                if !text.isEmpty { book.bookDescription = text }
-            }
-            if let published = publication.metadata.published {
-                // UTC: a date at midnight UTC must not read as the previous year in the Americas
-                var calendar = Calendar(identifier: .gregorian)
-                calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
-                book.year = String(calendar.component(.year, from: published))
-            }
-            if let identifier = publication.metadata.identifier, let isbn = ISBN.normalize(identifier) {
-                book.isbn = isbn
-            }
-            if let series = publication.metadata.belongsToSeries.first, !series.name.isEmpty {
-                book.series = series.name
-                book.seriesIndex = series.position
-            }
-            if let image = try? await publication.cover().get(),
-               let jpeg = image.jpegData(compressionQuality: 0.85)
-            {
-                try? jpeg.write(to: coverURL(for: book))
-            }
+            try await readDetails(of: &book, at: dest)
         } catch {
             try? fm.removeItem(at: dest)
             throw error
@@ -800,6 +781,37 @@ final class LibraryStore: ObservableObject {
         }
         books.insert(book, at: 0)
         save()
+    }
+
+    /// What Readium finds in a book file: its title, author, blurb, year, ISBN and series go onto `book`, and its cover
+    /// is written to the book's cover file. Throws when the file cannot be opened.
+    private func readDetails(of book: inout Book, at url: URL) async throws {
+        let publication = try await Readium.shared.open(url: url)
+        if let title = publication.metadata.title, !title.isEmpty { book.title = title }
+        // " & ", not ", ": a comma reads as "Last, First" to BookMaster
+        book.author = publication.metadata.authors.map(\.name).joined(separator: " & ")
+        if let blurb = publication.metadata.description, !blurb.isEmpty {
+            let text = BookText.plain(fromHTML: blurb)
+            if !text.isEmpty { book.bookDescription = text }
+        }
+        if let published = publication.metadata.published {
+            // UTC: a date at midnight UTC must not read as the previous year in the Americas
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+            book.year = String(calendar.component(.year, from: published))
+        }
+        if let identifier = publication.metadata.identifier, let isbn = ISBN.normalize(identifier) {
+            book.isbn = isbn
+        }
+        if let series = publication.metadata.belongsToSeries.first, !series.name.isEmpty {
+            book.series = series.name
+            book.seriesIndex = series.position
+        }
+        if let image = try? await publication.cover().get(),
+           let jpeg = image.jpegData(compressionQuality: 0.85)
+        {
+            try? jpeg.write(to: coverURL(for: book))
+        }
     }
 
     private static func fileSize(_ url: URL) -> Int? {
@@ -860,6 +872,87 @@ final class LibraryStore: ObservableObject {
             if book != books[i] { books[i] = book; changed = true }
         }
         if changed { save() }
+    }
+
+    // MARK: - Books from Google Drive
+
+    /// The Drive files the library already holds a book for, downloaded or not.
+    var driveFileIDs: Set<String> {
+        Set(books.flatMap { $0.drive?.parts.map(\.id) ?? [] })
+    }
+
+    /// Put books found in the Drive on the shelf without downloading anything: each is a book with its title, ready
+    /// to be downloaded when the reader asks. The first of `plans` ends up on top.
+    @discardableResult
+    func addFromDrive(_ plans: [DriveBooks.Plan]) -> [Book] {
+        let now = Date()
+        var added: [Book] = []
+        for (n, plan) in plans.enumerated() where !plan.source.parts.isEmpty {
+            let id = UUID()
+            let names = plan.source.parts.enumerated().map {
+                DriveBooks.localName(book: id, index: $0.offset, part: $0.element, audio: plan.isAudio)
+            }
+            var book = Book(
+                id: id, title: plan.title, author: "", fileName: names[0], fileNames: names,
+                addedAt: now.addingTimeInterval(-Double(n) * 0.001))
+            book.trackTitles = plan.trackTitles
+            book.drive = plan.source
+            added.append(book)
+        }
+        guard !added.isEmpty else { return [] }
+        books.insert(contentsOf: added, at: 0)
+        inCloud.formUnion(added.map(\.id))
+        save()
+        return added
+    }
+
+    /// The files of a Drive book are all down: the book is available now, and what its files say about it (title,
+    /// author, cover, blurb, tags) is read as an import reads it — onto what the reader has not already changed.
+    func driveDownloadFinished(_ id: UUID) async {
+        guard let book = books.first(where: { $0.id == id }), let source = book.drive else { return }
+        // only a book whose every part is there is available
+        guard fileURLs(for: book).allSatisfy({ fm.fileExists(atPath: $0.path) }) else { return }
+        inCloud.remove(id)
+        missing.remove(id)
+        var fresh = book
+        if book.isAudio {
+            let tags = await audioTags(at: fileURL(for: book))
+            if let album = tags.album { fresh.title = album }
+            if let artist = tags.artist { fresh.author = artist }
+            if let data = tags.artwork, let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.85) {
+                try? jpeg.write(to: coverURL(for: book))
+            }
+        } else {
+            // a file Readium cannot open keeps its name for a title, and says so when it is opened
+            try? await readDetails(of: &fresh, at: fileURL(for: book))
+        }
+        mutate(id) { b in
+            if b.title == source.guessedTitle, !fresh.title.isEmpty { b.title = fresh.title }
+            if b.author.isEmpty { b.author = fresh.author }
+            if b.bookDescription == nil { b.bookDescription = fresh.bookDescription }
+            if b.year == nil { b.year = fresh.year }
+            if b.isbn == nil { b.isbn = fresh.isbn }
+            if b.series == nil { b.series = fresh.series; b.seriesIndex = fresh.seriesIndex }
+            b.drive?.finished = true
+        }
+        coverChanged()
+    }
+
+    /// Album, artist and artwork from an audio file's tags.
+    private func audioTags(at url: URL) async -> (album: String?, artist: String?, artwork: Data?) {
+        let metadata = (try? await AVURLAsset(url: url).load(.metadata)) ?? []
+        func item(_ key: AVMetadataKey) -> AVMetadataItem? { metadata.first { $0.commonKey == key } }
+        let album = item(.commonKeyAlbumName)?.stringValue
+        return (album?.isEmpty == false ? album : nil, item(.commonKeyArtist)?.stringValue, item(.commonKeyArtwork)?.dataValue)
+    }
+
+    /// Give back the space a Drive book takes: its files go, the book stays in the library (with its place) and
+    /// can be downloaded again.
+    func removeDownload(_ id: UUID) {
+        guard let book = books.first(where: { $0.id == id }), book.drive != nil else { return }
+        DriveDownloads.shared.cancel(id)
+        for url in fileURLs(for: book) { try? fm.removeItem(at: url) }
+        inCloud.insert(id)
     }
 
     // MARK: - Shelves
@@ -989,6 +1082,9 @@ final class LibraryStore: ObservableObject {
     }
 
     func delete(_ book: Book) {
+        DriveDownloads.shared.cancel(book.id)
+        inCloud.remove(book.id)
+        missing.remove(book.id)
         for url in fileURLs(for: book) { try? fm.removeItem(at: url) }
         try? fm.removeItem(at: coverURL(for: book))
         // a restored backup can resurrect the id with different art
@@ -1003,6 +1099,7 @@ final class LibraryStore: ObservableObject {
         saveShelves()
         books.insert(book, at: 0)
         save()
+        refreshMissing()   // a Drive book restored without its files is waiting to be downloaded
     }
 
     enum SortOrder: String, CaseIterable, Identifiable {

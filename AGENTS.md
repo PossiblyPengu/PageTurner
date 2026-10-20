@@ -305,7 +305,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   export, named by day into a Files folder kept as a bookmark, oldest copies pruned. Made on opening the app when due, and by a
   `BGProcessingTask` (needs `processing` + the identifier in Info.plist; handler registered in `PageturnerApp.init`) — iOS picks
   the time, so the foreground run is the reliable one. It checks free space first: a backup is every book file.
-- **Google Drive** (`Drive/`): browse and import books, watch a Drive folder, and back up to Drive. `DriveCore` is the pure part
+- **Google Drive** (`Drive/`): browse and add books, watch a Drive folder, and back up to Drive. `DriveCore` is the pure part
   (Linux-checked: Drive v3 decoding, queries, sign-in URLs, sync plan, backup pruning, error wording); `GoogleAuth` is OAuth for an
   installed app — `ASWebAuthenticationSession` + PKCE with Pageturner's own **iOS-type client ID, built in**
   (`GoogleDrive.defaultClientID`; no client secret exists and the ID is public), so a reader only ever sees "Sign in with Google", redirect
@@ -314,12 +314,27 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   and a project in *Testing* mode expires the sign-in after a week — Publish it) and `drive.file` (write only what the app made). The
   `drive.file` scope can write only to folders the app created, so backups go to a "Pageturner Backups" folder it makes and remembers
   by id (`DriveClient.backupFolder`), never one found by name. `DriveClient`: 401 renews the token once, 429/5xx retry with backoff,
-  downloads check the size, uploads are chunked resumable (8 MiB pieces, offset asked for after a failure, 308 not followed). `DriveSync`
-  mirrors `FolderWatcher`: a folder id, each file's id+checksum remembered, a file touched in the last 30 s waits, at most every 10 minutes
-  on opening; downloads mirror the Drive folders in a temp folder so audiobook parts stay together, then `library.importFiles`. In the browser a folder can be **ticked** (a circle on its row, apart from opening it): everything under it, to
-  8 levels and 1000 books, is brought in with its folders kept (`DriveBrowserModel.importSelected`), alongside any files ticked.
-  `AutoBackup` has a destination ("backup-auto-dest": folder | drive; Drive needs the network, so the background task asks for it);
-  `DriveBackupsView` restores one. The library's + is a menu (Files / Google Drive).
+  uploads are chunked resumable (8 MiB pieces, offset asked for after a failure, 308 not followed).
+  **Books are never downloaded by adding them.** Ticking books or folders in the browser (a circle on a folder row ticks everything under it,
+  to 8 levels and 1000 books) and `DriveSync` (a watched folder: a folder id, each file's id+checksum remembered, a file touched in the last
+  30 s waits, at most every 10 minutes on opening) put **entries in the library**: `Book.drive` (`GoogleDrive.Source`: the Drive files in play
+  order, each with id/name/size/md5, and the first title guess) with the local file names planned up front (`<id>.<ext>`, `<id>-<n>.<ext>`).
+  `DriveBooks.plan` (pure, Linux-checked) groups the files the way the Files importer does (sibling "CD n" folders merge, file-name stems keep
+  two books in one folder apart, `AudioGrouping.folderTitle`) and skips what the library holds (`LibraryStore.driveFileIDs`); a zip or a
+  text file cannot be an entry before it is opened, so the browser still downloads those at once and the watcher leaves them (and says so).
+  A Drive book without its files is `LibraryStore.inCloud` (not `missing`): its cover wears a cloud badge, a tap opens its page
+  (`AppRouter.open` → `detail`) with **Download**, and the context menu and select bar have it too. `DriveDownloads` does the work with a
+  **background `URLSession`** (iOS runs it: it goes on with the app closed, waits for connectivity, and is reconnected at launch —
+  `PageturnerApp.init` + `PageturnerAppDelegate.handleEventsForBackgroundURLSession`): one task per part (taskDescription
+  `book|index|name|size|file` outlives the app), the finished file is moved into the Books folder inside the delegate call and size-checked,
+  a failed part is asked for again 3 times (fresh token on 401, resume data when iOS kept some), then the book shows why and "Try Again"
+  asks only for what is missing. When the last part is in, `LibraryStore.driveDownloadFinished` reads the file (Readium / audio tags) for
+  title, author, cover, blurb — onto what the reader has not changed (`Source.guessedTitle`) — and a local notification says so when the app
+  is not in front. Settings → Google Drive has "Download over mobile data". "Remove Download" frees the files and keeps the book and its
+  place. A backup holds Drive books without their files and restores them as waiting entries. `AutoBackup` has a destination
+  ("backup-auto-dest": folder | drive; Drive needs the network, so the background task asks for it); `DriveBackupsView` restores one. The
+  library's + is a menu (Files / Google Drive). The simulator run photographs the cloud badges (02), a book's page not started (03a) and part
+  way down (03b).
 - Page-turn sound (`Reader/PageTurnSound.swift`, `Resources/Sounds/pageturn.wav`, synthesised noise): a *system* sound so it
   follows the ringer switch and never touches the audio session an audiobook is using.
 - Trends (`ReadingTrends` in `Library/ReadingStats.swift`, Linux-checked): weekly totals and the finish-date forecast, which

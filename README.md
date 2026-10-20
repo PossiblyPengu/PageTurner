@@ -26,7 +26,7 @@ A native SwiftUI app (iOS 17+) built on the [Readium](https://readium.org) toolk
 - **Library:** All / Books / Audiobooks, a status filter, **shelves** (named collections), an **Up next** shelf from BookMaster, search, sort, a **select mode** for
   bulk shelves / find details / remove, covers (designed jackets when there's no art), book details with description, year and ISBN, metadata lookup
   (BookMaster, Google Books and Open Library), mark as finished / start over; import from Files, a **zip of books**, or "Open in Pageturner";
-  **Watch a Folder…** in Settings auto-imports whatever lands in a Files folder; **Google Drive** (Settings → Google Drive, with your own free Google sign-in ID — the steps are on the page) browses My Drive and Shared with me, imports files or whole folders, watches a Drive folder, and backs the library up to a Drive folder of its own
+  **Watch a Folder…** in Settings auto-imports whatever lands in a Files folder; **Google Drive** (Settings → Google Drive: one tap to sign in) browses My Drive and Shared with me and adds files or whole folders to the library *without downloading them* — each book shows a cloud badge and downloads on its own, in the background and resumably, when you tap Download — watches a Drive folder the same way, and backs the library up to a Drive folder of its own
 - **Liquid Glass:** built for iOS 26 — a tab bar that shrinks as you scroll, a mini player docked above it, floating glass controls in the reader and the player.
   Earlier versions (iOS 17+) get plain materials.
 - **BookMaster:** link once and your progress and finished sessions go to BookMaster as you read or listen (with a switch to pause that without unlinking);

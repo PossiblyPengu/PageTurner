@@ -13,6 +13,7 @@ import UIKit
 ///     -PTDebugReaderScroll 1    with `reader`: lay the book out as one scrolling page
 ///     -PTDebugHighlights …      with readaloud: which of sentence,line,word to light (comma separated)
 ///     -PTDebugVoice neural      with readaloud: speak with the downloaded Piper voice (en_US-lessac-low)
+///     -PTDebugCloudState downloading   with `clouddetail`: the Drive book that is part way down (default: the one not started)
 ///     -PTDebugSettingsPush …    with `settings`: voices (open the voice list), or a page: bookmaster, notifications,
 ///                               chat, reading, readaloud, playback, appearance, library, backup, diagnostics
 ///     -PTDebugSpeechProbe 1     log the installed voices and how long speech takes at each rate
@@ -182,6 +183,14 @@ enum DebugScenario {
             selectTab(.books)
         case "settings": router.showSettings = true
         case "detail": router.detail = text
+        // a book still in Google Drive: its page offers the download (with `-PTDebugCloudState downloading`, shows one on its way)
+        case "clouddetail":
+            let downloading = defaults.string(forKey: "PTDebugCloudState") == "downloading"
+            let cloudBook = library.books.first { library.inCloud.contains($0.id) && $0.isAudio == downloading }
+            if downloading, let cloudBook {
+                DriveDownloads.shared.debugProgress(cloudBook.id, received: 136_000_000, total: 408_000_000, partsDone: 4, parts: 12)
+            }
+            router.detail = cloudBook
         case "edit": router.editing = text
         case "shelves": if let text { router.openShelves([text.id]) }
         case "reader": router.reading = text; selectTab(.reading)
@@ -341,6 +350,25 @@ enum DebugScenario {
             library.setShelf(shelf, on: books.prefix(2).map(\.id), member: true)
         }
         _ = library.addShelf("To read")
+
+        // two books waiting in Google Drive, nothing downloaded: one not started, one a third of the way down
+        let tracks = (1...12).map {
+            GoogleDrive.FileRef(id: "debug-way-\($0)", name: String(format: "Part %02d.mp3", $0), size: 34_000_000)
+        }
+        let cloud = library.addFromDrive([
+            DriveBooks.Plan(
+                title: "Dune", isAudio: false,
+                source: GoogleDrive.Source(
+                    parts: [GoogleDrive.FileRef(id: "debug-dune", name: "Dune.epub", size: 1_400_000)], guessedTitle: "Dune"),
+                trackTitles: []),
+            DriveBooks.Plan(
+                title: "The Way of Kings", isAudio: true,
+                source: GoogleDrive.Source(parts: tracks, guessedTitle: "The Way of Kings"),
+                trackTitles: tracks.map(\.name)),
+        ])
+        if let kings = cloud.first(where: { $0.isAudio }) {
+            DriveDownloads.shared.debugProgress(kings.id, received: 136_000_000, total: 408_000_000, partsDone: 4, parts: 12)
+        }
 
         let log = ReadingLog.shared
         if log.sessions.isEmpty, let book = books.first {

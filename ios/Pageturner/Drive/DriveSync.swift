@@ -1,9 +1,10 @@
 import Foundation
 import Observation
 
-/// Bringing Drive files into the library: the files a reader picked, a whole folder, or what is new in the folder
-/// being watched. Each is downloaded into a fresh temporary folder (mirroring the Drive's folders, so an audiobook's
-/// parts stay together and its disc folders still merge) and handed to the library's own importer.
+/// Downloading Drive files straight into the library — what cannot be a library entry before it is opened (a zip, a
+/// text file) is brought in this way. Each file is downloaded into a fresh temporary folder (mirroring the Drive's
+/// folders) and handed to the library's own importer. Books are not: they are added as entries and downloaded one at a
+/// time, when asked for (`DriveBooks`, `DriveDownloads`).
 @MainActor
 enum DriveTransfer {
     /// A file and the Drive folder path it sits in ("Audiobooks/Dune", or "" for none).
@@ -42,13 +43,13 @@ enum DriveTransfer {
     }
 }
 
-/// Watches one Google Drive folder and imports whatever new books land in it, so dropping a file there is the whole
-/// job — what `FolderWatcher` does for a folder in Files, without needing the Drive app to have synced it.
+/// Watches one Google Drive folder and adds whatever new books land in it to the library, so dropping a file there is
+/// the whole job — what `FolderWatcher` does for a folder in Files, without needing the Drive app to have synced it.
+/// Nothing is downloaded by a look: a new book is an entry in the library, downloaded when the reader asks.
 ///
-/// The folder is remembered by its Drive id. A look lists its books (subfolders too), compares each file's id and
-/// checksum with what was brought in before, and downloads the new ones. It looks when the app opens, and no more
-/// often than every ten minutes unless asked. A file touched in the last half minute may still be uploading, so
-/// it waits for the next look; one that failed to download is tried again then.
+/// The folder is remembered by its Drive id. A look lists its books (subfolders too) and compares each file's id and
+/// checksum with what was added before. It looks when the app opens, and no more often than every ten minutes unless
+/// asked. A file touched in the last half minute may still be uploading, so it waits for the next look.
 @Observable
 @MainActor
 final class DriveSync {
@@ -101,7 +102,8 @@ final class DriveSync {
         await scan(library: library)
     }
 
-    /// Import anything new in the folder.
+    /// Add anything new in the folder to the library. Nothing is downloaded: a book arrives as an entry that can be
+    /// downloaded on its own (a zip or a text file cannot be an entry before it is opened, so those are left, and said so).
     func scan(library: LibraryStore) async {
         guard !scanning, let id = defaults.string(forKey: idKey) else { return }
         guard GoogleAuth.shared.signedIn else {
@@ -113,24 +115,27 @@ final class DriveSync {
         do {
             let found = try await DriveClient.shared.books(under: id)
             let seen = Set(defaults.stringArray(forKey: seenKey) ?? [])
-            let fresh = GoogleDrive.newFiles(found.map(\.file), seen: seen, now: Date())
+            let fresh = Set(GoogleDrive.newFiles(found.map(\.file), seen: seen, now: Date()).map(\.id))
             defaults.set(Date().timeIntervalSince1970, forKey: lastKey)
-            guard !fresh.isEmpty else {
+            let wanted = found.filter { fresh.contains($0.file.id) }.map { DriveBooks.Found($0.file, folder: $0.folder) }
+            guard !wanted.isEmpty else {
                 report("Checked \(Date().formatted(date: .abbreviated, time: .shortened)): nothing new.")
                 return
             }
-            let paths = Dictionary(found.map { ($0.file.id, $0.folder) }, uniquingKeysWith: { first, _ in first })
-            let items: [DriveTransfer.Item] = fresh.map { ($0, paths[$0.id] ?? "") }
-            let (came, failures) = await DriveTransfer.bring(items, into: library) { [weak self] text in self?.status = text }
-            // remembered once it is in (an import that failed is not retried for ever; a download that failed is)
-            let keys = came.map(GoogleDrive.syncKey)
+            let result = DriveBooks.plan(wanted, known: library.driveFileIDs)
+            let added = library.addFromDrive(result.books)
+            // remembered once it is in the library — so one taken out again is not put back — except what was left alone
+            let left = Set(result.direct.map(\.file.id))
+            let keys = wanted.filter { !left.contains($0.file.id) }.map { GoogleDrive.syncKey($0.file) }
             defaults.set(GoogleDrive.remembering(defaults.stringArray(forKey: seenKey) ?? [], adding: keys, max: seenMax), forKey: seenKey)
-            if failures.isEmpty {
-                report("Added \(came.count) book\(came.count == 1 ? "" : "s") from Drive, \(Date().formatted(date: .omitted, time: .shortened)).")
-            } else {
-                report("Added \(came.count); \(failures.count) could not come down: \(failures[0])")
-                Log.error("drive", "sync: \(failures.joined(separator: " | "))")
+            let time = Date().formatted(date: .omitted, time: .shortened)
+            var text = added.isEmpty
+                ? "Checked \(time): nothing new."
+                : "Added \(added.count) book\(added.count == 1 ? "" : "s") from Drive, \(time). Open one to download it."
+            if !left.isEmpty {
+                text += " \(left.count) zip or text file\(left.count == 1 ? " was" : "s were") left in Drive: add \(left.count == 1 ? "it" : "them") from Browse Google Drive."
             }
+            report(text)
         } catch {
             report("Couldn’t check Google Drive: \((error as? DriveError)?.message ?? error.localizedDescription)")
             Log.error("drive", "sync failed: \(error.localizedDescription)")

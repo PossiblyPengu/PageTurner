@@ -386,6 +386,16 @@ struct LibraryView: View {
     private var selectionBar: some View {
         HStack(spacing: 4) {
             barButton("Shelves", "books.vertical") { router.openShelves(Array(selected)) }
+            // books waiting in Google Drive come down one after another, in the background
+            if selected.contains(where: { library.inCloud.contains($0) }) {
+                barButton("Download", "icloud.and.arrow.down") {
+                    for book in library.books where selected.contains(book.id) && library.inCloud.contains(book.id) {
+                        DriveDownloads.shared.start(book, library: library)
+                    }
+                    selecting = false
+                    selected = []
+                }
+            }
             barButton("Find Details", "sparkle.magnifyingglass") { findDetails() }
             barButton("Remove", "trash") {
                 router.askDelete(library.books.filter { selected.contains($0.id) })

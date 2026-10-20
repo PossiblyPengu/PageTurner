@@ -240,9 +240,15 @@ final class BackupStore {
         book.bmUpNext = nil
 
         let names = book.fileNames.isEmpty ? [book.fileName] : book.fileNames
-        let files = try names.map { name -> (source: URL, destination: URL) in
-            guard let src = staged.files[name] else { throw BackupError.missingPayload }
-            return (src, booksDir.appendingPathComponent(name))
+        // a book from Google Drive is backed up without the files it has not downloaded: it comes back as it was,
+        // waiting in the Drive
+        var files: [(source: URL, destination: URL)] = []
+        for name in names {
+            if let src = staged.files[name] {
+                files.append((src, booksDir.appendingPathComponent(name)))
+            } else if book.drive == nil {
+                throw BackupError.missingPayload
+            }
         }
         try BackupFiles.install(files, using: fm)
         if let cover = staged.covers[book.id.uuidString]

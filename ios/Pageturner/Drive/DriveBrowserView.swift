@@ -64,9 +64,9 @@ final class DriveBrowserModel {
         selectedFolders = [:]
     }
 
-    /// Download what is ticked — the files, and every book under each ticked folder — and import it. True when
-    /// everything came.
-    func importSelected(library: LibraryStore) async -> Bool {
+    /// Put what is ticked — the files, and every book under each ticked folder — in the library, without downloading
+    /// it: each book is downloaded on its own, when it is asked for. True when everything was added.
+    func addSelected(library: LibraryStore) async -> Bool {
         var items: [String: DriveTransfer.Item] = [:]
         let folders = selectedFolders.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         if !folders.isEmpty {
@@ -90,20 +90,17 @@ final class DriveBrowserModel {
             }
             working = false
         }
-        // a book ticked on its own that a ticked folder also holds is brought in once, with its folder
+        // a book ticked on its own that a ticked folder also holds is added once, with its folder
         for file in selected.values where items[file.id] == nil { items[file.id] = (file, "") }
         guard !items.isEmpty else {
             error = "There are no books in what you ticked."
             return false
         }
-        let ordered = items.values.sorted {
-            ($0.folder + "/" + $0.file.name).localizedStandardCompare($1.folder + "/" + $1.file.name) == .orderedAscending
-        }
-        return await bring(ordered, library: library)
+        return await add(Array(items.values), library: library)
     }
 
     /// A folder and everything under it that is a book.
-    func importFolder(_ folder: DriveLocation, library: LibraryStore) async -> Bool {
+    func addFolder(_ folder: DriveLocation, library: LibraryStore) async -> Bool {
         working = true
         progress = "Looking through \(folder.name)…"
         error = nil
@@ -114,7 +111,7 @@ final class DriveBrowserModel {
                 error = "There are no books in “\(folder.name)”."
                 return false
             }
-            return await bring(found.map { ($0.file, $0.folder.isEmpty ? folder.name : folder.name + "/" + $0.folder) }, library: library)
+            return await add(found.map { ($0.file, $0.folder.isEmpty ? folder.name : folder.name + "/" + $0.folder) }, library: library)
         } catch {
             working = false
             self.error = (error as? DriveError)?.message ?? error.localizedDescription
@@ -122,23 +119,34 @@ final class DriveBrowserModel {
         }
     }
 
-    private func bring(_ items: [DriveTransfer.Item], library: LibraryStore) async -> Bool {
-        guard !items.isEmpty else { return false }
-        working = true
-        error = nil
-        defer { working = false }
-        let (came, failures) = await DriveTransfer.bring(items, into: library) { [weak self] text in self?.progress = text }
-        if failures.isEmpty {
-            clear()
-        } else {
-            for file in came { selected[file.id] = nil }
-            error = failures.joined(separator: "\n")
+    /// The books go on the shelf at once. What cannot be a book before it is downloaded (a zip is unpacked, a text file
+    /// made into an EPUB) is downloaded now, as before.
+    private func add(_ items: [DriveTransfer.Item], library: LibraryStore) async -> Bool {
+        let result = DriveBooks.plan(items.map { DriveBooks.Found($0.file, folder: $0.folder) }, known: library.driveFileIDs)
+        let added = library.addFromDrive(result.books)
+        guard result.direct.isEmpty else {
+            working = true
+            error = nil
+            defer { working = false }
+            let (came, failures) = await DriveTransfer.bring(
+                result.direct.map { ($0.file, $0.folder) }, into: library
+            ) { [weak self] text in self?.progress = text }
+            if failures.isEmpty { clear() } else {
+                for file in came { selected[file.id] = nil }
+                error = failures.joined(separator: "\n")
+            }
+            return failures.isEmpty
         }
-        return failures.isEmpty && !came.isEmpty
+        guard !added.isEmpty else {
+            error = result.known > 0 ? "That is already in your library." : "There is nothing there Pageturner can add."
+            return false
+        }
+        clear()
+        return true
     }
 }
 
-/// Browsing Google Drive: My Drive and what is shared, with folders to open and book files to tick. Used to import books,
+/// Browsing Google Drive: My Drive and what is shared, with folders to open and book files to tick. Used to add books,
 /// and — with `.chooseFolder` — to pick the folder Pageturner watches.
 struct DriveBrowserView: View {
     enum Purpose { case importBooks, chooseFolder }
@@ -265,8 +273,9 @@ struct DriveFolderView: View {
                     Button("Try Again") { Task { await load() } }
                 }
             }
+            let known = library.driveFileIDs
             ForEach(shown) { file in
-                row(file)
+                row(file, known: known)
             }
         }
         .overlay {
@@ -281,9 +290,17 @@ struct DriveFolderView: View {
     }
 
     @ViewBuilder
-    private func row(_ file: GoogleDrive.File) -> some View {
+    private func row(_ file: GoogleDrive.File, known: Set<String>) -> some View {
         if file.isFolder {
             folderRow(file)
+        } else if known.contains(file.resolved.id) {
+            HStack {
+                Image(systemName: "checkmark.circle").foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(file.name).foregroundStyle(.secondary)
+                    Text("In your library").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
         } else if GoogleDrive.isImportable(file) {
             Button { model.toggle(file) } label: {
                 HStack {
@@ -339,9 +356,9 @@ struct DriveFolderView: View {
                 Menu {
                     Button { model.select(items) } label: { Label("Tick Everything Here", systemImage: "checkmark.circle") }
                     Button {
-                        Task { if await model.importFolder(location, library: library) { onDone() } }
+                        Task { if await model.addFolder(location, library: library) { onDone() } }
                     } label: {
-                        Label("Import This Folder and Its Subfolders", systemImage: "square.and.arrow.down.on.square")
+                        Label("Add This Folder and Its Subfolders", systemImage: "square.and.arrow.down.on.square")
                     }
                     if model.count > 0 {
                         Button(role: .destructive) { model.clear() } label: { Label("Clear Selection", systemImage: "xmark.circle") }
@@ -374,9 +391,9 @@ struct DriveFolderView: View {
             .background(.bar)
         } else if purpose == .importBooks, model.count > 0 {
             Button {
-                Task { if await model.importSelected(library: library) { onDone() } }
+                Task { if await model.addSelected(library: library) { onDone() } }
             } label: {
-                Text("Import \(model.summary)").frame(maxWidth: .infinity)
+                Text("Add \(model.summary) to Library").frame(maxWidth: .infinity)
             }
             .ptButtonStyle(prominent: true)
             .padding(14)

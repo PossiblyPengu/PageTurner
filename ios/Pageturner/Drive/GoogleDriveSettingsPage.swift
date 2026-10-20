@@ -8,6 +8,7 @@ struct GoogleDriveSettingsPage: View {
     @State private var showBrowser = false
     @State private var showFolderPicker = false
     @State private var confirmSignOut = false
+    @AppStorage(DriveDownloads.cellularKey) private var cellular = true
     private let auth = GoogleAuth.shared
     private let sync = DriveSync.shared
 
@@ -15,6 +16,7 @@ struct GoogleDriveSettingsPage: View {
         Form {
             if auth.signedIn {
                 account
+                downloads
                 watching
                 backupNote
             } else {
@@ -70,7 +72,17 @@ struct GoogleDriveSettingsPage: View {
         } header: {
             Text("Account")
         } footer: {
-            Text("Browse to pick books to add. The same sign-in serves the watched folder and Drive backups.")
+            Text("Browse to pick books to add to your library. The same sign-in serves the watched folder and Drive backups.")
+        }
+    }
+
+    private var downloads: some View {
+        Section {
+            Toggle("Download over mobile data", isOn: $cellular)
+        } header: {
+            Text("Downloads")
+        } footer: {
+            Text("Books from Drive are added to your library without being downloaded: open one and tap Download. Downloads go on with the app closed, and pick up again after a lost connection. Large audiobooks are best on Wi-Fi.")
         }
     }
 
@@ -97,9 +109,9 @@ struct GoogleDriveSettingsPage: View {
                 }
             }
         } header: {
-            Text("Auto-import")
+            Text("Watch a folder")
         } footer: {
-            Text("New EPUB, PDF, CBZ, text and audio files that land in the folder — or in a folder inside it — are added to your library when Pageturner opens, at most every ten minutes.")
+            Text("New EPUB, PDF, CBZ and audio files that land in the folder — or in a folder inside it — are added to your library when Pageturner opens, at most every ten minutes. They are not downloaded: open a book and tap Download.")
         }
     }
 

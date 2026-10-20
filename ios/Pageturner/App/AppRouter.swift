@@ -105,6 +105,11 @@ final class AppRouter {
     /// is where the book is. When BookMaster has the book further on than this
     /// device, that is asked about first.
     func open(_ book: Book, library: LibraryStore) {
+        // a book still in the Drive has nothing to open: its page is where it is downloaded
+        if library.inCloud.contains(book.id) {
+            detail = book
+            return
+        }
         if library.missing.contains(book.id) {
             library.lastError = "“\(book.title)” can’t be opened: its file is no longer on this device (it may have been deleted in the Files app). Remove it from the library to clear it."
             return
@@ -122,6 +127,15 @@ final class AppRouter {
         resumePrompt = nil
         library.answerResume(prompt.book.id, fraction: jump ? prompt.fraction : nil)
         launch(library.books.first { $0.id == prompt.book.id } ?? prompt.book, library: library)
+    }
+
+    /// Give back the space of a Drive book's files (the book stays in the library): what is playing, read to or open
+    /// from them is put away first.
+    func removeDownload(_ book: Book, library: LibraryStore) {
+        if PlaybackCoordinator.shared.bookID == book.id { PlaybackCoordinator.shared.stop() }
+        ReadAloudHost.shared.stop(bookID: book.id)
+        if reading?.id == book.id { reading = nil }
+        library.removeDownload(book.id)
     }
 
     /// The now-playing strip for a book being read aloud was tapped: the book, at the place the voice has reached.
