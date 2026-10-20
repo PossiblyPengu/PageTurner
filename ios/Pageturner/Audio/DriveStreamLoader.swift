@@ -71,7 +71,7 @@ final class DriveStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @uncheck
             // a size Drive did not give is found out from the first byte's answer
             let size = declared > 0 ? declared : (await self.fetchSize(id) ?? 0)
             guard size > 0 else {
-                request.finishLoading(with: URLError(.cannotDetermineHostSize))
+                request.finishLoading(with: URLError(.badServerResponse))
                 return
             }
             if let info = request.contentInformationRequest {
