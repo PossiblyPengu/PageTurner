@@ -12,15 +12,50 @@ struct MetadataCandidate: Identifiable, Hashable, Codable {
     var isbn: String?
     /// Open Library work id — what BookMaster keeps on its catalogue rows.
     var openLibraryId: String?
-    var coverURL: URL?
+    /// Jacket guesses, best first: the source's own cover, then Open Library's
+    /// by ISBN and work id. `CoverFetch` walks the list until a real image
+    /// answers, so a 404 on the first guess is not the end.
+    var coverURLs: [URL] = []
+    var coverURL: URL? { coverURLs.first }
     var source: String
     /// The BookMaster shelf row this is — applying it pins the book there, so a
     /// later push can never write a duplicate.
     var bookmasterId: String?
 
     /// `id` is only for the list on screen; what is kept on disk is the rest.
+    /// `coverURL` is read for lists cached by older builds, which kept one.
     enum CodingKeys: String, CodingKey {
-        case title, authors, year, summary, isbn, openLibraryId, coverURL, source, bookmasterId
+        case title, authors, year, summary, isbn, openLibraryId, coverURL, coverURLs, source, bookmasterId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        authors = try c.decode(String.self, forKey: .authors)
+        year = try c.decode(String.self, forKey: .year)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        isbn = try c.decodeIfPresent(String.self, forKey: .isbn)
+        openLibraryId = try c.decodeIfPresent(String.self, forKey: .openLibraryId)
+        if let urls = try c.decodeIfPresent([URL].self, forKey: .coverURLs) {
+            coverURLs = urls
+        } else if let url = try c.decodeIfPresent(URL.self, forKey: .coverURL) {
+            coverURLs = [url]
+        }
+        source = try c.decode(String.self, forKey: .source)
+        bookmasterId = try c.decodeIfPresent(String.self, forKey: .bookmasterId)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(title, forKey: .title)
+        try c.encode(authors, forKey: .authors)
+        try c.encode(year, forKey: .year)
+        try c.encode(summary, forKey: .summary)
+        try c.encodeIfPresent(isbn, forKey: .isbn)
+        try c.encodeIfPresent(openLibraryId, forKey: .openLibraryId)
+        try c.encode(coverURLs, forKey: .coverURLs)
+        try c.encode(source, forKey: .source)
+        try c.encodeIfPresent(bookmasterId, forKey: .bookmasterId)
     }
 }
 
@@ -142,7 +177,8 @@ enum MetadataLookup {
                 if out[i].summary.isEmpty { out[i].summary = c.summary }
                 if out[i].isbn == nil { out[i].isbn = c.isbn }
                 if out[i].openLibraryId == nil { out[i].openLibraryId = c.openLibraryId }
-                if out[i].coverURL == nil { out[i].coverURL = c.coverURL }
+                // merge cover guesses, keeping the survivor's own first
+                out[i].coverURLs.append(contentsOf: c.coverURLs.filter { !out[i].coverURLs.contains($0) })
                 if out[i].year.isEmpty { out[i].year = c.year }
                 continue
             }
@@ -158,13 +194,16 @@ enum MetadataLookup {
         let hits = await BookMaster.shared.searchCatalogue(title: title, author: author)
         return hits.compactMap { hit in
             guard !hit.title.isEmpty else { return nil }
+            let isbn = hit.isbn.flatMap { ISBN.normalize($0) }
+            var covers = hit.coverUrl.flatMap { URL(string: $0) }.map { [$0] } ?? []
+            covers += CoverLinks.isbn(isbn) + CoverLinks.openLibraryWork(hit.openLibraryId)
             return MetadataCandidate(
                 title: hit.title,
                 authors: hit.author ?? "",
                 year: hit.year ?? "",
-                isbn: hit.isbn.flatMap { ISBN.normalize($0) },
+                isbn: isbn,
                 openLibraryId: hit.openLibraryId,
-                coverURL: hit.coverUrl.flatMap { URL(string: $0) },
+                coverURLs: covers,
                 source: hit.userBookId != nil ? "On your BookMaster shelf" : "BookMaster",
                 bookmasterId: hit.userBookId)
         }
@@ -197,19 +236,22 @@ enum MetadataLookup {
             else { return nil }
             let authors = (info["authors"] as? [String] ?? []).joined(separator: ", ")
             let year = String((info["publishedDate"] as? String ?? "").prefix(4))
-            var cover: URL?
+            var covers: [URL] = []
             if let links = info["imageLinks"] as? [String: Any],
-               let thumb = (links["thumbnail"] as? String) ?? (links["smallThumbnail"] as? String)
+               let thumb = (links["thumbnail"] as? String) ?? (links["smallThumbnail"] as? String),
+               let url = URL(string: thumb.replacingOccurrences(of: "http://", with: "https://"))
             {
                 // Google serves covers over http — force https for ATS
-                cover = URL(string: thumb.replacingOccurrences(of: "http://", with: "https://"))
+                covers.append(url)
             }
             let identifiers = (info["industryIdentifiers"] as? [[String: Any]] ?? [])
                 .compactMap { $0["identifier"] as? String }
+            let isbn = ISBN.best(of: identifiers)
+            covers += CoverLinks.isbn(isbn)
             return MetadataCandidate(
                 title: t, authors: authors, year: year,
                 summary: BookText.plain(fromHTML: info["description"] as? String ?? ""),
-                isbn: ISBN.best(of: identifiers), coverURL: cover, source: "Google Books")
+                isbn: isbn, coverURLs: covers, source: "Google Books")
         }
     }
 
@@ -237,25 +279,31 @@ enum MetadataLookup {
             guard let t = doc["title"] as? String, !t.isEmpty else { return nil }
             let authors = (doc["author_name"] as? [String] ?? []).joined(separator: ", ")
             let year = (doc["first_publish_year"] as? Int).map(String.init) ?? ""
-            var cover: URL?
+            var covers: [URL] = []
+            // cover_i is -1 when the work has no jacket — asking for it still
+            // produced a URL, which is why dead cover boxes showed in results
             if let coverID = doc["cover_i"] as? Int {
-                cover = URL(string: "https://covers.openlibrary.org/b/id/\(coverID)-M.jpg")
+                covers += CoverLinks.coverID(coverID)
             }
             // "/works/OL45804W" → "OL45804W", the id BookMaster keeps
             let olid = (doc["key"] as? String).map { $0.replacingOccurrences(of: "/works/", with: "") }
             let isbns = (doc["isbn"] as? [String] ?? []).prefix(25).map { $0 }
+            let isbn = ISBN.best(of: Array(isbns))
+            // an ISBN- or OLID-keyed jacket is a second guess when the work's
+            // own cover id is missing or 404s
+            covers += CoverLinks.isbn(isbn)
             return MetadataCandidate(
-                title: t, authors: authors, year: year, isbn: ISBN.best(of: Array(isbns)),
-                openLibraryId: olid, coverURL: cover, source: "Open Library")
+                title: t, authors: authors, year: year, isbn: isbn,
+                openLibraryId: olid, coverURLs: covers, source: "Open Library")
         }
     }
 
     // MARK: - Applying
 
-    /// Download a candidate's cover into the covers folder for `book`.
-    static func applyCover(from url: URL, to book: Book, library: LibraryStore) async {
-        guard let (data, _) = try? await session.data(from: url),
-              let image = UIImage(data: data),
+    /// Download a candidate's cover into the covers folder for `book`. `urls`
+    /// is the fallback chain: the first that answers with a real image wins.
+    static func applyCover(from urls: [URL], to book: Book, library: LibraryStore) async {
+        guard let image = await CoverFetch.firstImage(in: urls),
               let jpeg = image.jpegData(compressionQuality: 0.85)
         else { return }
         await MainActor.run {
@@ -305,8 +353,8 @@ enum MetadataLookup {
             library.updateBookMaster(id) { $0.bookmasterId = pin }
             changed = true
         }
-        if !FileManager.default.fileExists(atPath: library.coverURL(for: book).path), let url = match.coverURL {
-            await applyCover(from: url, to: book, library: library)
+        if !FileManager.default.fileExists(atPath: library.coverURL(for: book).path), !match.coverURLs.isEmpty {
+            await applyCover(from: match.coverURLs, to: book, library: library)
             changed = true
         }
         return changed

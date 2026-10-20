@@ -154,18 +154,12 @@ struct BookMasterDetailView: View {
     private var cover: some View {
         let isbn = detail?.catalogue?.isbn ?? detail?.book?.isbn
         let olid = detail?.catalogue?.openLibraryId ?? detail?.book?.openLibraryId
-        let stored = detail?.catalogue?.coverUrl.flatMap { URL(string: $0) }
-        return AsyncImage(url: stored ?? bmCoverURL(isbn: isbn, openLibraryId: olid)) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                Color.secondary.opacity(0.15).overlay(
-                    Image(systemName: (detail?.book?.isAudio ?? false) ? "headphones" : "book.closed")
-                        .foregroundStyle(.secondary))
-            }
-        }
-        .frame(width: 64, height: 96)
-        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        return RemoteCover(
+            urls: bmCoverURLs(coverUrl: detail?.catalogue?.coverUrl, isbn: isbn, openLibraryId: olid),
+            icon: (detail?.book?.isAudio ?? false) ? "headphones" : "book.closed")
+        .frame(width: 96, height: 144)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
     }
 
     /// Where the row stands, and the ways to move it — the edits BookMaster's
@@ -554,14 +548,11 @@ struct BookMasterDetailView: View {
     }
 }
 
-/// A jacket by the ids the catalogue knows — the same ladder BMShelfRow.coverURL climbs.
-func bmCoverURL(isbn: String?, openLibraryId: String?) -> URL? {
-    let digits = (isbn ?? "").filter { $0.isNumber || $0 == "X" || $0 == "x" }
-    if digits.count >= 10 {
-        return URL(string: "https://covers.openlibrary.org/b/isbn/\(digits)-M.jpg?default=false")
-    }
-    if let ol = openLibraryId, !ol.isEmpty {
-        return URL(string: "https://covers.openlibrary.org/b/olid/\(ol)-M.jpg?default=false")
-    }
-    return nil
+/// Jacket guesses by the ids the catalogue knows — the same ladder
+/// BMShelfRow.coverURLs climbs: stored cover first, then Open Library by ISBN
+/// and work id, each falling through on a miss.
+func bmCoverURLs(coverUrl: String? = nil, isbn: String?, openLibraryId: String?) -> [URL] {
+    var urls = coverUrl.flatMap { URL(string: $0) }.map { [$0] } ?? []
+    urls += CoverLinks.isbn(isbn) + CoverLinks.openLibraryWork(openLibraryId)
+    return urls
 }

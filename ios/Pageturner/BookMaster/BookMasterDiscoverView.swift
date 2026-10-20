@@ -39,14 +39,7 @@ struct BookMasterDiscoverView: View {
         Section("From \(recs.partner?.name ?? "the other reader")’s shelf") {
             ForEach(recs.partnerPicks, id: \.title) { pick in
                 HStack(spacing: 12) {
-                    AsyncImage(url: bmCoverURL(isbn: pick.isbn, openLibraryId: pick.openLibraryId)) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            Color.secondary.opacity(0.15).overlay(
-                                Image(systemName: "book.closed").foregroundStyle(.secondary))
-                        }
-                    }
+                    RemoteCover(urls: bmCoverURLs(coverUrl: pick.coverUrl, isbn: pick.isbn, openLibraryId: pick.openLibraryId))
                     .frame(width: 40, height: 60)
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
 

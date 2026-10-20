@@ -326,13 +326,7 @@ struct OPDSFeedView: View {
 
     private func bookRow(_ entry: OPDSEntry) -> some View {
         HStack(spacing: 12) {
-            AsyncImage(url: entry.cover) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    Color.secondary.opacity(0.15).overlay(Image(systemName: "book.closed").foregroundStyle(.secondary))
-                }
-            }
+            RemoteCover(url: entry.cover)
             .frame(width: 44, height: 66)
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .accessibilityHidden(true)

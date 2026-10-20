@@ -47,6 +47,7 @@ cp "$SRC/Notifications/NotificationPlan.swift" "$OUT/NotificationPlan.swift"
 cp "$SRC/Notifications/BMInbox.swift" "$OUT/BMInbox.swift"
 cp "$SRC/Settings/AppPrefs.swift" "$OUT/AppPrefs.swift"
 cp "$SRC/Library/AudioGrouping.swift" "$OUT/AudioGrouping.swift"
+cp "$SRC/Library/CoverLinks.swift" "$OUT/CoverLinks.swift"
 cp "$SRC/Library/OPDSFeed.swift" "$OUT/OPDSFeed.swift"
 cp "$SRC/Library/AutoBackupPlan.swift" "$OUT/AutoBackupPlan.swift"
 cp "$SRC/Audio/VoiceDSP.swift" "$OUT/VoiceDSP.swift"
@@ -81,7 +82,7 @@ import Foundation
 /// The real one writes files and needs UIKit; the pull's cover fetch is
 /// network IO the checks never run.
 enum MetadataLookup {
-    static func applyCover(from url: URL, to book: Book, library: LibraryStore) async {}
+    static func applyCover(from urls: [URL], to book: Book, library: LibraryStore) async {}
 }
 /// The real logger writes Documents/Logs and needs a real home dir; checks
 /// only need its calls to compile.
