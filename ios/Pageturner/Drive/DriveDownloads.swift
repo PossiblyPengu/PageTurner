@@ -177,7 +177,8 @@ final class DriveDownloads {
     /// Ask Drive for one part: a task in the background session, with a fresh token (or, after a failure that kept
     /// part of the file, from where it stopped).
     private func enqueue(_ ticket: DriveDownloadDelegate.Ticket, resume: Data? = nil) async {
-        guard states[ticket.book] != nil else { return }
+        // a book that has failed or been cancelled asks for nothing more (a retry that was waiting comes too late)
+        guard let state = states[ticket.book], state.failure == nil else { return }
         do {
             let task: URLSessionDownloadTask
             if let resume {
@@ -228,6 +229,7 @@ final class DriveDownloads {
         whenReady { [self] in
             guard !cancelled.contains(ticket.book) else { return }
             flying[ticket.book]?[ticket.index] = nil
+            ensureState(ticket.book)
             guard states[ticket.book] != nil else { return }
             let tried = attempts[ticket.description] ?? 0
             // 0 is a connection that did not hold; Drive's own "busy" and "token expired" answers are worth another go

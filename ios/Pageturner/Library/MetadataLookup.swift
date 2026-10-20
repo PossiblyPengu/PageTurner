@@ -267,6 +267,9 @@ extension MetadataLookup {
     /// author. One book at a time, so the sources are not hammered by a folder of hundreds.
     @MainActor
     static func enrichDriveBooks(_ ids: [UUID], library: LibraryStore) async {
+        // a first sync of a big folder adds hundreds: the first forty are looked up now (the sources limit how often
+        // they may be asked), the rest when their page is opened
+        let ids = Array(ids.prefix(40))
         // three at a time: a folder of hundreds is not done one slow answer after another
         var next = 0
         await withTaskGroup(of: Void.self) { group in

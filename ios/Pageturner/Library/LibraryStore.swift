@@ -407,8 +407,13 @@ final class LibraryStore: ObservableObject {
                 }
                 return (gone, cloud)
             }.value
-            if missing != gone { missing = gone }
-            if inCloud != cloud { inCloud = cloud }
+            // only the books that were looked at: one added while this ran (a Drive sync) is not in the answer, and
+            // must keep what it was given
+            let looked = Set(snapshot.map(\.id))
+            let newMissing = missing.subtracting(looked).union(gone)
+            let newCloud = inCloud.subtracting(looked).union(cloud)
+            if missing != newMissing { missing = newMissing }
+            if inCloud != newCloud { inCloud = newCloud }
         }
     }
 
