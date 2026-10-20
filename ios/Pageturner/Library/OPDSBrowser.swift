@@ -198,6 +198,7 @@ struct OPDSCatalogsView: View {
                 .disabled(store.catalogs.contains { $0.url.host == "m.gutenberg.org" })
             }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("Online Catalogs")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -308,6 +309,7 @@ struct OPDSFeedView: View {
                 ContentUnavailableView(results == nil ? "Nothing here" : "No results", systemImage: "books.vertical")
             }
         }
+        .ptSoftScrollEdges()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search this catalogue")

@@ -578,7 +578,7 @@ struct LibraryView: View {
         }
         .padding(20)
         .frame(maxWidth: 280)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .ptGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .transition(.opacity)
     }
 }

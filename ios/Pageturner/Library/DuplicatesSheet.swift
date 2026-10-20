@@ -39,6 +39,7 @@ struct DuplicatesSheet: View {
                     }
                 }
             }
+            .ptSoftScrollEdges()
             .navigationTitle("Duplicates")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

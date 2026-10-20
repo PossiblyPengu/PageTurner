@@ -33,6 +33,7 @@ struct BMSeriesView: View {
                     .listRowBackground(Color.clear)
             }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("Series")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -136,6 +137,7 @@ struct BMSeriesDetailView: View {
                 ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
             }
         }
+        .ptSoftScrollEdges()
         .navigationTitle(detail?.series?.name ?? name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

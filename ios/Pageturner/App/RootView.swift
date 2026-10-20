@@ -383,13 +383,16 @@ struct RootView: View {
     }
 
     /// Before iOS 26 there is no bottom accessory, so the strip rides
-    /// above the tab bar as an inset of each tab.
+    /// above the tab bar as an inset of each tab — a floating capsule,
+    /// the same silhouette the accessory has.
     private func withMiniPlayer<V: View>(_ content: V) -> some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
+        content.safeAreaInset(edge: .bottom, spacing: 6) {
             if showMiniPlayer {
                 miniPlayer
-                    .padding(.vertical, 8)
-                    .background(.bar)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .ptGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .padding(.horizontal, 12)
             }
         }
     }

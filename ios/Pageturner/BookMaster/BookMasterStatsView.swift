@@ -41,6 +41,7 @@ struct BookMasterStatsView: View {
                 .padding(.vertical, 12)
                 .ptReadableWidth()
             }
+            .ptSoftScrollEdges()
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationDestination(for: Push.self) { push in
                 switch push {

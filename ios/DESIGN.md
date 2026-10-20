@@ -33,7 +33,8 @@ TabView                       (iOS 26: minimises on scroll, mini player docks ab
 ├─ Library      NavigationStack: shelf chips · filter (All / Books / Audiobooks) · status · cover grid
 ├─ BookMaster   tracking: this phone's reading time always; linked: streak, goals, achievements, shelf, partner, suggestions — badge = suggestions waiting
 └─ Search       role: .search — library search, books and audiobooks
-tabViewBottomAccessory:  mini player (audiobook or read-aloud) → tap opens Now Playing sheet
+tabViewBottomAccessory:  mini player (audiobook or read-aloud) → tap opens Now Playing sheet;
+  before iOS 26 the same strip rides as a floating glass capsule in a bottom safe-area inset instead
 Settings:  gear in the Library toolbar → sheet (BookMaster, read-aloud voice, speed and highlights, watched folder, backup)
 ```
 

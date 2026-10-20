@@ -79,10 +79,9 @@ struct BMQuestLogRoomView: View {
         } else if let role {
             VStack(spacing: 0) {
                 header(role)
-                Divider()
                 thread(role)
-                Divider()
-                composer(role)
+                    // the composer floats: the transcript scrolls under it
+                    .safeAreaInset(edge: .bottom, spacing: 4) { composer(role) }
             }
         } else if room == nil {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -112,7 +111,6 @@ struct BMQuestLogRoomView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .ptReadableWidth()
-        .background(.bar)
     }
 
     private var rolePicker: some View {
@@ -157,6 +155,7 @@ struct BMQuestLogRoomView: View {
             .refreshable { await chat.refresh() }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
+            .ptSoftScrollEdges()
             .onChange(of: chat.entries.last?.id) { _, _ in follow(proxy, role: role) }
             .overlay(alignment: .bottom) { newMessageChip(proxy) }
             .overlay {
@@ -195,7 +194,7 @@ struct BMQuestLogRoomView: View {
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
+                    .ptGlassCapsule(interactive: true)
             }
             .padding(.bottom, 8)
         }
@@ -326,10 +325,10 @@ struct BMQuestLogRoomView: View {
                 .accessibilityLabel("Send")
             }
         }
+        .padding(8)
+        .ptGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .ptReadableWidth()
-        .background(.bar)
     }
 
     private func send(_ role: BMQuestLog.Role) async {

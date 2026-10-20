@@ -83,6 +83,7 @@ struct HighlightsHubView: View {
                     ContentUnavailableView.search(text: query)
                 }
             }
+            .ptSoftScrollEdges()
             .navigationTitle("Highlights")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Text, notes and books")

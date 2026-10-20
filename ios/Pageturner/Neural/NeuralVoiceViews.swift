@@ -43,6 +43,7 @@ struct SavedVoicesView: View {
                 }
             }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("Saved Voices")
         .navigationBarTitleDisplayMode(.inline)
         .tint(.ptAccent)

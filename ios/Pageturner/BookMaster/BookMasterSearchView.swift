@@ -55,6 +55,7 @@ struct BookMasterSearchView: View {
             if let info { Section { Text(info).foregroundStyle(.secondary) } }
             if let error { Section { Text(error).foregroundStyle(.secondary) } }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("Find a book")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -41,6 +41,7 @@ struct BookMasterWrappedView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.secondary) } }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("The year so far")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

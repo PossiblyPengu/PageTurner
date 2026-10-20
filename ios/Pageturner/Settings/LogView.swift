@@ -16,6 +16,7 @@ struct LogView: View {
                 .padding()
         }
         .defaultScrollAnchor(.bottom)
+        .ptSoftScrollEdges()
         .navigationTitle("Log")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

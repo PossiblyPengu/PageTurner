@@ -75,6 +75,7 @@ struct SavedWordsView: View {
                 ContentUnavailableView.search(text: query)
             }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("Saved Words")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Words and books")

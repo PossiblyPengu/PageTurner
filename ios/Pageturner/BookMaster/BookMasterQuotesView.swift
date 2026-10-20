@@ -54,6 +54,7 @@ struct BookMasterQuotesView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.secondary) } }
         }
+        .ptSoftScrollEdges()
         .navigationTitle(pin == nil ? "Quotes & notes" : "Kept lines")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }

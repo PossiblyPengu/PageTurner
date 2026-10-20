@@ -159,6 +159,7 @@ struct DriveBackupsView: View {
                                            description: Text("Turn on Back up automatically and choose Google Drive, then Back Up Now."))
                 }
             }
+            .ptSoftScrollEdges()
             .navigationTitle("Restore from Drive")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }

@@ -46,6 +46,7 @@ struct VoiceListView: View {
             case .neural: neuralRows
             }
         }
+        .ptSoftScrollEdges()
     }
 
     private func chrome<V: View>(_ content: V) -> some View {

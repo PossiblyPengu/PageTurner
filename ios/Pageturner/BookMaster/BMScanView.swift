@@ -31,16 +31,16 @@ struct BMScanView: View {
                             UIApplication.shared.open(url)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .ptButtonStyle(prominent: true)
                 }
                 .padding(24)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .ptGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .padding(24)
             } else {
                 Text("Point at the barcode on the back cover")
                     .font(.subheadline.weight(.medium))
                     .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.regularMaterial, in: Capsule())
+                    .ptGlassCapsule()
                     .padding(.bottom, 40)
             }
         }

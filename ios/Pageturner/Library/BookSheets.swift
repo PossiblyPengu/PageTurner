@@ -218,7 +218,7 @@ struct BookDetailSheet: View {
                             Image(systemName: "photo.badge.arrow.down")
                                 .font(.caption.weight(.bold))
                                 .padding(7)
-                                .background(.ultraThinMaterial, in: Circle())
+                                .ptGlass(in: Circle())
                                 .offset(x: 8, y: 8)
                         }
                     }
@@ -351,6 +351,7 @@ struct BookDetailSheet: View {
             .navigationTitle("Book Info")
             .navigationBarTitleDisplayMode(.inline)
             .scrollContentBackground(.hidden)
+            .ptSoftScrollEdges()
             .background(CoverTintBackdrop(tint: tint))
             .task(id: cover.map(ObjectIdentifier.init)) {
                 tint = cover?.averageColor.map { Color($0) } ?? .ptAccent
@@ -712,6 +713,7 @@ struct BookLookupSheet: View {
                 .onSubmit { search() }
                 resultsSection
             }
+            .ptSoftScrollEdges()
             .navigationTitle(coverOnly ? "Pick a Cover" : "Find Details")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(
@@ -840,7 +842,7 @@ struct BookLookupSheet: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(.ultraThinMaterial, in: Capsule())
+                                .ptGlassCapsule()
                                 .padding(6)
                         }
                     }

@@ -117,6 +117,7 @@ struct BookMasterDetailView: View {
                 if let error, detail == nil { Section { Text(error).foregroundStyle(.secondary) } }
             }
             .scrollContentBackground(.hidden)
+            .ptSoftScrollEdges()
             .background(CoverTintBackdrop(tint: tint))
             // a failed write is told where the reader is looking, not in a footer at the bottom of a long list
             .alert("BookMaster", isPresented: Binding(get: { error != nil && detail != nil }, set: { if !$0 { error = nil } })) {
@@ -255,7 +256,7 @@ struct BookMasterDetailView: View {
                     Image(systemName: "photo.badge.arrow.down")
                         .font(.caption.weight(.bold))
                         .padding(7)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .ptGlass(in: Circle())
                         .offset(x: 8, y: 8)
                 }
             }

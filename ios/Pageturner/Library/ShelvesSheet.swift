@@ -61,6 +61,7 @@ struct ShelvesSheet: View {
                     Button { showNew = true } label: { Label("New Shelf…", systemImage: "plus") }
                 }
             }
+            .ptSoftScrollEdges()
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -42,6 +42,7 @@ struct BookNotesView: View {
                 if let info { Section { Text(info).foregroundStyle(.secondary) } }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
             }
+            .ptSoftScrollEdges()
             .navigationTitle(book.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

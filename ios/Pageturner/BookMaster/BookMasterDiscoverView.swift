@@ -28,6 +28,7 @@ struct BookMasterDiscoverView: View {
             if let info { Section { Text(info).foregroundStyle(.secondary) } }
             if let error { Section { Text(error).foregroundStyle(.secondary) } }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("What to read next")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }

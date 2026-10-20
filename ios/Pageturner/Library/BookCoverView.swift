@@ -80,14 +80,14 @@ struct BookCoverView: View {
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.orange)
                     .padding(6)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .ptGlass(in: Circle())
                     .accessibilityLabel("File missing")
             }
             if book.isAudio {
                 Image(systemName: "headphones")
                     .font(.caption2.weight(.bold))
                     .padding(6)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .ptGlass(in: Circle())
             }
             Spacer(minLength: 0)
             if let p = book.progression, p > 0 {
@@ -96,7 +96,7 @@ struct BookCoverView: View {
                     .monospacedDigit()
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .ptGlassCapsule()
             }
         }
         .padding(6)
@@ -120,7 +120,7 @@ struct CloudBadge: View {
             .font(.caption2.weight(.bold))
             .frame(width: 14, height: 14)
             .padding(6)
-            .background(.ultraThinMaterial, in: Circle())
+            .ptGlass(in: Circle())
             .accessibilityLabel(label)
     }
 

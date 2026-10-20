@@ -16,6 +16,7 @@ struct FootnoteSheet: View {
                     .padding(20)
                     .textSelection(.enabled)
             }
+            .ptSoftScrollEdges()
             .navigationTitle(note.label.map { "Note \($0)" } ?? "Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

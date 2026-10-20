@@ -47,6 +47,7 @@ struct BookMasterTogetherView: View {
             .padding(.vertical, 12)
             .ptReadableWidth()
         }
+        .ptSoftScrollEdges()
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("Together")
     }
@@ -765,6 +766,7 @@ private struct BMPartnerShelfList: View {
                 }
             }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("\(shelf.partner?.name ?? "Their")’s shelf")
         .navigationBarTitleDisplayMode(.inline)
     }

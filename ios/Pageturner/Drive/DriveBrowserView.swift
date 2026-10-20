@@ -194,6 +194,7 @@ struct DriveBrowserView: View {
                 Label("Shared with me", systemImage: "person.2")
             }
         }
+        .ptSoftScrollEdges()
         .navigationDestination(for: DriveLocation.self) { location in
             DriveFolderView(location: location, purpose: purpose, model: model, onChoose: choose, onDone: { dismiss() })
         }
@@ -292,6 +293,7 @@ struct DriveFolderView: View {
                     description: Text(purpose == .chooseFolder ? "Use this folder, or go back." : "No folders or files in this one."))
             }
         }
+        .ptSoftScrollEdges()
     }
 
     @ViewBuilder
@@ -386,14 +388,14 @@ struct DriveFolderView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity)
-            .background(.bar)
+            .ptGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.horizontal, 14)
         } else if purpose == .chooseFolder, !location.isSharedList {
             Button { onChoose(location.asFolder) } label: {
                 Text("Use “\(location.name)”").frame(maxWidth: .infinity)
             }
             .ptButtonStyle(prominent: true)
             .padding(14)
-            .background(.bar)
         } else if purpose == .importBooks, model.count > 0 {
             Button {
                 Task { if await model.addSelected(library: library) { onDone() } }
@@ -402,7 +404,6 @@ struct DriveFolderView: View {
             }
             .ptButtonStyle(prominent: true)
             .padding(14)
-            .background(.bar)
         }
     }
 

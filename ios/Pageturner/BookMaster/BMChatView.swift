@@ -74,11 +74,9 @@ struct BMChatView: View {
             if BookMaster.shared.isLinked {
                 switch tab {
                 case .us:
-                    VStack(spacing: 0) {
-                        thread
-                        Divider()
-                        composer
-                    }
+                    thread
+                        // the composer floats: the transcript scrolls under it
+                        .safeAreaInset(edge: .bottom, spacing: 4) { composer }
                 case .questLog:
                     BMQuestLogRoomView(room: room)
                 }
@@ -147,6 +145,7 @@ struct BMChatView: View {
             .refreshable { await refresh() }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
+            .ptSoftScrollEdges()
             .onChange(of: messages.last?.id) { _, _ in follow(proxy) }
             .overlay(alignment: .bottom) { newMessageChip(proxy) }
             .overlay {
@@ -189,7 +188,7 @@ struct BMChatView: View {
                     .font(.footnote.weight(.semibold))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
+                    .ptGlassCapsule(interactive: true)
             }
             .padding(.bottom, 8)
         }
@@ -342,10 +341,10 @@ struct BMChatView: View {
                 .accessibilityLabel("Send")
             }
         }
+        .padding(8)
+        .ptGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .ptReadableWidth()
-        .background(.bar)
     }
 
     // MARK: Fetching

@@ -44,6 +44,7 @@ struct BookMasterShelfView: View {
                 }
             }
         }
+        .ptSoftScrollEdges()
         .navigationTitle("Your Shelf")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await BookMaster.shared.pullShelf(into: library) }
