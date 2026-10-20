@@ -137,6 +137,11 @@ final class DriveBrowserModel {
             }
             return failures.isEmpty
         }
+        if !added.isEmpty {
+            // names are all there is to go on until a book is downloaded: look the books up for authors and covers
+            let ids = added.map(\.id)
+            Task { await MetadataLookup.enrichDriveBooks(ids, library: library) }
+        }
         guard !added.isEmpty else {
             error = result.known > 0 ? "That is already in your library." : "There is nothing there Pageturner can add."
             return false

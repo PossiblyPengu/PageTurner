@@ -124,6 +124,8 @@ final class DriveSync {
             }
             let result = DriveBooks.plan(wanted, known: library.driveFileIDs)
             let added = library.addFromDrive(result.books)
+            let addedIDs = added.map(\.id)
+            Task { await MetadataLookup.enrichDriveBooks(addedIDs, library: library) }
             // remembered once it is in the library — so one taken out again is not put back — except what was left alone
             let left = Set(result.direct.map(\.file.id))
             let keys = wanted.filter { !left.contains($0.file.id) }.map { GoogleDrive.syncKey($0.file) }

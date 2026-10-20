@@ -169,11 +169,12 @@ enum MetadataLookup {
     /// the same book — used by bulk "Find details". Never overwrites something
     /// already there. Returns whether anything changed.
     @MainActor
-    static func autoApply(to id: UUID, library: LibraryStore) async -> Bool {
+    static func autoApply(to id: UUID, library: LibraryStore, title: String? = nil, author: String? = nil) async -> Bool {
         guard let book = library.books.first(where: { $0.id == id }) else { return false }
-        let results = await search(title: book.title, author: book.author)
+        let askTitle = title ?? book.title, askAuthor = author ?? book.author
+        let results = await search(title: askTitle, author: askAuthor)
         guard let match = results.first(where: {
-            BMShelf.titlesAgree(book.title, $0.title) && BMShelf.authorsAgree(book.author, $0.authors)
+            BMShelf.titlesAgree(askTitle, $0.title) && BMShelf.authorsAgree(askAuthor, $0.authors)
         }) else { return false }
 
         // the search took a while: change only these fields on the book as it is
@@ -181,6 +182,8 @@ enum MetadataLookup {
         var changed = false
         library.mutate(id) { current in
             let before = current
+            // a Drive book is called by its file or folder name until something better is known
+            if let guess = current.drive?.guessedTitle, current.title == guess, !match.title.isEmpty { current.title = match.title }
             if current.author.isEmpty, !match.authors.isEmpty { current.author = match.authors }
             if current.year == nil, !match.year.isEmpty { current.year = match.year }
             if current.bookDescription == nil, !match.summary.isEmpty { current.bookDescription = match.summary }
@@ -197,5 +200,36 @@ enum MetadataLookup {
             changed = true
         }
         return changed
+    }
+}
+
+extension MetadataLookup {
+    /// Books added from Google Drive have only a name to go by (their files are not down to read): look each up online
+    /// for author, blurb, year and cover. A name like "Dune - Frank Herbert (1965)" is tried whole, then as title and
+    /// author. One book at a time, so the sources are not hammered by a folder of hundreds.
+    @MainActor
+    static func enrichDriveBooks(_ ids: [UUID], library: LibraryStore) async {
+        for id in ids {
+            guard let book = library.books.first(where: { $0.id == id }) else { continue }
+            if await autoApply(to: id, library: library) { continue }
+            let (title, author) = splitName(book.title)
+            if title != book.title || !author.isEmpty { _ = await autoApply(to: id, library: library, title: title, author: author) }
+        }
+    }
+
+    /// "Dune - Frank Herbert (1965)" → ("Dune", "Frank Herbert"); "Dune by Frank Herbert" the same; brackets and
+    /// underscores dropped.
+    static func splitName(_ name: String) -> (title: String, author: String) {
+        var text = name.replacingOccurrences(of: "_", with: " ")
+        text = text.replacingOccurrences(of: #"[\(\[][^\)\]]*[\)\]]"#, with: " ", options: .regularExpression)
+        text = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        for separator in [" - ", " – ", " — ", " by "] {
+            if let range = text.range(of: separator) {
+                let left = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+                let right = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                if !left.isEmpty, !right.isEmpty { return (left, right) }
+            }
+        }
+        return (text, "")
     }
 }
