@@ -4,9 +4,10 @@ import Foundation
 // that a cached row still reads. No servers needed.
 
 private func row(_ id: String, _ title: String, _ author: String?, _ status: String, upNext: Int? = nil,
-                 format: String? = nil, isbn: String? = nil, ol: String? = nil) -> BMShelfRow {
+                 format: String? = nil, isbn: String? = nil, ol: String? = nil, cover: String? = nil) -> BMShelfRow {
     BMShelfRow(userBookId: id, bookId: "b" + id, title: title, author: author, status: status, rating: nil,
-               upNext: upNext, percent: nil, format: format, totalPages: nil, openLibraryId: ol, isbn: isbn)
+               upNext: upNext, percent: nil, format: format, totalPages: nil, openLibraryId: ol, isbn: isbn,
+               publishedYear: nil, description: nil, coverUrl: cover, finishDate: nil, updatedAt: nil)
 }
 
 @MainActor
@@ -52,13 +53,16 @@ func runShelfChecks() {
           && BMShelf.label(forStatus: "abandoned") == "Abandoned" && BMShelf.label(forStatus: "dnf") == "Abandoned"
           && BMShelf.label(forStatus: "on_hold") == "On Hold")
 
-    check("a jacket comes from the ISBN, else the Open Library id, else none",
-          row("a", "T", nil, "read", isbn: "9780441172719").coverURL?.absoluteString.contains("/isbn/9780441172719-M.jpg") == true
-          && row("b", "T", nil, "read", ol: "OL123M").coverURL?.absoluteString.contains("/olid/OL123M-M.jpg") == true
+    check("a jacket comes from the ISBN, else the Open Library id, else none — big first, medium behind",
+          row("a", "T", nil, "read", isbn: "9780441172719").coverURL?.absoluteString.contains("/isbn/9780441172719-L.jpg") == true
+          && row("a", "T", nil, "read", isbn: "9780441172719").coverURLs[1].absoluteString.contains("/isbn/9780441172719-M.jpg")
+          && row("b", "T", nil, "read", ol: "OL123M").coverURL?.absoluteString.contains("/olid/OL123M-L.jpg") == true
           && row("c", "T", nil, "read").coverURL == nil)
     check("an ISBN with hyphens or spaces still finds a jacket, and a junk one does not",
-          row("a", "T", nil, "read", isbn: "978-0-441-17271-9").coverURL?.absoluteString.contains("/isbn/9780441172719-M") == true
+          row("a", "T", nil, "read", isbn: "978-0-441-17271-9").coverURL?.absoluteString.contains("/isbn/9780441172719-L") == true
           && row("b", "T", nil, "read", isbn: "n/a").coverURL == nil)
+    check("a stored cover leads the guesses",
+          row("a", "T", nil, "read", isbn: "9780441172719", cover: "https://x.example/c.jpg").coverURLs.first?.absoluteString == "https://x.example/c.jpg")
 
     // the shelf is cached as JSON: a row cached by an earlier build (without the newer fields) still reads
     let old = Data(#"[{"userBookId":"u","bookId":"b","title":"Old","status":"reading"}]"#.utf8)
