@@ -127,18 +127,10 @@ struct BMCover: View {
     let row: BMShelfRow
     var body: some View {
         // The box is decided here (2:3 of the width offered); the art only ever
-        // fills it. AsyncImage otherwise lets a loaded file's intrinsic size
-        // leak into the grid's row heights, so covers land different sizes.
+        // fills it — a loaded file's intrinsic size must not leak into the
+        // grid's row heights, or covers land different sizes.
         GeometryReader { geo in
-            AsyncImage(url: row.coverURL) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    Color.secondary.opacity(0.15).overlay(
-                        Image(systemName: row.isAudio ? "headphones" : "book.closed")
-                            .foregroundStyle(.secondary))
-                }
-            }
+            RemoteCover(urls: row.coverURLs, icon: row.isAudio ? "headphones" : "book.closed")
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
         }

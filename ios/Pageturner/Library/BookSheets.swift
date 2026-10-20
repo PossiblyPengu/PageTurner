@@ -24,8 +24,10 @@ struct BookDetailSheet: View {
     /// Looks the book up online (a Drive book has only a name until it is downloaded); true when something was found.
     var onLookup: (() async -> Void)? = nil
     @State private var lookingUp = false
+    @EnvironmentObject private var library: LibraryStore
     @State private var picked: Int?
     @State private var showNotes = false
+    @State private var changeCover = false
     @State private var tint: Color = .ptAccent
     @State private var descriptionExpanded = false
     @State private var confirmRestart = false
@@ -140,18 +142,49 @@ struct BookDetailSheet: View {
         NavigationStack {
             List {
                 Section {
-                    VStack(spacing: 14) {
-                        BookCoverView(book: book, cover: cover, showsBadges: false, corner: 12)
-                            .frame(width: 124)
+                    VStack(spacing: 16) {
+                        Button { changeCover = true } label: {
+                            BookCoverView(book: book, cover: cover, showsBadges: false, corner: 16)
+                                .frame(width: 186)
+                                .shadow(color: tint.opacity(0.35), radius: 18, y: 8)
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "photo.badge.arrow.down")
+                                        .font(.caption.weight(.bold))
+                                        .padding(7)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                        .offset(x: 8, y: 8)
+                                }
+                        }
+                        .buttonStyle(PressableStyle())
+                        .accessibilityLabel("Change cover")
+                        .accessibilityHint("Finds jacket art online")
                         VStack(spacing: 4) {
                             Text(book.title)
-                                .font(.title3.weight(.bold))
+                                .font(.title2.weight(.bold))
                                 .multilineTextAlignment(.center)
                             if !book.author.isEmpty {
                                 Text(book.author)
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
+                            HStack(spacing: 6) {
+                                Text(book.ext.uppercased())
+                                if let year = book.year { Text("· \(year)") }
+                                if let status = book.bmStatus { Text("· \(BMShelf.label(forStatus: status))") }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        }
+                        if let p = book.progression, p > 0.001, !isFinished {
+                            HStack(spacing: 10) {
+                                ProgressView(value: p)
+                                    .tint(tint)
+                                Text("\(Int((p * 100).rounded()))%")
+                                    .font(.caption.weight(.semibold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: 240)
                         }
                         if cloud != nil {
                             cloudControl
@@ -170,7 +203,7 @@ struct BookDetailSheet: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
                     .listRowBackground(Color.clear)
                 }
                 if let blurb = book.bookDescription, !blurb.isEmpty {
@@ -274,6 +307,7 @@ struct BookDetailSheet: View {
                             }
                     }
                     Button(book.collections.isEmpty ? "Add to a Shelf…" : "Shelves: \(book.collections.joined(separator: ", "))", action: onShelves)
+                    Button("Change Cover…") { changeCover = true }
                     Button("Edit Details", action: onEdit)
                     if book.drive != nil, cloud == nil {
                         Button("Remove Download", action: onRemoveDownload)
@@ -297,6 +331,12 @@ struct BookDetailSheet: View {
                 lookingUp = false
             }
             .sheet(isPresented: $showNotes) { BookNotesView(book: book) }
+            .sheet(isPresented: $changeCover) {
+                BookLookupSheet(book: book, coverOnly: true) { candidate in
+                    guard !candidate.coverURLs.isEmpty else { return }
+                    Task { await MetadataLookup.applyCover(from: candidate.coverURLs, to: book, library: library) }
+                }
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -311,15 +351,16 @@ struct BookEditSheet: View {
     @State private var summary: String
     @State private var pin: String?
     @State private var openLibraryId: String?
-    @State private var searching = false
-    @State private var candidates: [MetadataCandidate]?
-    @State private var pickedCover: URL?
+    /// Jacket guesses the picked match will bring (lookup) or the jacket
+    /// picked online on its own — either way a chain `applyCover` walks.
+    @State private var pickedCovers: [URL] = []
     /// A cover chosen from the photos: written on save.
     @State private var pickedImage: UIImage?
     @State private var removeCover = false
     @State private var photo: PhotosPickerItem?
-    @State private var coverChoices: [MetadataCandidate]?
-    @State private var findingCovers = false
+    /// The lookup sheet, in take-everything or jacket-only mode.
+    @State private var showLookup = false
+    @State private var pickCoverOnly = false
     private let original: Book
     private let onSave: (Book) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -356,47 +397,10 @@ struct BookEditSheet: View {
                 coverSection
 
                 Section("Lookup") {
-                    if searching {
-                        HStack {
-                            ProgressView()
-                            Text(BookMaster.shared.isLinked
-                                ? "Searching BookMaster, Google Books and Open Library…"
-                                : "Searching Google Books and Open Library…")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Button("Find Details Online") { lookup() }
-                    }
-                    if let candidates {
-                        if candidates.isEmpty {
-                            Text("No matches found — check the title and author, and the connection.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(candidates) { c in
-                            Button { apply(c) } label: {
-                                HStack(spacing: 10) {
-                                    AsyncImage(url: c.coverURL) { image in
-                                        image.resizable().scaledToFill()
-                                    } placeholder: {
-                                        Image(systemName: "book.closed")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .frame(width: 34, height: 50)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(c.title).font(.subheadline.weight(.medium)).lineLimit(2)
-                                        Text(c.authors).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                        Text([c.year, c.source].filter { !$0.isEmpty }.joined(separator: " · "))
-                                            .font(.caption2).foregroundStyle(.tertiary)
-                                    }
-                                    Spacer()
-                                }
-                            }
-                            .foregroundStyle(.primary)
-                        }
-                    }
+                    Button("Find Details Online") { showLookup = true }
+                    Text("A match fills the fields and the cover at once.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Edit Details")
@@ -413,18 +417,23 @@ struct BookEditSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-    }
-
-    private func lookup() {
-        searching = true
-        candidates = nil
-        Task {
-            // the first source to answer shows at once; the rest add to the list as they come
-            let results = await MetadataLookup.search(title: title, author: author, progress: { found in
-                if !found.isEmpty { candidates = found }
-            })
-            candidates = results
-            searching = false
+        .sheet(isPresented: $showLookup) {
+            BookLookupSheet(
+                book: original,
+                seeded: (title: title, author: author, isbn: isbn)) { candidate in
+                    apply(candidate)
+                }
+        }
+        .sheet(isPresented: $pickCoverOnly) {
+            // the same grid, jacket-only: picking a cover is the same action
+            BookLookupSheet(
+                book: original,
+                seeded: (title: title, author: author, isbn: isbn),
+                coverOnly: true) { candidate in
+                    pickedCovers = candidate.coverURLs
+                    pickedImage = nil
+                    removeCover = false
+                }
         }
     }
 
@@ -435,60 +444,31 @@ struct BookEditSheet: View {
     private var coverSection: some View {
         Section {
             HStack {
-                BookCoverView(
-                    book: original, cover: removeCover ? nil : (pickedImage ?? library.cover(for: original)),
-                    showsBadges: false, corner: 8)
-                    .frame(width: 70)
+                if !removeCover, pickedImage == nil, !pickedCovers.isEmpty {
+                    RemoteCover(urls: pickedCovers)
+                        .frame(width: 70, height: 105)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                } else {
+                    BookCoverView(
+                        book: original, cover: removeCover ? nil : (pickedImage ?? library.cover(for: original)),
+                        showsBadges: false, corner: 8)
+                        .frame(width: 70)
+                }
                 Spacer()
             }
             PhotosPicker(selection: $photo, matching: .images) {
                 Label("Choose from Photos…", systemImage: "photo")
             }
             Button {
-                Task { await findCovers() }
+                pickCoverOnly = true
             } label: {
-                HStack {
-                    Label("Find Another Cover…", systemImage: "magnifyingglass")
-                    if findingCovers { Spacer(); ProgressView() }
-                }
+                Label("Find Another Cover…", systemImage: "magnifyingglass")
             }
-            .disabled(findingCovers)
-            if let coverChoices {
-                if coverChoices.isEmpty {
-                    Text("No covers turned up for that title and author.").font(.footnote).foregroundStyle(.secondary)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(coverChoices) { c in
-                                Button {
-                                    pickedCover = c.coverURL
-                                    pickedImage = nil
-                                    removeCover = false
-                                } label: {
-                                    AsyncImage(url: c.coverURL) { image in
-                                        image.resizable().scaledToFill()
-                                    } placeholder: {
-                                        Color.secondary.opacity(0.15)
-                                    }
-                                    .frame(width: 64, height: 96)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                    .overlay {
-                                        if pickedCover == c.coverURL {
-                                            RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.ptAccent, lineWidth: 3)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-            }
-            if library.cover(for: original) != nil || pickedImage != nil || pickedCover != nil {
+            if library.cover(for: original) != nil || pickedImage != nil || !pickedCovers.isEmpty {
                 Button("Remove Cover", role: .destructive) {
                     removeCover = true
                     pickedImage = nil
-                    pickedCover = nil
+                    pickedCovers = []
                 }
             }
         } header: {
@@ -499,19 +479,11 @@ struct BookEditSheet: View {
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
                     pickedImage = image
-                    pickedCover = nil
+                    pickedCovers = []
                     removeCover = false
                 }
             }
         }
-    }
-
-    private func findCovers() async {
-        findingCovers = true
-        let found = await MetadataLookup.search(
-            title: title.trimmingCharacters(in: .whitespaces), author: author.trimmingCharacters(in: .whitespaces))
-        coverChoices = found.filter { $0.coverURL != nil }
-        findingCovers = false
     }
 
     /// Take everything the match knows; blanks in the match leave the field alone.
@@ -524,7 +496,7 @@ struct BookEditSheet: View {
         if let olid = candidate.openLibraryId { openLibraryId = olid }
         // a shelf row the match names is the one to push to — never a guess
         if let id = candidate.bookmasterId { pin = id }
-        pickedCover = candidate.coverURL
+        pickedCovers = candidate.coverURLs
     }
 
     private func save() {
@@ -548,8 +520,126 @@ struct BookEditSheet: View {
         } else if let pickedImage, let jpeg = pickedImage.jpegData(compressionQuality: 0.85) {
             try? jpeg.write(to: library.coverURL(for: book))
             library.coverChanged()
-        } else if let pickedCover {
-            Task { await MetadataLookup.applyCover(from: pickedCover, to: book, library: library) }
+        } else if !pickedCovers.isEmpty {
+            Task { await MetadataLookup.applyCover(from: pickedCovers, to: book, library: library) }
+        }
+    }
+}
+
+/// Finding a book online. One grid of big covers and one action — tapping a
+/// cover hands back the match; the caller decides whether that takes the
+/// fields and jacket (the edit sheet) or the jacket alone ("Change Cover").
+/// Same pick, same grid, either job.
+struct BookLookupSheet: View {
+    let book: Book
+    /// Cover-only picking leaves the words alone — the caller takes just the
+    /// jacket off the match.
+    var coverOnly = false
+    let onPick: (MetadataCandidate) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var author: String
+    @State private var isbn: String
+    @State private var searching = false
+    @State private var candidates: [MetadataCandidate]?
+
+    /// `seeded` lets the edit sheet start the search from its working fields
+    /// rather than the stored book's.
+    init(book: Book, seeded: (title: String, author: String, isbn: String)? = nil,
+         coverOnly: Bool = false, onPick: @escaping (MetadataCandidate) -> Void) {
+        self.book = book
+        self.coverOnly = coverOnly
+        self.onPick = onPick
+        _title = State(initialValue: seeded?.title ?? book.title)
+        _author = State(initialValue: seeded?.author ?? book.author)
+        _isbn = State(initialValue: seeded?.isbn ?? book.isbn ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    TextField("Title", text: $title)
+                    TextField("Author", text: $author)
+                    TextField("ISBN", text: $isbn)
+                        .keyboardType(.numbersAndPunctuation)
+                        .autocorrectionDisabled()
+                }
+                Section {
+                    if searching {
+                        HStack {
+                            ProgressView()
+                            Text(BookMaster.shared.isLinked
+                                ? "Searching BookMaster, Google Books and Open Library…"
+                                : "Searching Google Books and Open Library…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button("Search Again") { search() }
+                    }
+                    if let candidates {
+                        if candidates.isEmpty {
+                            Text("No matches found — check the title and author, and the connection.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 126), spacing: 14)], spacing: 18) {
+                                ForEach(candidates) { c in
+                                    Button { pick(c) } label: {
+                                        VStack(spacing: 6) {
+                                            RemoteCover(urls: c.coverURLs)
+                                                .frame(maxWidth: .infinity)
+                                                .aspectRatio(2 / 3, contentMode: .fit)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                                .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+                                            Text(c.title).font(.caption.weight(.medium)).lineLimit(2)
+                                            Text(c.authors).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                            Text([c.year, c.source].filter { !$0.isEmpty }.joined(separator: " · "))
+                                                .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .top)
+                                    }
+                                    .foregroundStyle(.primary)
+                                    .accessibilityHint(coverOnly ? "Uses this jacket" : "Takes this match's details and jacket")
+                                }
+                            }
+                            .padding(.vertical, 8)
+                            Text(coverOnly
+                                ? "Tap a jacket to use it — the book's words stay as they are."
+                                : "Tap a cover to take its details — the jacket comes with it.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(coverOnly ? "Pick a Cover" : "Find Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+            .task { search() }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func pick(_ candidate: MetadataCandidate) {
+        onPick(candidate)
+        dismiss()
+    }
+
+    private func search() {
+        searching = true
+        candidates = nil
+        Task {
+            // the first source to answer shows at once; the rest add to the list as they come
+            let results = await MetadataLookup.search(
+                title: title, author: author, isbn: isbn,
+                progress: { found in if !found.isEmpty { candidates = found } })
+            candidates = results
+            searching = false
         }
     }
 }

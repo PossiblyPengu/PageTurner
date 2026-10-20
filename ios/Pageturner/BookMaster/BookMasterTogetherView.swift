@@ -218,7 +218,7 @@ struct BookMasterTogetherView: View {
         var id: String
         var title: String
         var author: String?
-        var coverUrl: URL? = nil
+        var coverUrls: [URL] = []
         var percent: Double? = nil
         var touched: String? = nil
         var rating: Int? = nil
@@ -229,7 +229,7 @@ struct BookMasterTogetherView: View {
     private var mineReadingBooks: [MemberBook] {
         (stats?.currentlyReading ?? []).map {
             MemberBook(id: $0.id, title: $0.title, author: $0.author,
-                       coverUrl: $0.coverUrl.flatMap { URL(string: $0) },
+                       coverUrls: bmCoverURLs(coverUrl: $0.coverUrl, isbn: nil, openLibraryId: nil),
                        percent: $0.percent, touched: $0.updatedAt)
         }
     }
@@ -255,8 +255,7 @@ struct BookMasterTogetherView: View {
         if !rows.isEmpty {
             return rows.map {
                 MemberBook(id: $0.id, title: $0.title ?? "Untitled", author: $0.author,
-                           coverUrl: $0.coverUrl.flatMap { URL(string: $0) }
-                               ?? bmCoverURL(isbn: $0.isbn, openLibraryId: $0.openLibraryId),
+                           coverUrls: bmCoverURLs(coverUrl: $0.coverUrl, isbn: $0.isbn, openLibraryId: $0.openLibraryId),
                            percent: $0.percent, touched: $0.updatedAt)
             }
         }
@@ -321,16 +320,7 @@ struct BookMasterTogetherView: View {
 
     /// The jacket the suggestion named: the bridge's stored cover, then Open Library's.
     private func nudgeCover(_ nudge: BMNudge) -> some View {
-        let url = nudge.coverUrl.flatMap { URL(string: $0) }
-            ?? bmCoverURL(isbn: nudge.isbn, openLibraryId: nudge.openLibraryId)
-        return AsyncImage(url: url) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                Color.secondary.opacity(0.15).overlay(
-                    Image(systemName: "book.closed").foregroundStyle(.secondary))
-            }
-        }
+        RemoteCover(urls: bmCoverURLs(coverUrl: nudge.coverUrl, isbn: nudge.isbn, openLibraryId: nudge.openLibraryId))
         .frame(width: 44, height: 66)
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
@@ -502,14 +492,7 @@ struct BookMasterTogetherView: View {
     }
 
     private func memberCover(_ book: MemberBook) -> some View {
-        AsyncImage(url: book.coverUrl) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                Color.secondary.opacity(0.15).overlay(
-                    Image(systemName: "book.closed").font(.caption2).foregroundStyle(.secondary))
-            }
-        }
+        RemoteCover(urls: book.coverUrls)
         .frame(width: 36, height: 54)
         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
     }
@@ -570,17 +553,9 @@ struct BookMasterTogetherView: View {
     }
 
     private func shelfThumb(_ book: BMPartnerBook) -> some View {
-        let url = book.coverUrl.flatMap { URL(string: $0) }
-            ?? bmCoverURL(isbn: book.isbn, openLibraryId: book.openLibraryId)
-        return AsyncImage(url: url) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                Color.secondary.opacity(0.15).overlay(
-                    Image(systemName: book.format == "audio" ? "headphones" : "book.closed")
-                        .foregroundStyle(.secondary))
-            }
-        }
+        RemoteCover(
+            urls: bmCoverURLs(coverUrl: book.coverUrl, isbn: book.isbn, openLibraryId: book.openLibraryId),
+            icon: book.format == "audio" ? "headphones" : "book.closed")
         .frame(width: 40, height: 60)
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
@@ -756,16 +731,9 @@ private struct BMPartnerShelfList: View {
         List {
             ForEach(shelf.books) { book in
                 HStack(spacing: 12) {
-                    AsyncImage(url: book.coverUrl.flatMap { URL(string: $0) }
-                        ?? bmCoverURL(isbn: book.isbn, openLibraryId: book.openLibraryId)) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            Color.secondary.opacity(0.15).overlay(
-                                Image(systemName: book.format == "audio" ? "headphones" : "book.closed")
-                                    .foregroundStyle(.secondary))
-                        }
-                    }
+                    RemoteCover(
+                        urls: bmCoverURLs(coverUrl: book.coverUrl, isbn: book.isbn, openLibraryId: book.openLibraryId),
+                        icon: book.format == "audio" ? "headphones" : "book.closed")
                     .frame(width: 40, height: 60)
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
 

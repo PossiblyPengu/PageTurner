@@ -30,15 +30,16 @@ struct BMShelfRow: Codable, Hashable, Identifiable {
     var id: String { userBookId }
     var isAudio: Bool { format == "audio" }
 
-    /// A jacket for the row: the stored cover when BookMaster knows one, else
-    /// Open Library's guess by ISBN or work id.
-    var coverURL: URL? {
-        if let coverUrl, let url = URL(string: coverUrl) { return url }
-        let digits = (isbn ?? "").filter { $0.isNumber || $0 == "X" || $0 == "x" }
-        if digits.count >= 10 { return URL(string: "https://covers.openlibrary.org/b/isbn/\(digits)-M.jpg?default=false") }
-        if let ol = openLibraryId, !ol.isEmpty { return URL(string: "https://covers.openlibrary.org/b/olid/\(ol)-M.jpg?default=false") }
-        return nil
+    /// Jacket guesses for the row, best first: the stored cover when
+    /// BookMaster knows one, then Open Library's by ISBN and work id — each
+    /// guess 404ing cleanly so the next is tried.
+    var coverURLs: [URL] {
+        var urls = coverUrl.flatMap { URL(string: $0) }.map { [$0] } ?? []
+        urls += CoverLinks.isbn(isbn) + CoverLinks.openLibraryWork(openLibraryId)
+        return urls
     }
+
+    var coverURL: URL? { coverURLs.first }
 }
 
 private struct BMShelfReply: Decodable { var books: [BMShelfRow] }
@@ -198,7 +199,7 @@ extension BookMaster {
         else { return false }
         keepShelf(reply.books)
         var changes: [(UUID, (inout Book) -> Void)] = []
-        var covers: [(Book, URL)] = []
+        var covers: [(Book, [URL])] = []
         for book in library.books {
             guard let row = BMShelf.match(book, in: reply.books) else {
                 // gone from the shelf (removed on BookMaster): the badges, rating and Up next go with it
@@ -231,10 +232,10 @@ extension BookMaster {
                     if let blurb = row.description, !blurb.isEmpty { b.bookDescription = blurb }
                 }
             }))
-            if let url = row.coverURL,
+            if !row.coverURLs.isEmpty,
                !FileManager.default.fileExists(atPath: library.coverURL(for: book).path),
                !Self.recentlyMissedCover(book.id) {
-                covers.append((book, url))
+                covers.append((book, row.coverURLs))
             }
         }
         library.applyShelf(changes)
@@ -242,8 +243,8 @@ extension BookMaster {
         // in the background: the refresh spinner should not wait on a string of image downloads
         if !covers.isEmpty {
             Task {
-                for (book, url) in covers where !Task.isCancelled {
-                    await MetadataLookup.applyCover(from: url, to: book, library: library)
+                for (book, urls) in covers where !Task.isCancelled {
+                    await MetadataLookup.applyCover(from: urls, to: book, library: library)
                     if !FileManager.default.fileExists(atPath: library.coverURL(for: book).path) {
                         Self.noteCoverMiss(book.id)
                     }

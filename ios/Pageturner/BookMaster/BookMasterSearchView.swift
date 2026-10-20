@@ -84,14 +84,7 @@ struct BookMasterSearchView: View {
     /// One hit: the shelf state when it is already yours, or the ways to add it.
     private func row(_ hit: BMSearchBook) -> some View {
         HStack(spacing: 12) {
-            AsyncImage(url: coverURL(hit)) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    Color.secondary.opacity(0.15).overlay(
-                        Image(systemName: "book.closed").foregroundStyle(.secondary))
-                }
-            }
+            RemoteCover(urls: coverURLs(hit))
             .frame(width: 40, height: 60)
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
 
@@ -135,10 +128,9 @@ struct BookMasterSearchView: View {
         }
     }
 
-    /// The jacket the hit names: its own URL, then Open Library's.
-    private func coverURL(_ hit: BMSearchBook) -> URL? {
-        if let cover = hit.coverUrl, let url = URL(string: cover) { return url }
-        return bmCoverURL(isbn: hit.isbn, openLibraryId: hit.openLibraryId)
+    /// The jackets the hit names: its own URL, then Open Library's guesses.
+    private func coverURLs(_ hit: BMSearchBook) -> [URL] {
+        bmCoverURLs(coverUrl: hit.coverUrl, isbn: hit.isbn, openLibraryId: hit.openLibraryId)
     }
 
     private func search() async {

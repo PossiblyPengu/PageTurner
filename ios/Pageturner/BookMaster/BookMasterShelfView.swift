@@ -85,14 +85,7 @@ private struct ShelfCover: View {
     let row: BMShelfRow
 
     var body: some View {
-        AsyncImage(url: row.coverURL) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else {
-                Color.secondary.opacity(0.15).overlay(
-                    Image(systemName: row.isAudio ? "headphones" : "book.closed").foregroundStyle(.secondary))
-            }
-        }
+        RemoteCover(urls: row.coverURLs, icon: row.isAudio ? "headphones" : "book.closed")
         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 }
