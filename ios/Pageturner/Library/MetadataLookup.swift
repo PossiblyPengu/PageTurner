@@ -48,13 +48,22 @@ enum MetadataLookup {
             await progress?(hit)
             return hit
         }
-        var slots: [[MetadataCandidate]] = [[], [], []]
+        // a name with the author in it ("David Wong - John Dies at the End") is asked as it stands, as title and
+        // author, and the other way round: files are named either way
+        var asks: [(title: String, author: String)] = [(title, author)]
+        if author.isEmpty {
+            let (left, right) = splitName(title)
+            if !right.isEmpty { asks += [(left, right), (right, left)] }
+        }
+        var slots: [[MetadataCandidate]] = Array(repeating: [], count: asks.count * 3)
         var finished = 0
         var stopped = false
         await withTaskGroup(of: (Int, [MetadataCandidate]).self) { group in
-            group.addTask { (0, await bookMasterCandidates(title: title, author: author)) }
-            group.addTask { (1, await googleBooks(title: title, author: author)) }
-            group.addTask { (2, await openLibrary(title: title, author: author)) }
+            for (n, ask) in asks.enumerated() {
+                group.addTask { (n * 3, await bookMasterCandidates(title: ask.title, author: ask.author)) }
+                group.addTask { (n * 3 + 1, await googleBooks(title: ask.title, author: ask.author)) }
+                group.addTask { (n * 3 + 2, await openLibrary(title: ask.title, author: ask.author)) }
+            }
             for await (index, list) in group {
                 slots[index] = list
                 finished += 1
@@ -215,8 +224,12 @@ enum MetadataLookup {
     static func autoApply(to id: UUID, library: LibraryStore, title: String? = nil, author: String? = nil) async -> Bool {
         guard let book = library.books.first(where: { $0.id == id }) else { return false }
         let askTitle = title ?? book.title, askAuthor = author ?? book.author
+        let (left, right) = askAuthor.isEmpty ? splitName(askTitle) : (askTitle, "")
         let agrees: (MetadataCandidate) -> Bool = {
-            BMShelf.titlesAgree(askTitle, $0.title) && BMShelf.authorsAgree(askAuthor, $0.authors)
+            (BMShelf.titlesAgree(askTitle, $0.title) && BMShelf.authorsAgree(askAuthor, $0.authors))
+                || (!right.isEmpty
+                    && ((BMShelf.titlesAgree(left, $0.title) && BMShelf.authorsAgree(right, $0.authors))
+                        || (BMShelf.titlesAgree(right, $0.title) && BMShelf.authorsAgree(left, $0.authors))))
         }
         // the first source to name the book is enough: the others need not be waited for
         let results = await search(title: askTitle, author: askAuthor, stopWhen: { $0.contains(where: agrees) })
