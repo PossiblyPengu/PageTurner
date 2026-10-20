@@ -129,6 +129,13 @@ final class AppRouter {
         launch(library.books.first { $0.id == prompt.book.id } ?? prompt.book, library: library)
     }
 
+    /// Play an audiobook that is still in the Drive straight from there, without downloading it.
+    func stream(_ book: Book, library: LibraryStore) {
+        guard book.isAudio else { return }
+        detail = nil
+        launch(book, library: library)
+    }
+
     /// Give back the space of a Drive book's files (the book stays in the library): what is playing, read to or open
     /// from them is put away first.
     func removeDownload(_ book: Book, library: LibraryStore) {

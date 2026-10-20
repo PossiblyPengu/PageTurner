@@ -191,6 +191,7 @@ struct RootView: View {
             downloadState: downloads.states[book.id],
             onDownload: { downloads.start(book, library: library) },
             onCancelDownload: { downloads.cancel(book.id) },
+            onStream: book.isAudio ? { router.stream(book, library: library) } : nil,
             onRemoveDownload: {
                 router.detail = nil
                 router.removeDownload(book, library: library)

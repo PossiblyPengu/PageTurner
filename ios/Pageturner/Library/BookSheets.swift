@@ -18,6 +18,8 @@ struct BookDetailSheet: View {
     var downloadState: DriveDownloads.State? = nil
     var onDownload: () -> Void = {}
     var onCancelDownload: () -> Void = {}
+    /// Play an audiobook from the Drive without downloading it.
+    var onStream: (() -> Void)? = nil
     var onRemoveDownload: () -> Void = {}
     /// Looks the book up online (a Drive book has only a name until it is downloaded); true when something was found.
     var onLookup: (() async -> Void)? = nil
@@ -75,6 +77,17 @@ struct BookDetailSheet: View {
             }
         default:
             VStack(spacing: 6) {
+                if book.isAudio, let onStream {
+                    Button(action: onStream) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "play.fill")
+                            Text("Listen Now")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .ptButtonStyle(prominent: true)
+                    .controlSize(.large)
+                }
                 Button(action: onDownload) {
                     HStack(spacing: 8) {
                         Image(systemName: "icloud.and.arrow.down")
