@@ -19,7 +19,8 @@ struct MetadataCandidate: Identifiable, Hashable, Codable {
     var coverURL: URL? { coverURLs.first }
     var source: String
     /// The BookMaster shelf row this is — applying it pins the book there, so a
-    /// later push can never write a duplicate.
+    /// later push can never write a duplicate. Found by matching the candidate
+    /// against the shelf copy the app keeps, not by asking BookMaster.
     var bookmasterId: String?
 
     /// `id` is only for the list on screen; what is kept on disk is the rest.
@@ -61,8 +62,10 @@ extension MetadataCandidate {
     }
 }
 
-/// Book metadata lookup: BookMaster's own catalogue first when linked (its hits
-/// carry shelf pins and catalogue ids), then Google Books and Open Library.
+/// Book metadata lookup: the same catalogues BookMaster asks — Open Library,
+/// Google Books and Apple Books through `CatalogueSearch` — never BookMaster
+/// itself. A match that lands on the reader's shelf is pinned from the shelf
+/// copy the app already keeps, so applying it can never push a duplicate.
 /// Only ever called on an explicit user action — the edit sheet's "Find Details"
 /// or a bulk "Find details" on selected books — never in the background.
 enum MetadataLookup {
@@ -113,8 +116,10 @@ enum MetadataLookup {
 
     /// All sources at once. `progress` hears the merged list each time one answers (the fastest shows at once, the
     /// slowest only adds); `stopWhen` ends the search early once the list so far holds what the caller wanted.
+    /// `interactive` is the fast lane for a search the reader is watching —
+    /// bulk fills take the polite one.
     static func search(
-        title: String, author: String, isbn: String? = nil,
+        title: String, author: String, isbn: String? = nil, interactive: Bool = true,
         progress: (@MainActor ([MetadataCandidate]) -> Void)? = nil,
         stopWhen: (([MetadataCandidate]) -> Bool)? = nil
     ) async -> [MetadataCandidate] {
@@ -132,23 +137,21 @@ enum MetadataLookup {
         }
         // an ISBN names the book outright: asked of the two sources that take one, beside the title and author
         let extra = isbn.flatMap { ISBN.normalize($0) }
-        var slots: [[MetadataCandidate]] = Array(repeating: [], count: asks.count * 3 + (extra == nil ? 0 : 2))
-        var finished = 0
+        var slots: [[MetadataCandidate]] = Array(repeating: [], count: asks.count * 2 + (extra == nil ? 0 : 2))
         var stopped = false
         await withTaskGroup(of: (Int, [MetadataCandidate]).self) { group in
             for (n, ask) in asks.enumerated() {
-                group.addTask { (n * 3, await bookMasterCandidates(title: ask.title, author: ask.author)) }
-                group.addTask { (n * 3 + 1, await googleBooks(title: ask.title, author: ask.author)) }
-                group.addTask { (n * 3 + 2, await openLibrary(title: ask.title, author: ask.author)) }
+                group.addTask { (n * 2, await catalogue(ask.title, author: ask.author, interactive: interactive)) }
+                group.addTask { (n * 2 + 1, await googleBooks(title: ask.title, author: ask.author)) }
             }
             if let extra {
-                group.addTask { (asks.count * 3, await googleBooks(query: "isbn:\(extra)")) }
-                group.addTask { (asks.count * 3 + 1, await openLibrary(items: [URLQueryItem(name: "isbn", value: extra)])) }
+                group.addTask { (asks.count * 2, await catalogue(extra, interactive: interactive)) }
+                group.addTask { (asks.count * 2 + 1, await googleBooks(query: "isbn:\(extra)")) }
             }
             for await (index, list) in group {
                 slots[index] = list
-                finished += 1
-                let merged = dedupe(slots.flatMap { $0 })
+                let deduped = dedupe(slots.flatMap { $0 })
+                let merged = await MainActor.run { pinToShelf(deduped) }
                 await progress?(merged)
                 if let stopWhen, stopWhen(merged) {
                     stopped = true
@@ -157,7 +160,8 @@ enum MetadataLookup {
                 }
             }
         }
-        let result = dedupe(slots.flatMap { $0 })
+        let deduped = dedupe(slots.flatMap { $0 })
+        let result = await MainActor.run { pinToShelf(deduped) }
         // a search cut short, or one where nothing came back (the network, not the book), is not worth remembering
         if !stopped, !result.isEmpty {
             await MainActor.run { remember(key, result) }
@@ -190,24 +194,45 @@ enum MetadataLookup {
         return out
     }
 
-    // MARK: - BookMaster
+    // MARK: - The catalogues
 
-    private static func bookMasterCandidates(title: String, author: String) async -> [MetadataCandidate] {
-        let hits = await BookMaster.shared.searchCatalogue(title: title, author: author)
-        return hits.compactMap { hit in
-            guard !hit.title.isEmpty else { return nil }
-            let isbn = hit.isbn.flatMap { ISBN.normalize($0) }
-            var covers = hit.coverUrl.flatMap { URL(string: $0) }.map { [$0] } ?? []
-            covers += CoverLinks.isbn(isbn) + CoverLinks.openLibraryWork(hit.openLibraryId)
-            return MetadataCandidate(
+    /// Open Library and Apple Books through `CatalogueSearch`, as candidates.
+    private static func catalogue(_ title: String, author: String = "", interactive: Bool) async -> [MetadataCandidate] {
+        let query = [title, author].filter { !$0.isEmpty }.joined(separator: " ")
+        guard !query.isEmpty else { return [] }
+        let reply = await CatalogueSearch.search(query, limit: 12, interactive: interactive)
+        return reply.books.map { hit in
+            MetadataCandidate(
                 title: hit.title,
-                authors: hit.author ?? "",
-                year: hit.year ?? "",
-                isbn: isbn,
-                openLibraryId: hit.openLibraryId,
-                coverURLs: covers,
-                source: hit.userBookId != nil ? "On your BookMaster shelf" : "BookMaster",
-                bookmasterId: hit.userBookId)
+                authors: hit.author == "Unknown" ? "" : hit.author,
+                year: hit.publishedYear.map(String.init) ?? "",
+                summary: hit.summary ?? "",
+                isbn: hit.isbn.flatMap { ISBN.normalize($0) },
+                openLibraryId: hit.openLibraryId.isEmpty ? nil : hit.openLibraryId,
+                coverURLs: hit.coverURLs,
+                source: hit.source)
+        }
+    }
+
+    /// A candidate that names a book already on the reader's shelf is pinned
+    /// to that row — so applying it can never push a duplicate — worked out
+    /// from the shelf copy the app keeps, not asked of BookMaster.
+    @MainActor
+    private static func pinToShelf(_ list: [MetadataCandidate]) -> [MetadataCandidate] {
+        let rows = BookMaster.shared.shelfRows
+        guard !rows.isEmpty else { return list }
+        return list.map { c in
+            guard c.bookmasterId == nil,
+                  let row = BMShelf.match(title: c.title, author: c.authors,
+                                          isbn: c.isbn, openLibraryId: c.openLibraryId, in: rows)
+            else { return c }
+            var c = c
+            c.bookmasterId = row.userBookId
+            // the shelf row's own jacket — including one this app pushed up —
+            // is the strongest guess of all
+            c.coverURLs.insert(contentsOf: row.coverURLs.filter { !c.coverURLs.contains($0) }, at: 0)
+            c.source = "On your BookMaster shelf"
+            return c
         }
     }
 
@@ -257,49 +282,6 @@ enum MetadataLookup {
         }
     }
 
-    // MARK: - Open Library
-
-    private static func openLibrary(title: String, author: String) async -> [MetadataCandidate] {
-        var items = [URLQueryItem(name: "title", value: title)]
-        if !author.isEmpty { items.append(URLQueryItem(name: "author", value: author)) }
-        return await openLibrary(items: items)
-    }
-
-    private static func openLibrary(items asked: [URLQueryItem]) async -> [MetadataCandidate] {
-        guard var comp = URLComponents(string: "https://openlibrary.org/search.json") else { return [] }
-        comp.queryItems = asked + [
-            URLQueryItem(name: "limit", value: "8"),
-            URLQueryItem(name: "fields", value: "key,title,author_name,first_publish_year,cover_i,isbn"),
-        ]
-        guard let url = comp.url,
-              let (data, _) = try? await session.data(from: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let docs = json["docs"] as? [[String: Any]]
-        else { return [] }
-
-        return docs.compactMap { doc in
-            guard let t = doc["title"] as? String, !t.isEmpty else { return nil }
-            let authors = (doc["author_name"] as? [String] ?? []).joined(separator: ", ")
-            let year = (doc["first_publish_year"] as? Int).map(String.init) ?? ""
-            var covers: [URL] = []
-            // cover_i is -1 when the work has no jacket — asking for it still
-            // produced a URL, which is why dead cover boxes showed in results
-            if let coverID = doc["cover_i"] as? Int {
-                covers += CoverLinks.coverID(coverID)
-            }
-            // "/works/OL45804W" → "OL45804W", the id BookMaster keeps
-            let olid = (doc["key"] as? String).map { $0.replacingOccurrences(of: "/works/", with: "") }
-            let isbns = (doc["isbn"] as? [String] ?? []).prefix(25).map { $0 }
-            let isbn = ISBN.best(of: Array(isbns))
-            // an ISBN- or OLID-keyed jacket is a second guess when the work's
-            // own cover id is missing or 404s
-            covers += CoverLinks.isbn(isbn)
-            return MetadataCandidate(
-                title: t, authors: authors, year: year, isbn: isbn,
-                openLibraryId: olid, coverURLs: covers, source: "Open Library")
-        }
-    }
-
     // MARK: - Applying
 
     /// Download a candidate's cover into the covers folder for `book`. `urls`
@@ -338,7 +320,8 @@ enum MetadataLookup {
                         || (BMShelf.titlesAgree(right, $0.title) && BMShelf.authorsAgree(left, $0.authors))))
         }
         // the first source to name the book is enough: the others need not be waited for
-        let results = await search(title: askTitle, author: askAuthor, isbn: book.isbn, stopWhen: { $0.contains(where: agrees) })
+        let results = await search(title: askTitle, author: askAuthor, isbn: book.isbn,
+                                   interactive: false, stopWhen: { $0.contains(where: agrees) })
         guard let match = results.first(where: agrees) else { return false }
 
         // the search took a while: change only these fields on the book as it is

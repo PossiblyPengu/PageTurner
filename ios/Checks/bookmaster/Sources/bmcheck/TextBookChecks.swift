@@ -46,8 +46,6 @@ func runBookText() {
     check("year from a full date", BookText.year(from: "2021-03-04") == "2021")
     check("year from a month and year", BookText.year(from: "March 2021") == "2021")
     check("no year", BookText.year(from: "n.d.") == nil)
-    check("BookMaster search hits decode, with nulls",
-          (try? JSONDecoder().decode(BMSearchReply.self, from: Data(#"{"books":[{"title":"Dune","author":null,"coverUrl":null,"totalPages":null,"year":"1965","isbn":"9780441172719","openLibraryId":"OL45804W","userBookId":"ub1","bookId":"b1","status":"reading","source":"shelf"},{"title":"X","source":"bookmaster"}]}"#.utf8)))?.books.count == 2)
 }
 
 @MainActor

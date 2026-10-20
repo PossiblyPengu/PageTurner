@@ -22,7 +22,6 @@ const ROUTES = new Set([
   "comments",
   "library",
   "overview",
-  "search",
   "together",
   "chat",
   "chat-read",

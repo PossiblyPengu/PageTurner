@@ -138,11 +138,20 @@ enum BMShelf {
         if let pin = book.bookmasterId, let hit = rows.first(where: { $0.userBookId == pin }) {
             return hit
         }
-        if let id = book.openLibraryId, !id.isEmpty,
+        return match(title: book.title, author: book.author, isbn: book.isbn,
+                     openLibraryId: book.openLibraryId, in: rows)
+    }
+
+    /// The same ladder for something that is not a `Book` yet — a catalogue
+    /// hit or a lookup candidate. There is no pin to try; that is what the
+    /// match is for.
+    static func match(title: String, author: String, isbn: String?, openLibraryId: String?,
+                      in rows: [BMShelfRow]) -> BMShelfRow? {
+        if let id = openLibraryId, !id.isEmpty,
            let hit = rows.first(where: { $0.openLibraryId == id }) { return hit }
-        if let raw = book.isbn, let isbn = ISBN.canonical(raw),
+        if let raw = isbn, let isbn = ISBN.canonical(raw),
            let hit = rows.first(where: { $0.isbn.flatMap(ISBN.canonical) == isbn }) { return hit }
-        return rows.first { titlesAgree(book.title, $0.title) && authorsAgree(book.author, $0.author) }
+        return rows.first { titlesAgree(title, $0.title) && authorsAgree(author, $0.author) }
     }
 }
 

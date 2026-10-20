@@ -760,9 +760,7 @@ struct BookLookupSheet: View {
             if searching {
                 HStack {
                     ProgressView()
-                    Text(BookMaster.shared.isLinked
-                        ? "Searching BookMaster, Google Books and Open Library…"
-                        : "Searching Google Books and Open Library…")
+                    Text("Searching Open Library, Google Books and Apple Books…")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -893,8 +891,8 @@ struct BookLookupSheet: View {
             || (ISBN.normalize(c.isbn ?? "") != nil && ISBN.normalize(c.isbn ?? "") == book.isbn)
     }
 
-    /// The chip a match sorts under: BookMaster's shelf rows and catalogue
-    /// hits share one, the rest go by the name the source gave.
+    /// The chip a match sorts under: a match pinned to the reader's shelf
+    /// sorts under "BookMaster", the rest go by the name the source gave.
     private func chipKey(_ c: MetadataCandidate) -> String {
         c.source.contains("BookMaster") ? "BookMaster" : c.source
     }

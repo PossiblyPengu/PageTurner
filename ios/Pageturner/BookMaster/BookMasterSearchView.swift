@@ -1,7 +1,10 @@
 import SwiftUI
 
-/// BookMaster's own catalogue search — the shelf first, then Open Library —
-/// with every hit one tap from your shelf. The Find page of the tab.
+/// Finding a book to shelve: the same catalogues BookMaster's own page asks —
+/// Open Library and Apple Books, queried straight from here — with every hit
+/// one tap from your shelf. A hit that is already shelved is pinned from the
+/// shelf copy the app keeps, so applying it can never push a duplicate.
+/// The Find page of the tab.
 struct BookMasterSearchView: View {
     /// A lane carried in from Discover — the field starts filled.
     var starting: String = ""
@@ -9,9 +12,10 @@ struct BookMasterSearchView: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(AppRouter.self) private var router
     @State private var query = ""
-    @State private var results: [BMSearchBook] = []
+    @State private var results: [CatalogueHit] = []
     @State private var searching = false
     @State private var info: String?
+    @State private var correctedTo: String?
     @State private var error: String?
     @State private var busy = false
     @State private var scanning = false
@@ -22,12 +26,12 @@ struct BookMasterSearchView: View {
             if offline, results.isEmpty, !searching, !query.isEmpty {
                 ContentUnavailableView(
                     "Couldn’t search", systemImage: "wifi.slash",
-                    description: Text("BookMaster didn’t answer. Check the connection and try again."))
+                    description: Text("The catalogues didn’t answer. Check the connection and try again."))
                     .listRowBackground(Color.clear)
             } else if results.isEmpty, !searching, !query.isEmpty {
                 ContentUnavailableView(
                     "No matches", systemImage: "magnifyingglass",
-                    description: Text("Nothing on the shelf or in Open Library by that name."))
+                    description: Text("Nothing in Open Library or Apple Books by that name."))
                     .listRowBackground(Color.clear)
             }
             if query.trimmingCharacters(in: .whitespaces).isEmpty, results.isEmpty {
@@ -35,9 +39,15 @@ struct BookMasterSearchView: View {
                     .foregroundStyle(.secondary)
                     .listRowBackground(Color.clear)
             }
-            ForEach(Array(results.enumerated()), id: \.element.stableKey) { n, hit in
+            if let correctedTo {
+                Text("Showing results for “\(correctedTo)”.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .listRowBackground(Color.clear)
+            }
+            ForEach(results, id: \.key) { hit in
                 row(hit)
-                    .onAppear { prefetchCovers(past: n) }
+                    .onAppear { prefetchCovers(past: hit.key) }
             }
             if searching {
                 ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
@@ -64,6 +74,7 @@ struct BookMasterSearchView: View {
         .task(id: query) {
             if query.trimmingCharacters(in: .whitespaces).isEmpty {
                 results = []
+                correctedTo = nil
                 offline = false
                 searching = false
                 return
@@ -83,17 +94,17 @@ struct BookMasterSearchView: View {
     }
 
     /// One hit: the shelf state when it is already yours, or the ways to add it.
-    private func row(_ hit: BMSearchBook) -> some View {
+    private func row(_ hit: CatalogueHit) -> some View {
         HStack(spacing: 12) {
-            RemoteCover(urls: coverURLs(hit))
+            RemoteCover(urls: hit.coverURLs)
             .frame(width: 40, height: 60)
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(hit.title).font(.body.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
-                    if let author = hit.author, !author.isEmpty { Text(author) }
-                    if let year = hit.year { Text("· \(String(year))") }
+                    if !hit.author.isEmpty, hit.author != "Unknown" { Text(hit.author) }
+                    if let year = hit.publishedYear { Text("· \(String(year))") }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -110,7 +121,7 @@ struct BookMasterSearchView: View {
 
     /// Already on the shelf → its page; not → the Add menu.
     @ViewBuilder
-    private func actions(_ hit: BMSearchBook) -> some View {
+    private func actions(_ hit: CatalogueHit) -> some View {
         if let pin = hit.userBookId {
             NavigationLink { BookMasterDetailView(pin: pin) } label: {
                 Image(systemName: "chevron.right").foregroundStyle(.secondary)
@@ -129,14 +140,10 @@ struct BookMasterSearchView: View {
         }
     }
 
-    /// The jackets the hit names: its own URL, then Open Library's guesses.
-    private func coverURLs(_ hit: BMSearchBook) -> [URL] {
-        bmCoverURLs(coverUrl: hit.coverUrl, isbn: hit.isbn, openLibraryId: hit.openLibraryId)
-    }
-
     /// The jackets ~10 hits further on, warmed before the list is scrolled to them.
-    private func prefetchCovers(past index: Int) {
-        prefetchCovers(results.dropFirst(index + 10).prefix(8).map { coverURLs($0) })
+    private func prefetchCovers(past key: String) {
+        guard let index = results.firstIndex(where: { $0.key == key }) else { return }
+        prefetchCovers(results.dropFirst(index + 10).prefix(8).map(\.coverURLs))
     }
 
     /// The first url of each cover chain into `CoverFetch`'s caches.
@@ -144,34 +151,40 @@ struct BookMasterSearchView: View {
         CoverFetch.prefetch(chains.prefix(8).compactMap(\.first))
     }
 
+    @MainActor
     private func search() async {
         let name = query.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { results = []; return }
         searching = true
-        let found = await BookMaster.shared.searchCatalogueChecked(title: name, author: "")
+        let reply = await CatalogueSearch.search(name, limit: 24)
         // a newer keystroke cancelled this lookup: leave its state to the next one
         guard !Task.isCancelled, name == query.trimmingCharacters(in: .whitespaces) else { return }
         searching = false
-        offline = found == nil
-        if let found { results = found }
+        offline = reply.failed
+        var books = reply.books
+        CatalogueSearch.pin(&books, to: BookMaster.shared.shelfRows)
+        results = books
+        correctedTo = reply.correctedTo
     }
 
     /// Shelve a find, annotated with the catalogue facts it carried.
-    private func add(_ hit: BMSearchBook, as status: BMShelfStatus) async {
+    @MainActor
+    private func add(_ hit: CatalogueHit, as status: BMShelfStatus) async {
         busy = true
         defer { busy = false }
         do {
             var extra: [String: Any] = [:]
-            if let pages = hit.totalPages { extra["total_pages"] = pages }
-            if let year = hit.year.flatMap({ Int($0) }) { extra["published_year"] = year }
             if let cover = hit.coverUrl { extra["cover_url"] = cover }
             _ = try await BookMaster.shared.shelve(
                 ref: BMBookRef(
                     title: hit.title,
-                    author: hit.author ?? "",
+                    author: hit.author == "Unknown" ? "" : hit.author,
                     isbn: hit.isbn,
-                    openLibraryId: hit.openLibraryId,
-                    userBookId: nil),
+                    openLibraryId: hit.openLibraryId.isEmpty ? nil : hit.openLibraryId,
+                    userBookId: nil,
+                    bookDescription: hit.summary,
+                    publishedYear: hit.publishedYear,
+                    totalPages: hit.totalPages),
                 status: status,
                 extra: extra)
             info = "“\(hit.title)” is on your \(status.label.lowercased()) shelf."
@@ -181,12 +194,5 @@ struct BookMasterSearchView: View {
             self.error = error.localizedDescription
             info = nil
         }
-    }
-}
-
-private extension BMSearchBook {
-    /// One result among lookalikes: its catalogue id when it has one.
-    var stableKey: String {
-        bookId ?? userBookId ?? openLibraryId ?? isbn ?? "\(title)|\(author ?? "")"
     }
 }

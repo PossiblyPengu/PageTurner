@@ -153,7 +153,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   once `PAGETURNER_REQUIRE_KEY = "1"` lands on BookMaster a missing or stale key answers
   `404 "Unknown reader"` — the dead-link path already walks the reader through relinking.
 - Payloads follow BookMaster's `functions/_lib/routes/pageturner.ts`: ids are strings, `at` on a session
-  is milliseconds (a number), percents are 0–100.
+  is milliseconds (a number), percents are 0–100. BookMaster is never a lookup *source*: catalogue and
+  metadata search go to Open Library + Apple Books through `Library/CatalogueSearch.swift` (a port of
+  BookMaster's `src/lib/search.ts` over `BookMatching`/`BookRanking`, pure and Linux-checked) plus Google
+  Books in `MetadataLookup`, and a hit that is already shelved is pinned by matching it against
+  `BookMaster.shelfRows` (`BMShelf.match`) — the same ladder the bridge ran, but on the local copy.
+  `shelve` is still the only write for a found book.
 - Offline: progress is coalesced by book identity (BookMaster / Open Library / ISBN, then title and author).
   Sessions and quotes always queue, oldest first, a 4xx is dropped. Presence beats are never queued.
   Only a push reply or a shelf pull may change a book's `bm*`
@@ -172,7 +177,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   `NavigationStack` and reports `place = "bookmaster"` while on screen. Shared chrome is `BMShared.swift`
   (`bmCard`, `BMLinkPrompt`, `BMCover`, `BMMetric`, `BMFormat`). Detail additions: `BMPace` (the web's
   PaceWidget math, pure), `BMLogSheet` + `BMReadingTimer` (manual logging, persisted stopwatch),
-  `BMEditSheet` (catalogue edit), `BMScanView` (barcode → catalogue search). `GoodreadsCSV` parses an
+  `BMEditSheet` (catalogue edit), `BMScanView` (barcode → `CatalogueSearch`). `GoodreadsCSV` parses an
   export on-device (scalars not Characters — a CRLF is one grapheme but two terminators); only the rows
   travel to `/pageturner/import`. New bridge writes go through `sendJSON` (username merged server-side).
 - Chat (`BMChat.swift` is pure and Linux-checked; `BMChatView.swift` is the screen): the suite's one shared room, in BookMaster's
