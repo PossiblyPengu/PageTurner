@@ -19,7 +19,7 @@ func runSpeechTextChecks() {
     check("etc. in the middle of a sentence stays there",
           SpeechText.spoken("pens, etc. and more") == "pens, et cetera and more")
     check("a year range is spoken as a range",
-          SpeechText.spoken("the war of 1914–1918") == "the war of 1914 to 1918")
+          SpeechText.spoken("the war of 1914–1918") == "the war of nineteen fourteen to nineteen eighteen")
     check("a hyphenated number is left alone",
           SpeechText.spoken("call 555-1234") == "call 555-1234")
     check("a chapter's roman numeral is a number",
@@ -83,4 +83,21 @@ func runSpeechTextChecks() {
           backOnPage("Chapter XIV Morning", "Morning") == "Morning")
     check("punctuation alone has no range",
           backOnPage("Well, then.", ",") == nil)
+
+    section("Read-aloud dates")
+    func said(_ t: String) -> String { SpeechText.spoken(t) }
+    check("an ISO date", said("It was 1984-05-12.") == "It was May twelfth, nineteen eighty-four.", said("It was 1984-05-12."))
+    check("a slash date with a day over 12", said("On 25/12/2023 we met.") == "On December twenty-fifth, 2023 we met.", said("On 25/12/2023 we met."))
+    check("a slash date with a second part over 12", said("On 12/25/2023 we met.") == "On December twenty-fifth, 2023 we met.", said("On 12/25/2023 we met."))
+    check("a year after a month", said("In May 1805 he left.") == "In May eighteen oh five he left.", said("In May 1805 he left."))
+    check("a month, day and year", said("March 5, 1999") == "March 5, nineteen ninety-nine", said("March 5, 1999"))
+    check("a year after in", said("He was born in 1900.") == "He was born in nineteen hundred.", said("He was born in 1900."))
+    check("a year after in that is a count is left to the voice when it is not a year", said("in 2005") == "in 2005")
+    check("an abbreviated month", said("Sept. 11 was a Tuesday.") == "September 11 was a Tuesday.", said("Sept. 11 was a Tuesday."))
+    check("a span of years", said("The war of 1914-1918 ended.") == "The war of nineteen fourteen to nineteen eighteen ended.", said("The war of 1914-1918 ended."))
+    check("a decade", said("the 1990s") == "the nineteen nineties" && said("the 1960's") == "the nineteen sixties", said("the 1990s"))
+    check("a decade of the two thousands", said("the 2010s and 2000s") == "the twenty tens and two thousands", said("the 2010s and 2000s"))
+    check("a short decade", said("back in the '80s") == "back in the eighties", said("back in the '80s"))
+    check("a plain number is left alone", said("He had 1500 men and 12 horses.") == "He had 1500 men and 12 horses.")
+    check("a number that is not a date with a slash is left alone", said("a ratio of 3/4 holds") == "a ratio of 3/4 holds")
 }

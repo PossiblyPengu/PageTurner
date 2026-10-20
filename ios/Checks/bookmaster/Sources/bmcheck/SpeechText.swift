@@ -23,6 +23,7 @@ enum SpeechText {
         // before a roman heading numeral becomes digits, so "XLII" is still a chapter
         if AppPrefs.speechSkipsPageNumbers, isPageNumber(text) { return "" }
         text = romanNumerals(in: text)
+        text = dates(in: text)
         return spaceBeforePunctuation.stringByReplacingMatches(in: text, range: nsRange(text), withTemplate: "$1")
     }
 
@@ -159,6 +160,114 @@ enum SpeechText {
             out.replaceSubrange(numeral, with: String(value))
         }
         return out
+    }
+
+    // MARK: Dates
+
+    private static let ones = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+        "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
+    ]
+    private static let tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+    private static let ordinals = [
+        "", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh",
+        "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth",
+        "twentieth", "twenty-first", "twenty-second", "twenty-third", "twenty-fourth", "twenty-fifth", "twenty-sixth",
+        "twenty-seventh", "twenty-eighth", "twenty-ninth", "thirtieth", "thirty-first",
+    ]
+    private static let monthNames = [
+        "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December",
+    ]
+    private static let monthWord = "(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+
+    private static func below100(_ n: Int) -> String {
+        n < 20 ? ones[n] : tens[n / 10] + (n % 10 == 0 ? "" : "-" + ones[n % 10])
+    }
+
+    /// A year of the 1100s to 1900s as a person says it: "nineteen eighty-four", "eighteen oh five", "nineteen hundred".
+    /// Nil for any other number — a voice reads those as they are.
+    static func yearWords(_ year: Int) -> String? {
+        guard (1100 ... 1999).contains(year) else { return nil }
+        let high = year / 100, low = year % 100
+        if low == 0 { return below100(high) + " hundred" }
+        if low < 10 { return below100(high) + " oh " + ones[low] }
+        return below100(high) + " " + below100(low)
+    }
+
+    /// "1990s" as "nineteen nineties", "2010s" as "twenty tens".
+    static func decadeWords(_ year: Int) -> String? {
+        guard year % 10 == 0, (1100 ... 2090).contains(year) else { return nil }
+        if year == 2000 { return "two thousands" }
+        let high = year / 100, low = year % 100
+        if low == 0 { return below100(high) + " hundreds" }
+        let tensWord = below100(low)
+        let plural = tensWord.hasSuffix("y") ? String(tensWord.dropLast()) + "ies" : tensWord + "s"
+        return below100(high) + " " + plural
+    }
+
+    private static let isoDate = rx(#"\b(\d{4})-(\d{2})-(\d{2})\b"#)
+    private static let slashDate = rx(#"\b(\d{1,2})/(\d{1,2})/(\d{4})\b"#)
+    private static let monthAbbreviation = rx(#"\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.?(?=\s+\d)"#)
+    private static let monthYear = rx("\\b(\(monthWord))(\\s+\\d{1,2}(?:st|nd|rd|th)?,?)?(\\s+)(1[1-9]\\d\\d)\\b")
+    private static let contextYear = rx(#"\b(in|In|of|since|until|by|from|during|year|circa|AD|A\.D\.)\s+(1[1-9]\d\d)\b"#)
+    private static let yearRange = rx(#"\b(1[1-9]\d\d)(?:\s*[-‐‑]\s*|\s+to\s+)(1[1-9]\d\d)\b"#)
+    private static let decade = rx(#"\b(1[1-9]\d0|20\d0)['’]?s\b"#)
+    private static let shortDecade = rx(#"(?<![\p{L}\d])['’](\d)0s\b"#)
+
+    /// Dates said the way they are read: "1984-05-12" and "5/12/1984" as "May twelfth, nineteen eighty-four", "Mar 5" as
+    /// "March 5", a year after a month or "in" as words, "1914-1918" as a span, "1990s" as "nineteen nineties".
+    private static func dates(in source: String) -> String {
+        var text = source
+        // quick exit: nothing here has a digit
+        guard text.rangeOfCharacter(from: .decimalDigits) != nil else { return text }
+
+        func replace(_ regex: NSRegularExpression, _ make: (NSTextCheckingResult, String) -> String?) {
+            let matches = regex.matches(in: text, range: nsRange(text))
+            for match in matches.reversed() {
+                guard let whole = Range(match.range, in: text), let new = make(match, text) else { continue }
+                text.replaceSubrange(whole, with: new)
+            }
+        }
+        func group(_ match: NSTextCheckingResult, _ index: Int, _ source: String) -> String {
+            Range(match.range(at: index), in: source).map { String(source[$0]) } ?? ""
+        }
+        func year(_ y: Int) -> String { yearWords(y) ?? String(y) }
+        func spokenDate(month: Int, day: Int, year y: Int) -> String? {
+            guard (1 ... 12).contains(month), (1 ... 31).contains(day) else { return nil }
+            return "\(monthNames[month - 1]) \(ordinals[day]), \(year(y))"
+        }
+
+        replace(yearRange) { m, t in
+            guard let a = Int(group(m, 1, t)), let b = Int(group(m, 2, t)), b > a, b - a < 200 else { return nil }
+            return "\(year(a)) to \(year(b))"
+        }
+        replace(isoDate) { m, t in
+            guard let y = Int(group(m, 1, t)), let mo = Int(group(m, 2, t)), let d = Int(group(m, 3, t)) else { return nil }
+            return spokenDate(month: mo, day: d, year: y)
+        }
+        replace(slashDate) { m, t in
+            guard let a = Int(group(m, 1, t)), let b = Int(group(m, 2, t)), let y = Int(group(m, 3, t)) else { return nil }
+            // the part that cannot be a month is the day; when both could be, the reader's region decides
+            let dayFirst = a > 12 || (b <= 12 && Locale.current.region?.identifier != "US")
+            return dayFirst ? spokenDate(month: b, day: a, year: y) : spokenDate(month: a, day: b, year: y)
+        }
+        let full = ["Jan": "January", "Feb": "February", "Mar": "March", "Apr": "April", "Jun": "June", "Jul": "July",
+                    "Aug": "August", "Sep": "September", "Sept": "September", "Oct": "October", "Nov": "November", "Dec": "December"]
+        replace(monthAbbreviation) { m, t in full[group(m, 1, t)] }
+        replace(monthYear) { m, t in
+            guard let y = Int(group(m, 4, t)), let words = yearWords(y) else { return nil }
+            return group(m, 1, t) + group(m, 2, t) + group(m, 3, t) + words
+        }
+        replace(contextYear) { m, t in
+            guard let y = Int(group(m, 2, t)), let words = yearWords(y) else { return nil }
+            return group(m, 1, t) + " " + words
+        }
+        replace(decade) { m, t in Int(group(m, 1, t)).flatMap(decadeWords) }
+        replace(shortDecade) { m, t in
+            guard let d = Int(group(m, 1, t)) else { return nil }
+            return d == 0 ? "hundreds" : below100(d * 10).hasSuffix("y") ? String(below100(d * 10).dropLast()) + "ies" : below100(d * 10) + "s"
+        }
+        return text
     }
 
     private static func nsRange(_ text: String) -> NSRange {
