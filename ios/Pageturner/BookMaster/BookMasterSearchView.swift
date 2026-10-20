@@ -35,8 +35,9 @@ struct BookMasterSearchView: View {
                     .foregroundStyle(.secondary)
                     .listRowBackground(Color.clear)
             }
-            ForEach(results, id: \.stableKey) { hit in
+            ForEach(Array(results.enumerated()), id: \.element.stableKey) { n, hit in
                 row(hit)
+                    .onAppear { prefetchCovers(past: n) }
             }
             if searching {
                 ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
@@ -131,6 +132,16 @@ struct BookMasterSearchView: View {
     /// The jackets the hit names: its own URL, then Open Library's guesses.
     private func coverURLs(_ hit: BMSearchBook) -> [URL] {
         bmCoverURLs(coverUrl: hit.coverUrl, isbn: hit.isbn, openLibraryId: hit.openLibraryId)
+    }
+
+    /// The jackets ~10 hits further on, warmed before the list is scrolled to them.
+    private func prefetchCovers(past index: Int) {
+        prefetchCovers(results.dropFirst(index + 10).prefix(8).map { coverURLs($0) })
+    }
+
+    /// The first url of each cover chain into `CoverFetch`'s caches.
+    private func prefetchCovers(_ chains: [[URL]]) {
+        CoverFetch.prefetch(chains.prefix(8).compactMap(\.first))
     }
 
     private func search() async {

@@ -25,17 +25,55 @@ struct BookMasterDetailView: View {
     @State private var confirmRemove = false
     @State private var logging = false
     @State private var editing = false
+    /// The cover-pick sheet is up; the pick writes the catalogue row and the
+    /// local copy's jacket file when the book is on this phone.
+    @State private var pickingCover = false
     @State private var loggedMinutes: Int? = nil
     /// The open log sheet was filled from the running timer, which stops when it saves.
     @State private var timedLog = false
     @State private var timerNow = Date()
     @State private var tint: Color = .ptAccent
-    @State private var blurbExpanded = false
 
     /// The library's copy of this book, when there is one — for the Read button.
     private var local: Book? {
         guard let row = detail?.book else { return nil }
         return library.books.first { BMShelf.match($0, in: [row]) != nil }
+    }
+
+    /// What the lookup sheet searches and marks "current" against — the local
+    /// copy when there is one, else a stand-in carrying the catalogue's ids.
+    private var lookupSeed: Book {
+        if let local { return local }
+        var seed = Book(id: UUID(), title: ref.title, author: ref.author,
+                        fileName: "seed.epub", addedAt: Date())
+        seed.isbn = ref.isbn
+        seed.openLibraryId = ref.openLibraryId
+        seed.bookmasterId = detail?.book?.userBookId
+        return seed
+    }
+
+    /// The pick pushes the jacket URL onto the catalogue row (so every app
+    /// shows it), then writes the local copy's cover file when there is one.
+    /// `editBook` resends the row's facts, so pass the values already there.
+    private func pushCover(_ urls: [URL], catalogueId: String) async {
+        guard let url = urls.first else { return }
+        let cat = detail?.catalogue
+        do {
+            try await BookMaster.shared.editBook(
+                catalogueId,
+                title: cat?.title ?? detail?.book?.title ?? "",
+                author: cat?.author ?? detail?.book?.author ?? "",
+                totalPages: cat?.totalPages, publishedYear: cat?.publishedYear,
+                isbn: cat?.isbn ?? detail?.book?.isbn,
+                genres: cat?.genreList ?? [],
+                coverUrl: url.absoluteString, coverPick: true)
+            if let local {
+                _ = await MetadataLookup.applyCover(from: urls, to: local, library: library)
+            }
+            await load()
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     /// How a push names the book — pinned whenever the shelf row is known.
@@ -125,6 +163,21 @@ struct BookMasterDetailView: View {
                     BMEditSheet(bookId: bookId, detail: detail) { Task { await load() } }
                 }
             }
+            .sheet(isPresented: $pickingCover) {
+                if let catalogueId = detail?.catalogue?.id {
+                    BookLookupSheet(book: lookupSeed, coverOnly: true,
+                        onPick: { candidate, _ in
+                            Task { await pushCover(candidate.coverURLs, catalogueId: catalogueId) }
+                        },
+                        // a drawn jacket is a file, not a URL — it can only go on the local copy
+                        onPickCropped: local.map { book in { image in
+                            if let jpeg = image.jpegData(compressionQuality: 0.85) {
+                                try? jpeg.write(to: library.coverURL(for: book))
+                                library.coverChanged()
+                            }
+                        } })
+                }
+            }
     }
 
     // MARK: Sections
@@ -158,22 +211,13 @@ struct BookMasterDetailView: View {
             .padding(.vertical, 10)
             .listRowBackground(Color.clear)
             if let blurb = detail.catalogue?.description, !blurb.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(blurb)
-                        .font(.subheadline)
-                        .lineLimit(blurbExpanded ? nil : 5)
-                    if blurb.count > 240 {
-                        Button(blurbExpanded ? "Less" : "More") {
-                            withAnimation { blurbExpanded.toggle() }
-                        }
-                        .font(.subheadline.weight(.medium))
-                    }
-                }
+                ExpandableText(blurb)
             }
         }
     }
 
     /// The cover BookMaster knows: a pushed one is a URL of its own, then Open Library's.
+    /// Tappable when the book has a catalogue row — the pick writes back to it.
     private var cover: some View {
         let isbn = detail?.catalogue?.isbn ?? detail?.book?.isbn
         let olid = detail?.catalogue?.openLibraryId ?? detail?.book?.openLibraryId
@@ -186,7 +230,22 @@ struct BookMasterDetailView: View {
         .frame(width: 186)
         .aspectRatio(2 / 3, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(alignment: .bottomTrailing) {
+            if detail?.catalogue?.id != nil {
+                Image(systemName: "photo.badge.arrow.down")
+                    .font(.caption.weight(.bold))
+                    .padding(7)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .offset(x: 8, y: 8)
+            }
+        }
         .shadow(color: tint.opacity(0.35), radius: 18, y: 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if detail?.catalogue?.id != nil { pickingCover = true }
+        }
+        .accessibilityLabel("Book cover")
+        .accessibilityHint(detail?.catalogue?.id != nil ? "Finds jacket art online" : "")
     }
 
     /// Where the row stands, and the ways to move it — the edits BookMaster's

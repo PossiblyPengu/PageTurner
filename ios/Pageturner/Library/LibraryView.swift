@@ -16,6 +16,14 @@ struct LibraryView: View {
     @State private var finding: (done: Int, total: Int)?
     @State private var findResult: String?
     @State private var findTask: Task<Void, Never>?
+    /// The books "Find Details" couldn't match, offered by the result alert.
+    @State private var findMisses: [UUID] = []
+    /// The misses being walked through one lookup sheet at a time — `reviewBook`
+    /// is the one on screen, `reviewPicked` says its sheet ended on a pick (a
+    /// pick steps the queue on, a cancel ends the review).
+    @State private var reviewQueue: [UUID] = []
+    @State private var reviewBook: Book?
+    @State private var reviewPicked = false
     /// The folded-in Search tab's field — empty means the shelf shows.
     @State private var query = ""
     @State private var showDuplicates = false
@@ -59,7 +67,7 @@ struct LibraryView: View {
     }
 
     enum Filter: String, CaseIterable, Identifiable {
-        case all = "All", books = "Books", audiobooks = "Audiobooks"
+        case all = "All", books = "Books", audiobooks = "Audiobooks", incomplete = "Incomplete"
         var id: String { rawValue }
     }
 
@@ -111,44 +119,39 @@ struct LibraryView: View {
         case .all: return list
         case .books: return list.filter { !$0.isAudio }
         case .audiobooks: return list.filter { $0.isAudio }
+        case .incomplete: return list.filter { lacksDetails($0) }
         }
+    }
+
+    /// Missing what a lookup could fill — an author, a blurb, or a jacket on
+    /// disk. One pass over the visible books per evaluation, not per cell.
+    private func lacksDetails(_ book: Book) -> Bool {
+        book.author.isEmpty || book.bookDescription == nil
+            || !FileManager.default.fileExists(atPath: library.coverURL(for: book).path)
     }
 
 
     var body: some View {
+        // grouped, so no one expression is a long chain the compiler has to solve at once
         NavigationStack {
-            Group {
-                if library.books.isEmpty {
-                    emptyState
-                } else {
-                    content
+            routing(sheets(
+                Group {
+                    if library.books.isEmpty {
+                        emptyState
+                    } else {
+                        content
+                    }
                 }
-            }
-            .allowsHitTesting(finding == nil)
-            .navigationTitle(selecting ? "\(selected.count) Selected" : "Library")
-            // the folded-in Search tab: browsing filters step aside for it
-            .searchable(text: $query, prompt: "Books and audiobooks")
-            .toolbar { toolbar }
-            .safeAreaInset(edge: .bottom) {
-                if selecting { selectionBar }
-            }
-            .overlay { if let finding { findingCard(finding) } }
-            .sheet(isPresented: $showDuplicates) { DuplicatesSheet() }
-            .sheet(isPresented: $showHighlights) { HighlightsHubView() }
-            .sheet(isPresented: $showCatalogs) { NavigationStack { OPDSCatalogsView() } }
-            .alert("Find Details", isPresented: Binding(
-                get: { findResult != nil },
-                set: { if !$0 { findResult = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(findResult ?? "")
-            }
-            // books removed elsewhere (the confirmation lives at the root) drop out of the selection
-            .onChange(of: library.books) { _, books in
-                selected = selected.intersection(Set(books.map(\.id)))
-                if books.isEmpty { selecting = false }
-            }
+                .allowsHitTesting(finding == nil)
+                .navigationTitle(selecting ? "\(selected.count) Selected" : "Library")
+                // the folded-in Search tab: browsing filters step aside for it
+                .searchable(text: $query, prompt: "Books and audiobooks")
+                .toolbar { toolbar }
+                .safeAreaInset(edge: .bottom) {
+                    if selecting { selectionBar }
+                }
+                .overlay { if let finding { findingCard(finding) } }
+            ))
             #if DEBUG
             // CI simulator run: start in select mode with two books ticked (Debug/DebugScenario.swift)
             .task {
@@ -159,6 +162,63 @@ struct LibraryView: View {
             }
             #endif
         }
+    }
+
+    /// The sheets and the Find Details result — their own function so the
+    /// body's modifier chain stays short enough for the type checker.
+    private func sheets<V: View>(_ content: V) -> some View {
+        content
+            .sheet(isPresented: $showDuplicates) { DuplicatesSheet() }
+            .sheet(isPresented: $showHighlights) { HighlightsHubView() }
+            .sheet(isPresented: $showCatalogs) { NavigationStack { OPDSCatalogsView() } }
+            // the misses "Find Details" couldn't match, one lookup sheet at a time
+            .sheet(item: $reviewBook, onDismiss: reviewSheetClosed) { book in
+                BookLookupSheet(book: book, modeSwitchable: true,
+                    onPick: { candidate, coverOnly in
+                        reviewPicked = true
+                        applyReview(candidate, to: book.id, coverOnly: coverOnly)
+                    },
+                    onPickCropped: { image in
+                        reviewPicked = true
+                        if let jpeg = image.jpegData(compressionQuality: 0.85) {
+                            try? jpeg.write(to: library.coverURL(for: book))
+                            library.coverChanged()
+                        }
+                    })
+            }
+            .alert("Find Details", isPresented: Binding(
+                get: { findResult != nil },
+                set: { if !$0 { findResult = nil; findMisses = [] } }
+            )) {
+                if !findMisses.isEmpty {
+                    Button("Review \(findMisses.count)") {
+                        reviewQueue = findMisses
+                        reviewNext()
+                    }
+                }
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(findResult ?? "")
+            }
+    }
+
+    /// Requests that arrive from outside: a book page's "find this author in
+    /// the library" lands here as a shelf search.
+    private func routing<V: View>(_ content: V) -> some View {
+        content
+            // books removed elsewhere (the confirmation lives at the root) drop out of the selection
+            .onChange(of: library.books) { _, books in
+                selected = selected.intersection(Set(books.map(\.id)))
+                if books.isEmpty { selecting = false }
+            }
+            .onChange(of: router.librarySearch, initial: true) { _, search in
+                guard let search else { return }
+                router.librarySearch = nil
+                // whatever sheet the tap came from (the book page) is put away first
+                router.dismissPresentations()
+                router.tab = .library
+                query = search
+            }
     }
 
     // MARK: Content
@@ -415,26 +475,95 @@ struct LibraryView: View {
         .buttonStyle(.plain)
     }
 
-    /// Look each ticked book up online and fill in what it's missing.
+    /// Look each ticked book up online and fill in what it's missing. The ones
+    /// no match agreed with are offered afterwards, one at a time ("Review").
     private func findDetails() {
         let ids = Array(selected)
         guard !ids.isEmpty else { return }
         finding = (0, ids.count)
         findTask = Task {
             var updated = 0
+            var misses: [UUID] = []
             for (n, id) in ids.enumerated() {
                 if Task.isCancelled { break }
-                if await MetadataLookup.autoApply(to: id, library: library) { updated += 1 }
+                if await MetadataLookup.autoApply(to: id, library: library) {
+                    updated += 1
+                } else if stillMissing(id) {
+                    misses.append(id)
+                }
                 finding = (n + 1, ids.count)
             }
             let stopped = Task.isCancelled
             finding = nil
             findTask = nil
+            findMisses = stopped ? [] : misses
             findResult = stopped
                 ? (updated == 0 ? nil : "Stopped. Updated \(updated) of \(ids.count) book\(ids.count == 1 ? "" : "s").")
-                : updated == 0
-                ? "No new details turned up for \(ids.count == 1 ? "that book" : "those books")."
-                : "Updated \(updated) of \(ids.count) book\(ids.count == 1 ? "" : "s")."
+                : misses.isEmpty
+                ? (updated == 0
+                    ? "No new details turned up for \(ids.count == 1 ? "that book" : "those books")."
+                    : "Updated \(updated) of \(ids.count) book\(ids.count == 1 ? "" : "s").")
+                : "Updated \(updated) of \(ids.count) — \(misses.count) got no match."
+        }
+    }
+
+    /// Still short of what a lookup could have filled — an author, or a jacket
+    /// on disk. The cheap check, for sorting a "no match" into worth reviewing.
+    private func stillMissing(_ id: UUID) -> Bool {
+        guard let book = library.books.first(where: { $0.id == id }) else { return false }
+        return book.author.isEmpty
+            || !FileManager.default.fileExists(atPath: library.coverURL(for: book).path)
+    }
+
+    /// Open the lookup sheet on the queue's first book, skipping any gone meanwhile.
+    private func reviewNext() {
+        while let id = reviewQueue.first {
+            reviewQueue.removeFirst()
+            if let book = library.books.first(where: { $0.id == id }) {
+                reviewBook = book
+                return
+            }
+        }
+        reviewBook = nil
+    }
+
+    /// The lookup sheet closed: a pick steps to the next missed book, a cancel
+    /// ends the review.
+    private func reviewSheetClosed() {
+        if reviewPicked {
+            reviewPicked = false
+            reviewNext()
+        } else {
+            reviewQueue = []
+        }
+    }
+
+    /// The reviewer picked a match for a missed book: fill what it is still
+    /// missing the way `MetadataLookup.autoApply` does — then its jacket, when
+    /// there is none. `coverOnly` (the sheet's switch) takes the jacket alone.
+    private func applyReview(_ candidate: MetadataCandidate, to id: UUID, coverOnly: Bool) {
+        guard let book = library.books.first(where: { $0.id == id }) else { return }
+        if !coverOnly {
+            library.mutate(id) { current in
+                // a Drive book is called by its file or folder name until
+                // something better is known — as is one with no real title
+                let nameless = current.title.trimmingCharacters(in: .whitespaces).isEmpty
+                    || current.title == current.drive?.guessedTitle
+                if nameless, !candidate.title.isEmpty { current.title = candidate.title }
+                if current.author.isEmpty, !candidate.authors.isEmpty { current.author = candidate.authors }
+                if current.year == nil, !candidate.year.isEmpty { current.year = candidate.year }
+                if current.bookDescription == nil, !candidate.summary.isEmpty { current.bookDescription = candidate.summary }
+                if current.isbn == nil { current.isbn = candidate.isbn }
+                if current.openLibraryId == nil { current.openLibraryId = candidate.openLibraryId }
+            }
+            if let pin = candidate.bookmasterId, book.bookmasterId == nil {
+                library.updateBookMaster(id) { $0.bookmasterId = pin }
+            }
+        }
+        // the jacket is fetched off the pick — the callback itself stays synchronous
+        if !candidate.coverURLs.isEmpty,
+           !FileManager.default.fileExists(atPath: library.coverURL(for: book).path) {
+            Task { await MetadataLookup.applyCover(from: candidate.coverURLs, to: book, library: library) }
         }
     }
 

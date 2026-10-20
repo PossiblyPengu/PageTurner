@@ -25,17 +25,22 @@ struct BookDetailSheet: View {
     var onLookup: (() async -> Void)? = nil
     @State private var lookingUp = false
     @EnvironmentObject private var library: LibraryStore
+    @Environment(AppRouter.self) private var router
     @State private var picked: Int?
     @State private var showNotes = false
     @State private var changeCover = false
     @State private var coverFetching = false
     @State private var coverFailed = false
     @State private var tint: Color = .ptAccent
-    @State private var descriptionExpanded = false
     @State private var confirmRestart = false
     @State private var detent: PresentationDetent = .large
 
     private var isFinished: Bool { (book.progression ?? 0) >= 0.995 }
+
+    /// "Dune by Frank Herbert" — what the share sheet carries.
+    private var shareLine: String {
+        "“\(book.title)”" + (book.author.isEmpty ? "" : " by \(book.author)")
+    }
 
     private var openLabel: String {
         let p = book.progression ?? 0
@@ -140,6 +145,7 @@ struct BookDetailSheet: View {
                         Button { changeCover = true } label: {
                             BookCoverView(book: book, cover: cover, showsBadges: false, corner: 16)
                                 .frame(width: 186)
+                                .ptAnimation(.smooth(duration: 0.25), value: cover.map(ObjectIdentifier.init))
                                 .overlay {
                                     if coverFetching {
                                         RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -174,9 +180,13 @@ struct BookDetailSheet: View {
                                 .font(.title2.weight(.bold))
                                 .multilineTextAlignment(.center)
                             if !book.author.isEmpty {
-                                Text(book.author)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                Button { router.librarySearch = book.author } label: {
+                                    Text(book.author)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("Shows this author on the shelf")
                             }
                             HStack(spacing: 6) {
                                 Text(book.ext.uppercased())
@@ -196,6 +206,30 @@ struct BookDetailSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: 240)
+                        }
+                        // rating lives with the cover, where it is a gesture — not a line in the facts
+                        if BookMaster.shared.isLinked, BookMaster.shared.syncEnabled, let onRate,
+                           (book.progression ?? 0) > 0.001 || book.bmStatus == "reading" || book.bmStatus == "read" {
+                            HStack(spacing: 0) {
+                                ForEach(1...5, id: \.self) { n in
+                                    Button {
+                                        picked = n
+                                        onRate(n)
+                                    } label: {
+                                        Image(systemName: n <= (picked ?? book.bmRating ?? 0) ? "star.fill" : "star")
+                                            .foregroundStyle(Color.ptAccent)
+                                            .font(.title3)
+                                            .frame(minWidth: 36, minHeight: 44)
+                                            .contentShape(Rectangle())
+                                            .ptSymbolSwap(on: picked)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel(n == 1 ? "1 star" : "\(n) stars")
+                                    .accessibilityAddTraits(n == (picked ?? book.bmRating ?? 0) ? .isSelected : [])
+                                }
+                            }
+                            .sensoryFeedback(.selection, trigger: picked)
+                            .onChange(of: book.bmRating) { _, _ in picked = nil }
                         }
                         if cloud != nil {
                             cloudControl
@@ -219,17 +253,7 @@ struct BookDetailSheet: View {
                 }
                 if let blurb = book.bookDescription, !blurb.isEmpty {
                     Section {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(blurb)
-                                .font(.subheadline)
-                                .lineLimit(descriptionExpanded ? nil : 5)
-                            if blurb.count > 240 {
-                                Button(descriptionExpanded ? "Less" : "More") {
-                                    withAnimation { descriptionExpanded.toggle() }
-                                }
-                                .font(.subheadline.weight(.medium))
-                            }
-                        }
+                        ExpandableText(blurb)
                     }
                 }
                 if lookingUp {
@@ -264,32 +288,10 @@ struct BookDetailSheet: View {
                     if let remote = book.bmRemotePercent {
                         LabeledContent("BookMaster position", value: "\(Int(remote.rounded()))%")
                     }
-                    // rating a book that has not been started would put it on the shelf as being read at 0%
-                    if BookMaster.shared.isLinked, BookMaster.shared.syncEnabled, let onRate,
-                       (book.progression ?? 0) > 0.001 || book.bmStatus == "reading" || book.bmStatus == "read" {
-                        HStack {
-                            Text("Your Rating")
-                            Spacer()
-                            ForEach(1...5, id: \.self) { n in
-                                Button {
-                                    picked = n
-                                    onRate(n)
-                                } label: {
-                                    Image(systemName: n <= (picked ?? book.bmRating ?? 0) ? "star.fill" : "star")
-                                        .foregroundStyle(Color.ptAccent)
-                                        .font(.title3)
-                                        .frame(minWidth: 36, minHeight: 44)
-                                        .contentShape(Rectangle())
-                                        .ptSymbolSwap(on: picked)
-                                }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel(n == 1 ? "1 star" : "\(n) stars")
-                                .accessibilityAddTraits(n == (picked ?? book.bmRating ?? 0) ? .isSelected : [])
-                            }
-                        }
-                        .sensoryFeedback(.selection, trigger: picked)
-                        .onChange(of: book.bmRating) { _, _ in picked = nil }
-                    } else if let rating = book.bmRating {
+                    // a book that cannot be rated (not started, not linked) still shows the rating it has
+                    if let rating = book.bmRating,
+                       !(BookMaster.shared.isLinked && BookMaster.shared.syncEnabled && onRate != nil
+                         && ((book.progression ?? 0) > 0.001 || book.bmStatus == "reading" || book.bmStatus == "read")) {
                         LabeledContent("Rating", value: String(repeating: "★", count: max(0, min(5, rating))))
                     }
                     if book.isAudio, book.fileNames.count > 1 {
@@ -330,6 +332,21 @@ struct BookDetailSheet: View {
             }
             .navigationTitle("Book Info")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    // the Open Library page when the book has one, its name otherwise
+                    if let olid = book.openLibraryId,
+                       let url = URL(string: "https://openlibrary.org/works/\(olid)") {
+                        ShareLink(item: url, message: Text(shareLine)) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    } else {
+                        ShareLink(item: shareLine) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                }
+            }
             .scrollContentBackground(.hidden)
             .background(CoverTintBackdrop(tint: tint))
             .task(id: cover.map(ObjectIdentifier.init)) {
@@ -344,15 +361,24 @@ struct BookDetailSheet: View {
             }
             .sheet(isPresented: $showNotes) { BookNotesView(book: book) }
             .sheet(isPresented: $changeCover) {
-                BookLookupSheet(book: book, coverOnly: true) { candidate, _ in
-                    guard !candidate.coverURLs.isEmpty else { return }
-                    coverFetching = true
-                    Task {
-                        let ok = await MetadataLookup.applyCover(from: candidate.coverURLs, to: book, library: library)
-                        coverFetching = false
-                        coverFailed = !ok
-                    }
-                }
+                BookLookupSheet(book: book, coverOnly: true,
+                    onPick: { candidate, _ in
+                        guard !candidate.coverURLs.isEmpty else { return }
+                        coverFetching = true
+                        Task {
+                            let ok = await MetadataLookup.applyCover(from: candidate.coverURLs, to: book, library: library)
+                            coverFetching = false
+                            coverFailed = !ok
+                        }
+                    },
+                    onPickCropped: { image in
+                        // a drawn jacket is already the whole file — written, not fetched
+                        guard let jpeg = image.jpegData(compressionQuality: 0.85) else { coverFailed = true; return }
+                        do {
+                            try jpeg.write(to: library.coverURL(for: book))
+                            library.coverChanged()
+                        } catch { coverFailed = true }
+                    })
             }
         }
         .presentationDetents([.medium, .large], selection: $detent)
@@ -435,7 +461,8 @@ struct BookEditSheet: View {
             BookLookupSheet(
                 book: original,
                 seeded: (title: title, author: author, isbn: isbn),
-                modeSwitchable: true) { candidate, coverOnly in
+                modeSwitchable: true,
+                onPick: { candidate, coverOnly in
                     if coverOnly {
                         pickedCovers = candidate.coverURLs
                         pickedImage = nil
@@ -443,7 +470,12 @@ struct BookEditSheet: View {
                     } else {
                         apply(candidate)
                     }
-                }
+                },
+                onPickCropped: { image in
+                    pickedImage = image
+                    pickedCovers = []
+                    removeCover = false
+                })
         }
     }
 
@@ -578,6 +610,8 @@ struct BookLookupSheet: View {
     let modeSwitchable: Bool
     /// `coverOnly` tells the caller whether the pick is only the jacket.
     let onPick: (MetadataCandidate, _ coverOnly: Bool) -> Void
+    /// A jacket drawn by hand in the preview (a crop) goes to the caller as an image.
+    let onPickCropped: ((UIImage) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var author: String
@@ -590,16 +624,26 @@ struct BookLookupSheet: View {
     @State private var searching = false
     @State private var candidates: [MetadataCandidate]?
     @State private var sourceFilter: String?
-    @State private var previewing: MetadataCandidate?
+    /// The edition set open full size — one match, or the editions of a work.
+    @State private var previewing: PreviewSet?
+
+    /// A card leads a group of matches that are the same book: editions of one
+    /// work, or the same title named by two sources.
+    private struct PreviewSet: Identifiable {
+        let id = UUID()
+        var editions: [MetadataCandidate]
+    }
 
     /// `seeded` lets the edit sheet start the search from its working fields
     /// rather than the stored book's.
     init(book: Book, seeded: (title: String, author: String, isbn: String)? = nil,
          coverOnly: Bool = false, modeSwitchable: Bool = false,
-         onPick: @escaping (MetadataCandidate, _ coverOnly: Bool) -> Void) {
+         onPick: @escaping (MetadataCandidate, _ coverOnly: Bool) -> Void,
+         onPickCropped: ((UIImage) -> Void)? = nil) {
         self.book = book
         self.modeSwitchable = modeSwitchable
         self.onPick = onPick
+        self.onPickCropped = onPickCropped
         _coverOnly = State(initialValue: coverOnly)
         _title = State(initialValue: seeded?.title ?? book.title)
         _author = State(initialValue: seeded?.author ?? book.author)
@@ -652,8 +696,14 @@ struct BookLookupSheet: View {
                     }
                 }
             }
-            .sheet(item: $previewing) { c in
-                CoverPreviewSheet(candidate: c, coverOnly: coverOnly) { pick(c) }
+            .sheet(item: $previewing) { set in
+                CoverPreviewSheet(editions: set.editions, coverOnly: coverOnly,
+                    onUse: { pick($0) },
+                    onUseCropped: onPickCropped.map { use in { image in
+                        previewing = nil
+                        use(image)
+                        dismiss()
+                    } })
             }
             .task { search() }
         }
@@ -698,11 +748,12 @@ struct BookLookupSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     let shown = pickable.filter { active == nil || chipKey($0) == active }
+                    let groups = editionGroups(of: shown)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 126), spacing: 14)], spacing: 18) {
-                        ForEach(shown) { c in card(c) }
+                        ForEach(groups) { set in card(set) }
                     }
                     .padding(.vertical, 8)
-                    .ptAnimation(.smooth(duration: 0.35), value: shown.map(\.id))
+                    .ptAnimation(.smooth(duration: 0.35), value: groups.map(\.id))
                     Text(coverOnly
                         ? "Tap a jacket to see it full size — the book's words stay as they are."
                         : "Tap a cover to take its details — the jacket comes with it.")
@@ -713,10 +764,13 @@ struct BookLookupSheet: View {
         }
     }
 
-    /// One match: art, title, source — a ring and a capsule mark the book itself.
-    private func card(_ c: MetadataCandidate) -> some View {
-        Button {
-            if coverOnly { previewing = c } else { pick(c) }
+    /// One match — or one card for a work's editions: art, title, source — a
+    /// ring and a capsule mark the book itself, a count names the editions.
+    private func card(_ set: PreviewSet) -> some View {
+        let c = set.editions[0]
+        return Button {
+            // jackets are picked at full size; so is a choice between editions
+            if coverOnly || set.editions.count > 1 { previewing = set } else { pick(c) }
         } label: {
             VStack(spacing: 6) {
                 RemoteCover(urls: c.coverURLs)
@@ -724,19 +778,30 @@ struct BookLookupSheet: View {
                     .aspectRatio(2 / 3, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay {
-                        if isCurrent(c) {
+                        if set.editions.contains(where: isCurrent) {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .strokeBorder(Color.ptAccent, lineWidth: 3)
                         }
                     }
                     .overlay(alignment: .topLeading) {
-                        if isCurrent(c) {
+                        if set.editions.contains(where: isCurrent) {
                             Text("Current")
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(Color.ptAccent, in: Capsule())
+                                .padding(6)
+                        }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if set.editions.count > 1 {
+                            Text("\(set.editions.count) editions")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.ultraThinMaterial, in: Capsule())
                                 .padding(6)
                         }
                     }
@@ -749,12 +814,35 @@ struct BookLookupSheet: View {
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .foregroundStyle(.primary)
-        .accessibilityHint(coverOnly ? "Shows this jacket full size" : "Takes this match's details and jacket")
+        .accessibilityHint(coverOnly || set.editions.count > 1
+            ? "Shows this jacket full size" : "Takes this match's details and jacket")
         .contextMenu {
-            Button { previewing = c } label: {
+            Button { previewing = set } label: {
                 Label("Preview Cover", systemImage: "eye")
             }
         }
+    }
+
+    /// One card per book: the same Open Library work, or the same title and
+    /// author named by two sources, lands together — in the order first met.
+    private func editionGroups(of shown: [MetadataCandidate]) -> [PreviewSet] {
+        var groups: [PreviewSet] = []
+        var index: [String: Int] = [:]
+        for c in shown {
+            let key = c.openLibraryId.map { "ol:\($0)" }
+                ?? "ta:" + Self.fold(c.title) + "|" + Self.fold(c.authors)
+            if let at = index[key] {
+                groups[at].editions.append(c)
+            } else {
+                index[key] = groups.count
+                groups.append(PreviewSet(editions: [c]))
+            }
+        }
+        return groups
+    }
+
+    private static func fold(_ s: String) -> String {
+        s.lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
     /// The match that is this book already — same shelf pin, work id or ISBN.
@@ -833,39 +921,126 @@ struct BookLookupSheet: View {
 }
 
 /// A jacket at full size before it is taken — reached by a tap in cover-only
-/// mode, or "Preview Cover" on a long press in either.
+/// mode, "Preview Cover" on a long press, or any card that holds a work's
+/// editions. The strip picks which edition is shown; Crop reframes the art.
 private struct CoverPreviewSheet: View {
-    let candidate: MetadataCandidate
+    let editions: [MetadataCandidate]
     let coverOnly: Bool
-    let onUse: () -> Void
-    @Environment(\.dismiss) private var dismiss
+    let onUse: (MetadataCandidate) -> Void
+    /// When the caller takes a drawn jacket (a crop): called with the image.
+    var onUseCropped: ((UIImage) -> Void)? = nil
 
-    var body: some View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var shown: MetadataCandidate
+    /// The art RemoteCover fetched — the crop's source.
+    @State private var art: UIImage?
+    @State private var cropping = false
+    @State private var zoom: CGFloat = 1
+    @State private var lastZoom: CGFloat = 1
+    @State private var pan = CGSize.zero
+    @State private var lastPan = CGSize.zero
+
+    init(editions: [MetadataCandidate], coverOnly: Bool,
+         onUse: @escaping (MetadataCandidate) -> Void, onUseCropped: ((UIImage) -> Void)? = nil) {
+        self.editions = editions
+        self.coverOnly = coverOnly
+        self.onUse = onUse
+        self.onUseCropped = onUseCropped
+        _shown = State(initialValue: editions[0])
+    }
+
+    /// The crop frame's size — 2:3 like every cover box.
+    private var frame: CGSize { CGSize(width: 240, height: 360) }
+
+    /// How big the art is in the crop frame before the pinch: aspect-fit.
+    private func fitSize(_ image: UIImage) -> CGSize {
+        let s = min(frame.width / image.size.width, frame.height / image.size.height)
+        return CGSize(width: image.size.width * s, height: image.size.height * s)
+    }
+
+    private var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
-                RemoteCover(urls: candidate.coverURLs, contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(24)
-                Text(candidate.title)
+                ZStack {
+                    if cropping, let art {
+                        cropView(art)
+                    } else {
+                        RemoteCover(urls: shown.coverURLs, contentMode: .fit,
+                                    onLoad: { art = $0 })
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 24)
+
+                if editions.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(editions) { edition in
+                                Button {
+                                    shown = edition
+                                    art = nil
+                                } label: {
+                                    RemoteCover(urls: edition.coverURLs)
+                                        .frame(width: 44, height: 66)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                        .overlay {
+                                            if edition.id == shown.id {
+                                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                                    .strokeBorder(Color.ptAccent, lineWidth: 2)
+                                            }
+                                        }
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(edition.year.isEmpty ? edition.source : "\(edition.source), \(edition.year)")
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                    .frame(height: 70)
+                }
+
+                Text(shown.title)
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
-                if !candidate.authors.isEmpty {
-                    Text(candidate.authors)
+                if !shown.authors.isEmpty {
+                    Text(shown.authors)
                         .foregroundStyle(.secondary)
                 }
-                Text([candidate.year, candidate.source].filter { !$0.isEmpty }.joined(separator: " · "))
+                Text([shown.year, shown.source].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                Button {
-                    // the pick dismisses the lookup sheet, which takes this one with it
-                    onUse()
-                    dismiss()
-                } label: {
-                    Text(coverOnly ? "Use This Cover" : "Take Details & Cover")
-                        .frame(maxWidth: .infinity)
+
+                if cropping {
+                    HStack(spacing: 16) {
+                        Button("Cancel") { cropping = false }
+                            .frame(maxWidth: .infinity)
+                            .ptButtonStyle(prominent: false)
+                        Button("Use Crop") { useCrop() }
+                            .frame(maxWidth: .infinity)
+                            .ptButtonStyle(prominent: true)
+                            .disabled(art == nil)
+                    }
+                } else {
+                    Button {
+                        // the pick dismisses the lookup sheet, which takes this one with it
+                        onUse(shown)
+                        dismiss()
+                    } label: {
+                        Text(coverOnly ? "Use This Cover" : "Take Details & Cover")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .ptButtonStyle(prominent: true)
+                    .controlSize(.large)
+                    if onUseCropped != nil, art != nil {
+                        Button { withAnimation { cropping = true } } label: {
+                            Label("Crop…", systemImage: "crop")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .ptButtonStyle(prominent: false)
+                        .controlSize(.large)
+                    }
                 }
-                .ptButtonStyle(prominent: true)
-                .controlSize(.large)
             }
             .padding()
             .navigationTitle("Preview")
@@ -875,5 +1050,68 @@ private struct CoverPreviewSheet: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    /// The art inside a fixed 2:3 frame, pinched and dragged to frame it.
+    private func cropView(_ image: UIImage) -> some View {
+        let fitted = fitSize(image)
+        let shown = CGSize(width: fitted.width * zoom, height: fitted.height * zoom)
+        // the frame must stay covered: the art cannot be dragged past its own edge
+        let maxX = max(0, (shown.width - frame.width) / 2)
+        let maxY = max(0, (shown.height - frame.height) / 2)
+        return Color.clear
+            .frame(width: frame.width, height: frame.height)
+            .overlay {
+                Image(uiImage: image)
+                    .resizable()
+                    .frame(width: shown.width, height: shown.height)
+                    .offset(pan)
+            }
+            .clipped()
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.8), lineWidth: 1.5)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                MagnifyGesture()
+                    .onChanged { zoom = min(max(lastZoom * $0.magnification, 1), 6) }
+                    .onEnded { _ in
+                        lastZoom = zoom
+                        // a shrink can leave an edge uncovered
+                        let fitted = fitSize(image)
+                        let maxX = max(0, (fitted.width * zoom - frame.width) / 2)
+                        let maxY = max(0, (fitted.height * zoom - frame.height) / 2)
+                        pan.width = min(max(pan.width, -maxX), maxX)
+                        pan.height = min(max(pan.height, -maxY), maxY)
+                        lastPan = pan
+                    })
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged {
+                        pan.width = min(max(lastPan.width + $0.translation.width, -maxX), maxX)
+                        pan.height = min(max(lastPan.height + $0.translation.height, -maxY), maxY)
+                    }
+                    .onEnded { _ in lastPan = pan })
+    }
+
+    /// The framed part of the art, cut out in the image's own pixels.
+    private func useCrop() {
+        guard let image = art, let full = image.cgImage, let use = onUseCropped else { return }
+        let fitted = fitSize(image)
+        // back to image points: how much of the art fits under the frame
+        let visibleW = frame.width / (fitted.width * zoom) * image.size.width
+        let visibleH = frame.height / (fitted.height * zoom) * image.size.height
+        let centerX = image.size.width / 2 - pan.width / (fitted.width * zoom) * image.size.width
+        let centerY = image.size.height / 2 - pan.height / (fitted.height * zoom) * image.size.height
+        var rect = CGRect(
+            x: centerX - visibleW / 2, y: centerY - visibleH / 2,
+            width: visibleW, height: visibleH)
+        let pixels = CGRect(x: 0, y: 0, width: CGFloat(full.width), height: CGFloat(full.height))
+        rect = rect.applying(CGAffineTransform(scaleX: image.scale, y: image.scale))
+            .intersection(pixels)
+        guard let cg = full.cropping(to: rect) else { return }
+        use(UIImage(cgImage: cg, scale: image.scale, orientation: image.imageOrientation))
+        dismiss()
     }
 }

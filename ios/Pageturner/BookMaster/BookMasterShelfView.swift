@@ -39,6 +39,7 @@ struct BookMasterShelfView: View {
                         } label: {
                             ShelfRowView(row: row, inLibrary: local(row) != nil)
                         }
+                        .onAppear { prefetchCovers(past: row) }
                     }
                 }
             }
@@ -49,6 +50,18 @@ struct BookMasterShelfView: View {
         // again when a book is added, removed, renamed or tied to a row, or the shelf changes
         .task(id: library.books.map { "\($0.id)\($0.title)\($0.author)\($0.bookmasterId ?? "")" }.hashValue
                     ^ BookMaster.shared.shelfRows.hashValue) { matchBooks() }
+    }
+
+    /// The jackets ~10 rows further on, warmed before the list is scrolled to them.
+    private func prefetchCovers(past row: BMShelfRow) {
+        let all = groups.flatMap(\.rows)
+        guard let i = all.firstIndex(where: { $0.id == row.id }) else { return }
+        prefetchCovers(all.dropFirst(i + 10).prefix(8).map(\.coverURLs))
+    }
+
+    /// The first url of each cover chain into `CoverFetch`'s caches.
+    private func prefetchCovers(_ chains: [[URL]]) {
+        CoverFetch.prefetch(chains.prefix(8).compactMap(\.first))
     }
 }
 

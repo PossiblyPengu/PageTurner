@@ -45,6 +45,8 @@ final class AppRouter {
     var showChat = false
     /// The Together tab should open its notifications list (set by the simulator run; the bell does it by hand).
     var showInbox = false
+    /// Set to have the library shelf filter to this text (a book page's author tap); the shelf clears it once read.
+    var librarySearch: String?
     /// The screens that cover the floating button's place (the chat itself, the in-app browser), by
     /// identity, so one that appears twice still counts once.
     private(set) var chatButtonHiders: Set<UUID> = []

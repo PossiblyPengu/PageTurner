@@ -122,8 +122,13 @@ struct BookMasterDiscoverView: View {
             return
         }
         do {
-            recs = try await BookMaster.shared.fetchRecommendations()
+            let fetched = try await BookMaster.shared.fetchRecommendations()
+            recs = fetched
             error = nil
+            // the row of jackets just under the fold is warmed before it is scrolled to
+            CoverFetch.prefetch(fetched.partnerPicks.prefix(8).compactMap {
+                bmCoverURLs(coverUrl: $0.coverUrl, isbn: $0.isbn, openLibraryId: $0.openLibraryId).first
+            })
         } catch {
             if recs == nil { self.error = error.localizedDescription }
         }

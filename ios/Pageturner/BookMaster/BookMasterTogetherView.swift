@@ -289,7 +289,7 @@ struct BookMasterTogetherView: View {
                     .padding(.horizontal, 7).padding(.vertical, 2)
                     .background(Color.ptAccent, in: Capsule())
             }
-            ForEach(nudges) { nudge in
+            ForEach(Array(nudges.enumerated()), id: \.element.id) { n, nudge in
                 HStack(alignment: .top, spacing: 12) {
                     nudgeCover(nudge)
                     VStack(alignment: .leading, spacing: 3) {
@@ -313,9 +313,20 @@ struct BookMasterTogetherView: View {
                         .padding(.top, 4)
                     }
                 }
+                .onAppear {
+                    prefetchCovers(nudges.dropFirst(n + 10).prefix(8).map {
+                        bmCoverURLs(coverUrl: $0.coverUrl, isbn: $0.isbn, openLibraryId: $0.openLibraryId)
+                    })
+                }
             }
         }
         .bmCard()
+    }
+
+    /// The first url of each cover chain into `CoverFetch`'s caches — the
+    /// suggestion rows further down are warmed before they scroll into view.
+    private func prefetchCovers(_ chains: [[URL]]) {
+        CoverFetch.prefetch(chains.compactMap(\.first))
     }
 
     /// The jacket the suggestion named: the bridge's stored cover, then Open Library's.

@@ -24,11 +24,20 @@ enum CoverFetch {
         return cache
     }()
     private static let lock = NSLock()
-    /// URLs the server said no to (a 404, a stand-in) this run — without it a
-    /// dead jacket is re-asked on every redraw of a shelf. A fetch that never
-    /// reached the server (offline, a timeout) is *not* a miss: it is asked
-    /// again the next time the cover comes on screen.
-    private static var misses: Set<URL> = []
+    /// URLs the server said no to (a 404, a stand-in), with when — without it a
+    /// dead jacket is re-asked on every redraw of a shelf. The list is kept on
+    /// disk but lives a day: a shelf of books with dead cover ids would
+    /// otherwise re-ask every URL on every cold start, and a day is long
+    /// enough to matter without making a missed jacket unreachable for good.
+    /// A fetch that never reached the server (offline, a timeout) is *not* a
+    /// miss: it is asked again the next time the cover comes on screen.
+    private static var missDates: [URL: TimeInterval] = [:]
+    private static var missesLoaded = false
+    private static let missTTL: TimeInterval = 24 * 3600
+    private static let missStoreURL: URL = {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("cover-misses.json")
+    }()
     /// Fetches already under way — a grid asking for the same jacket makes
     /// one request, not one per cell.
     private static var inflight: [URL: Task<UIImage?, Never>] = [:]
@@ -42,8 +51,8 @@ enum CoverFetch {
 
     static func image(from url: URL) async -> UIImage? {
         if let hit = memory.object(forKey: url as NSURL) { return hit }
+        if isMiss(url) { return nil }
         lock.lock()
-        if misses.contains(url) { lock.unlock(); return nil }
         if let task = inflight[url] {
             lock.unlock()
             return await task.value
@@ -58,15 +67,65 @@ enum CoverFetch {
         return image
     }
 
+    /// Warm the caches for jackets about to scroll on screen — the same
+    /// single-flight fetch at utility priority, so a cell that appears asks
+    /// the shared in-flight task, never a second request.
+    static func prefetch(_ urls: [URL]) {
+        for url in urls {
+            Task.detached(priority: .utility) { _ = await image(from: url) }
+        }
+    }
+
+    /// True when the server already said no to this jacket, recently enough to
+    /// trust the answer; an entry past its day is dropped and the url retried.
+    private static func isMiss(_ url: URL) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        loadMisses()
+        guard let at = missDates[url] else { return false }
+        if Date().timeIntervalSince1970 - at < missTTL { return true }
+        missDates[url] = nil
+        return false
+    }
+
+    private static func rememberMiss(_ url: URL) {
+        lock.lock()
+        loadMisses()
+        missDates[url] = Date().timeIntervalSince1970
+        let snapshot = missDates
+        lock.unlock()
+        Task.detached(priority: .utility) { saveMisses(snapshot) }
+    }
+
+    /// The stored list, once a run, entries past their day already out. Call
+    /// it holding the lock.
+    private static func loadMisses() {
+        guard !missesLoaded else { return }
+        missesLoaded = true
+        guard let data = try? Data(contentsOf: missStoreURL),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: TimeInterval]
+        else { return }
+        let now = Date().timeIntervalSince1970
+        missDates = raw.reduce(into: [:]) { out, pair in
+            if let url = URL(string: pair.key), now - pair.value < missTTL {
+                out[url] = pair.value
+            }
+        }
+    }
+
+    private static func saveMisses(_ snapshot: [URL: TimeInterval]) {
+        let raw = snapshot.reduce(into: [String: TimeInterval]()) { $0[$1.key.absoluteString] = $1.value }
+        guard let data = try? JSONSerialization.data(withJSONObject: raw) else { return }
+        try? data.write(to: missStoreURL, options: .atomic)
+    }
+
     private static func fetch(_ url: URL) async -> UIImage? {
         // no reply at all: nothing learned about the jacket, so nothing remembered
         guard let (data, response) = try? await session.data(from: url) else { return nil }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let image = decode(data)
         else {
-            lock.lock()
-            misses.insert(url)
-            lock.unlock()
+            rememberMiss(url)
             return nil
         }
         memory.setObject(image, forKey: url as NSURL, cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)

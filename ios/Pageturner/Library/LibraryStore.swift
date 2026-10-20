@@ -135,7 +135,12 @@ struct Book: Identifiable, Codable, Hashable {
     var drive: GoogleDrive.Source?
 
     var ext: String { fileName.split(separator: ".").last.map(String.init)?.lowercased() ?? "" }
-    var isAudio: Bool { Self.audioExtensions.contains(ext) }
+    /// The local name keeps the file's extension, except Drive parts whose Drive name
+    /// had none — then the parts' own names say whether the book is audio.
+    var isAudio: Bool {
+        Self.audioExtensions.contains(ext)
+            || (drive?.parts.contains { Self.audioExtensions.contains(($0.name as NSString).pathExtension.lowercased()) } ?? false)
+    }
 }
 
 /// A word or short phrase saved from a book, with the line it was found in.
