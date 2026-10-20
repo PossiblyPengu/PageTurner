@@ -478,15 +478,15 @@ struct BookMasterBooksView: View {
                 }
                 .accessibilityLabel("Sort shelf")
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { pushing = .find } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("Find or add a book")
-            }
             if !rows.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { selecting = true } label: { Image(systemName: "checkmark.circle") }
                         .accessibilityLabel("Select books")
                 }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { pushing = .find } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Find or add a book")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
