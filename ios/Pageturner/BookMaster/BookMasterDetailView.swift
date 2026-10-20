@@ -186,7 +186,7 @@ struct BookMasterDetailView: View {
         Section {
             hero(detail)
             if let blurb = detail.catalogue?.description, !blurb.isEmpty {
-                ExpandableText(blurb)
+                ExpandableText(text: blurb)
             }
         }
     }

@@ -137,123 +137,141 @@ struct BookDetailSheet: View {
         return parts.isEmpty ? "Starting…" : parts.joined(separator: " · ")
     }
 
+    /// The hero: jacket, name, progress, stars, the open button. Split out of
+    /// `body` — the whole List in one expression is a type-checker timeout.
+    private var heroSection: some View {
+        Section {
+            VStack(spacing: 16) {
+                heroCover
+                VStack(spacing: 4) {
+                    Text(book.title)
+                        .font(.title2.weight(.bold))
+                        .multilineTextAlignment(.center)
+                    if !book.author.isEmpty {
+                        Button { router.librarySearch = book.author } label: {
+                            Text(book.author)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Shows this author on the shelf")
+                    }
+                    HStack(spacing: 6) {
+                        Text(book.ext.uppercased())
+                        if let year = book.year { Text("· \(year)") }
+                        if let status = book.bmStatus { Text("· \(BMShelf.label(forStatus: status))") }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                }
+                if let p = book.progression, p > 0.001, !isFinished {
+                    HStack(spacing: 10) {
+                        ProgressView(value: p)
+                            .tint(tint)
+                        Text("\(Int((p * 100).rounded()))%")
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: 240)
+                }
+                ratingRow
+                if cloud != nil {
+                    cloudControl
+                } else {
+                    Button(action: onOpen) {
+                        // not a Label: inside a List it tints its icon with the accent colour,
+                        // which vanishes on the accent-filled button
+                        HStack(spacing: 8) {
+                            Image(systemName: book.isAudio ? "play.fill" : "book.fill")
+                            Text(openLabel)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .ptButtonStyle(prominent: true)
+                    .controlSize(.large)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    /// The big jacket, tappable for a new one; a "Find a Cover" pill stands in when there is none.
+    private var heroCover: some View {
+        VStack(spacing: 12) {
+            Button { changeCover = true } label: {
+                BookCoverView(book: book, cover: cover, showsBadges: false, corner: 16)
+                    .frame(width: 186)
+                    .ptAnimation(.smooth(duration: 0.25), value: cover.map(ObjectIdentifier.init))
+                    .overlay {
+                        if coverFetching {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.black.opacity(0.35))
+                                .overlay { ProgressView().tint(.white) }
+                        }
+                    }
+                    .shadow(color: tint.opacity(0.35), radius: 18, y: 8)
+                    .overlay(alignment: .bottomTrailing) {
+                        if cover != nil {
+                            Image(systemName: "photo.badge.arrow.down")
+                                .font(.caption.weight(.bold))
+                                .padding(7)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .offset(x: 8, y: 8)
+                        }
+                    }
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(coverFetching)
+            .accessibilityLabel("Change cover")
+            .accessibilityHint("Finds jacket art online")
+            if cover == nil {
+                Button { changeCover = true } label: {
+                    Label("Find a Cover", systemImage: "photo.badge.plus")
+                }
+                .ptButtonStyle(prominent: false)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    /// The stars live with the cover, where rating is a gesture — not a line in the facts.
+    @ViewBuilder
+    private var ratingRow: some View {
+        if BookMaster.shared.isLinked, BookMaster.shared.syncEnabled, let onRate,
+           (book.progression ?? 0) > 0.001 || book.bmStatus == "reading" || book.bmStatus == "read" {
+            HStack(spacing: 0) {
+                ForEach(1...5, id: \.self) { n in
+                    Button {
+                        picked = n
+                        onRate(n)
+                    } label: {
+                        Image(systemName: n <= (picked ?? book.bmRating ?? 0) ? "star.fill" : "star")
+                            .foregroundStyle(Color.ptAccent)
+                            .font(.title3)
+                            .frame(minWidth: 36, minHeight: 44)
+                            .contentShape(Rectangle())
+                            .ptSymbolSwap(on: picked)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(n == 1 ? "1 star" : "\(n) stars")
+                    .accessibilityAddTraits(n == (picked ?? book.bmRating ?? 0) ? .isSelected : [])
+                }
+            }
+            .sensoryFeedback(.selection, trigger: picked)
+            .onChange(of: book.bmRating) { _, _ in picked = nil }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    VStack(spacing: 16) {
-                        Button { changeCover = true } label: {
-                            BookCoverView(book: book, cover: cover, showsBadges: false, corner: 16)
-                                .frame(width: 186)
-                                .ptAnimation(.smooth(duration: 0.25), value: cover.map(ObjectIdentifier.init))
-                                .overlay {
-                                    if coverFetching {
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .fill(Color.black.opacity(0.35))
-                                            .overlay { ProgressView().tint(.white) }
-                                    }
-                                }
-                                .shadow(color: tint.opacity(0.35), radius: 18, y: 8)
-                                .overlay(alignment: .bottomTrailing) {
-                                    if cover != nil {
-                                        Image(systemName: "photo.badge.arrow.down")
-                                            .font(.caption.weight(.bold))
-                                            .padding(7)
-                                            .background(.ultraThinMaterial, in: Circle())
-                                            .offset(x: 8, y: 8)
-                                    }
-                                }
-                        }
-                        .buttonStyle(PressableStyle())
-                        .disabled(coverFetching)
-                        .accessibilityLabel("Change cover")
-                        .accessibilityHint("Finds jacket art online")
-                        if cover == nil {
-                            Button { changeCover = true } label: {
-                                Label("Find a Cover", systemImage: "photo.badge.plus")
-                            }
-                            .ptButtonStyle(prominent: false)
-                            .controlSize(.small)
-                        }
-                        VStack(spacing: 4) {
-                            Text(book.title)
-                                .font(.title2.weight(.bold))
-                                .multilineTextAlignment(.center)
-                            if !book.author.isEmpty {
-                                Button { router.librarySearch = book.author } label: {
-                                    Text(book.author)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityHint("Shows this author on the shelf")
-                            }
-                            HStack(spacing: 6) {
-                                Text(book.ext.uppercased())
-                                if let year = book.year { Text("· \(year)") }
-                                if let status = book.bmStatus { Text("· \(BMShelf.label(forStatus: status))") }
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        }
-                        if let p = book.progression, p > 0.001, !isFinished {
-                            HStack(spacing: 10) {
-                                ProgressView(value: p)
-                                    .tint(tint)
-                                Text("\(Int((p * 100).rounded()))%")
-                                    .font(.caption.weight(.semibold))
-                                    .monospacedDigit()
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: 240)
-                        }
-                        // rating lives with the cover, where it is a gesture — not a line in the facts
-                        if BookMaster.shared.isLinked, BookMaster.shared.syncEnabled, let onRate,
-                           (book.progression ?? 0) > 0.001 || book.bmStatus == "reading" || book.bmStatus == "read" {
-                            HStack(spacing: 0) {
-                                ForEach(1...5, id: \.self) { n in
-                                    Button {
-                                        picked = n
-                                        onRate(n)
-                                    } label: {
-                                        Image(systemName: n <= (picked ?? book.bmRating ?? 0) ? "star.fill" : "star")
-                                            .foregroundStyle(Color.ptAccent)
-                                            .font(.title3)
-                                            .frame(minWidth: 36, minHeight: 44)
-                                            .contentShape(Rectangle())
-                                            .ptSymbolSwap(on: picked)
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .accessibilityLabel(n == 1 ? "1 star" : "\(n) stars")
-                                    .accessibilityAddTraits(n == (picked ?? book.bmRating ?? 0) ? .isSelected : [])
-                                }
-                            }
-                            .sensoryFeedback(.selection, trigger: picked)
-                            .onChange(of: book.bmRating) { _, _ in picked = nil }
-                        }
-                        if cloud != nil {
-                            cloudControl
-                        } else {
-                            Button(action: onOpen) {
-                                // not a Label: inside a List it tints its icon with the accent colour,
-                                // which vanishes on the accent-filled button
-                                HStack(spacing: 8) {
-                                    Image(systemName: book.isAudio ? "play.fill" : "book.fill")
-                                    Text(openLabel)
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .ptButtonStyle(prominent: true)
-                            .controlSize(.large)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .listRowBackground(Color.clear)
-                }
+                heroSection
                 if let blurb = book.bookDescription, !blurb.isEmpty {
                     Section {
-                        ExpandableText(blurb)
+                        ExpandableText(text: blurb)
                     }
                 }
                 if lookingUp {
@@ -332,6 +350,57 @@ struct BookDetailSheet: View {
             }
             .navigationTitle("Book Info")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
+            .background(CoverTintBackdrop(tint: tint))
+            .task(id: cover.map(ObjectIdentifier.init)) {
+                tint = cover?.averageColor.map { Color($0) } ?? .ptAccent
+            }
+            // a book still in the Drive: ask the catalogues what they know of it, once, as the page opens
+            .task(id: book.id) {
+                guard cloud != nil, book.bookDescription == nil || book.author.isEmpty, let onLookup else { return }
+                lookingUp = true
+                await onLookup()
+                lookingUp = false
+            }
+        }
+        // sheets, the share button and the alerts: a chain of their own, so the
+        // type checker never faces the whole page at once
+        .modifier(DetailPresented(book: book, changeCover: $changeCover, showNotes: $showNotes,
+            detent: $detent, coverFailed: $coverFailed, shareLine: shareLine,
+            onCover: { candidate in
+                guard !candidate.coverURLs.isEmpty else { return }
+                coverFetching = true
+                Task {
+                    let ok = await MetadataLookup.applyCover(from: candidate.coverURLs, to: book, library: library)
+                    coverFetching = false
+                    coverFailed = !ok
+                }
+            },
+            onCoverCropped: { image in
+                // a drawn jacket is already the whole file — written, not fetched
+                guard let jpeg = image.jpegData(compressionQuality: 0.85) else { coverFailed = true; return }
+                do {
+                    try jpeg.write(to: library.coverURL(for: book))
+                    library.coverChanged()
+                } catch { coverFailed = true }
+            }))
+    }
+}
+
+/// The detail page's presentations — share, notes, the cover picker, its alert —
+/// as one modifier, keeping `body` under the type checker's limit.
+private struct DetailPresented: ViewModifier {
+    let book: Book
+    @Binding var changeCover: Bool
+    @Binding var showNotes: Bool
+    @Binding var detent: PresentationDetent
+    @Binding var coverFailed: Bool
+    let shareLine: String
+    let onCover: (MetadataCandidate) -> Void
+    let onCoverCropped: (UIImage) -> Void
+
+    func body(content: Content) -> some View {
+        content
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     // the Open Library page when the book has one, its name otherwise
@@ -347,47 +416,19 @@ struct BookDetailSheet: View {
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(CoverTintBackdrop(tint: tint))
-            .task(id: cover.map(ObjectIdentifier.init)) {
-                tint = cover?.averageColor.map { Color($0) } ?? .ptAccent
-            }
-            // a book still in the Drive: ask the catalogues what they know of it, once, as the page opens
-            .task(id: book.id) {
-                guard cloud != nil, book.bookDescription == nil || book.author.isEmpty, let onLookup else { return }
-                lookingUp = true
-                await onLookup()
-                lookingUp = false
-            }
             .sheet(isPresented: $showNotes) { BookNotesView(book: book) }
             .sheet(isPresented: $changeCover) {
                 BookLookupSheet(book: book, coverOnly: true,
-                    onPick: { candidate, _ in
-                        guard !candidate.coverURLs.isEmpty else { return }
-                        coverFetching = true
-                        Task {
-                            let ok = await MetadataLookup.applyCover(from: candidate.coverURLs, to: book, library: library)
-                            coverFetching = false
-                            coverFailed = !ok
-                        }
-                    },
-                    onPickCropped: { image in
-                        // a drawn jacket is already the whole file — written, not fetched
-                        guard let jpeg = image.jpegData(compressionQuality: 0.85) else { coverFailed = true; return }
-                        do {
-                            try jpeg.write(to: library.coverURL(for: book))
-                            library.coverChanged()
-                        } catch { coverFailed = true }
-                    })
+                    onPick: { candidate, _ in onCover(candidate) },
+                    onPickCropped: onCoverCropped)
             }
-        }
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.visible)
-        .alert("Couldn't get that cover", isPresented: $coverFailed) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("None of the jackets for that match could be downloaded. Try another.")
-        }
+            .presentationDetents([.medium, .large], selection: $detent)
+            .presentationDragIndicator(.visible)
+            .alert("Couldn't get that cover", isPresented: $coverFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("None of the jackets for that match could be downloaded. Try another.")
+            }
     }
 }
 
