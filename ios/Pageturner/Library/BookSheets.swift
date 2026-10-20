@@ -470,6 +470,7 @@ struct BookEditSheet: View {
                     pickedImage = nil
                     pickedCovers = []
                 }
+            }
         } header: {
             Text("Cover")
         }
