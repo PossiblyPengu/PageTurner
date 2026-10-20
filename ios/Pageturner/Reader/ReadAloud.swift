@@ -433,7 +433,7 @@ final class ReadAloud: NSObject, ObservableObject {
         // the marks and the page catch up to what is being said now
         if let decorable { paint(spoken, as: highlights, on: decorable) }
         if let target = scrolls ? spoken.sentence : (spoken.word ?? spoken.sentence) {
-            pendingFollow = target.anchorable
+            pendingFollow = target.followable
             follow()
         }
     }
@@ -667,9 +667,9 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
                     onNarrated?(utterance.locator)
                 }
             } else if scrolls {
-                followTarget.send(utterance.locator.anchorable)
+                followTarget.send(utterance.locator.followable)
             } else if let word {
-                followTarget.send(word.anchorable)
+                followTarget.send(word.followable)
             }
             // the state is published before every sentence, spoken or not — only a word being
             // spoken proves the voice works
@@ -742,6 +742,16 @@ extension Locator {
     /// querySelector throw, so nothing is marked or scrolled to. The text anchor's before/after
     /// context finds the spot without it. Locators the page itself produces (selections, the
     /// first-visible-element locator) carry a proper JS-generated selector and keep it.
+    /// What the page is taken to. A word or sentence with nothing of its own text around it ("No." on a line by
+    /// itself) is found by its text alone, and the first "No." of the chapter is what the page jumps back to — then
+    /// forward again to the next sentence. Without its text, the place the iterator gave (how far through the
+    /// chapter) is all that is used, which is exact enough for a page.
+    var followable: Locator {
+        let anchored = anchorable
+        let lonely = (anchored.text.before ?? "").isEmpty && (anchored.text.after ?? "").isEmpty
+        return lonely ? anchored.copy(text: { $0 = Locator.Text() }) : anchored
+    }
+
     var anchorable: Locator {
         copy(locations: { $0.otherLocations.removeValue(forKey: "cssSelector") })
     }
