@@ -237,7 +237,7 @@ struct BookMasterStatsView: View {
                     Text(goal.label ?? BMFormat.goalLabel(goal.type))
                         .font(.subheadline.weight(.medium))
                     if goal.type == "monthly_books", let month = goal.month, let year = goal.year {
-                        Text("for \(Self.monthName(month)) \(year)")
+                        Text("for \(Self.monthName(month)) \(String(year))")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }

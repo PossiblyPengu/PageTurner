@@ -99,7 +99,7 @@ struct BookMasterSearchView: View {
                 Text(hit.title).font(.body.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
                     if let author = hit.author, !author.isEmpty { Text(author) }
-                    if let year = hit.year { Text("· \(year)") }
+                    if let year = hit.year { Text("· \(String(year))") }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

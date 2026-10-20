@@ -363,7 +363,7 @@ struct BookMasterTogetherView: View {
         ]
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label(year.map { "\($0) so far" } ?? "The year so far", systemImage: "trophy")
+                Label(year.map { "\(String($0)) so far" } ?? "The year so far", systemImage: "trophy")
                     .font(.headline).foregroundStyle(Color.ptAccent)
                 Spacer()
             }

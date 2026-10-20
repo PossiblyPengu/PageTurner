@@ -21,7 +21,7 @@ struct BookMasterWrappedView: View {
                 }
             }
             if let wrapped {
-                Section("\(wrapped.year) in numbers") {
+                Section("\(String(wrapped.year)) in numbers") {
                     LabeledContent("Books finished", value: "\(wrapped.booksRead)")
                     LabeledContent("Pages read", value: "\(Int(wrapped.pagesRead))")
                     LabeledContent("Sessions", value: "\(wrapped.sessionsCount)")

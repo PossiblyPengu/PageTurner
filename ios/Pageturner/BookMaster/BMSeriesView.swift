@@ -166,7 +166,7 @@ struct BMSeriesDetailView: View {
                 Text(book.title ?? "Untitled").font(.body.weight(.medium)).lineLimit(2)
                 HStack(spacing: 6) {
                     if let author = book.author, !author.isEmpty { Text(author) }
-                    if let year = book.publishedYear { Text("· \(year)") }
+                    if let year = book.publishedYear { Text("· \(String(year))") }
                 }
                 .font(.caption).foregroundStyle(.secondary)
             }
