@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct BookDetailSheet: View {
@@ -300,6 +301,12 @@ struct BookEditSheet: View {
     @State private var searching = false
     @State private var candidates: [MetadataCandidate]?
     @State private var pickedCover: URL?
+    /// A cover chosen from the photos: written on save.
+    @State private var pickedImage: UIImage?
+    @State private var removeCover = false
+    @State private var photo: PhotosPickerItem?
+    @State private var coverChoices: [MetadataCandidate]?
+    @State private var findingCovers = false
     private let original: Book
     private let onSave: (Book) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -333,6 +340,7 @@ struct BookEditSheet: View {
                     TextField("A few lines about the book", text: $summary, axis: .vertical)
                         .lineLimit(3...10)
                 }
+                coverSection
 
                 Section("Lookup") {
                     if searching {
@@ -406,6 +414,92 @@ struct BookEditSheet: View {
         }
     }
 
+    // MARK: Cover
+
+    /// The cover on its own: from the photos, from another match's art, or none (the plain jacket) — whatever a
+    /// wrong lookup put there.
+    private var coverSection: some View {
+        Section {
+            HStack {
+                BookCoverView(
+                    book: original, cover: removeCover ? nil : (pickedImage ?? library.cover(for: original)),
+                    showsBadges: false, corner: 8)
+                    .frame(width: 70)
+                Spacer()
+            }
+            PhotosPicker(selection: $photo, matching: .images) {
+                Label("Choose from Photos…", systemImage: "photo")
+            }
+            Button {
+                Task { await findCovers() }
+            } label: {
+                HStack {
+                    Label("Find Another Cover…", systemImage: "magnifyingglass")
+                    if findingCovers { Spacer(); ProgressView() }
+                }
+            }
+            .disabled(findingCovers)
+            if let coverChoices {
+                if coverChoices.isEmpty {
+                    Text("No covers turned up for that title and author.").font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(coverChoices) { c in
+                                Button {
+                                    pickedCover = c.coverURL
+                                    pickedImage = nil
+                                    removeCover = false
+                                } label: {
+                                    AsyncImage(url: c.coverURL) { image in
+                                        image.resizable().scaledToFill()
+                                    } placeholder: {
+                                        Color.secondary.opacity(0.15)
+                                    }
+                                    .frame(width: 64, height: 96)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    .overlay {
+                                        if pickedCover == c.coverURL {
+                                            RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.ptAccent, lineWidth: 3)
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            if library.cover(for: original) != nil || pickedImage != nil || pickedCover != nil {
+                Button("Remove Cover", role: .destructive) {
+                    removeCover = true
+                    pickedImage = nil
+                    pickedCover = nil
+                }
+            }
+        } header: {
+            Text("Cover")
+        }
+        .onChange(of: photo) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                    pickedImage = image
+                    pickedCover = nil
+                    removeCover = false
+                }
+            }
+        }
+    }
+
+    private func findCovers() async {
+        findingCovers = true
+        let found = await MetadataLookup.search(
+            title: title.trimmingCharacters(in: .whitespaces), author: author.trimmingCharacters(in: .whitespaces))
+        coverChoices = found.filter { $0.coverURL != nil }
+        findingCovers = false
+    }
+
     /// Take everything the match knows; blanks in the match leave the field alone.
     private func apply(_ candidate: MetadataCandidate) {
         title = candidate.title
@@ -434,7 +528,13 @@ struct BookEditSheet: View {
         book.openLibraryId = openLibraryId
         book.bookmasterId = pin
         onSave(book)
-        if let pickedCover {
+        if removeCover {
+            try? FileManager.default.removeItem(at: library.coverURL(for: book))
+            library.coverChanged()
+        } else if let pickedImage, let jpeg = pickedImage.jpegData(compressionQuality: 0.85) {
+            try? jpeg.write(to: library.coverURL(for: book))
+            library.coverChanged()
+        } else if let pickedCover {
             Task { await MetadataLookup.applyCover(from: pickedCover, to: book, library: library) }
         }
     }
