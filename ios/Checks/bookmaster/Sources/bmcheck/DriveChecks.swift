@@ -57,7 +57,10 @@ func runDriveChecks() {
           url?.host == "www.googleapis.com" && url?.path == "/drive/v3/files" && item("q") == "'abc' in parents and trashed = false"
           && item("orderBy") == "folder,name_natural" && item("supportsAllDrives") == "true" && item("pageToken") == "tok"
           && item("fields")?.contains("md5Checksum") == true && item("pageSize") == "200")
-    check("a download asks for the file's content", GoogleDrive.downloadURL(id: "f1")?.absoluteString == "https://www.googleapis.com/drive/v3/files/f1?alt=media&supportsAllDrives=true")
+    // acknowledgeAbuse skips Drive's virus-scan warning page, which answers 200 with HTML
+    // for big files — players were reading that page as a broken book
+    check("a download asks for the file's content",
+          GoogleDrive.downloadURL(id: "f1")?.absoluteString == "https://www.googleapis.com/drive/v3/files/f1?alt=media&supportsAllDrives=true&acknowledgeAbuse=true")
     check("a backup upload is a resumable one that returns the new file's id",
           GoogleDrive.resumableUploadURL?.absoluteString.contains("uploadType=resumable") == true)
     let meta = (try? JSONSerialization.jsonObject(with: GoogleDrive.metadata(name: "x.zip", mime: "application/zip", parent: "p1"))) as? [String: Any]
