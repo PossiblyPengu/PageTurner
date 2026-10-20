@@ -12,34 +12,55 @@ enum CoverFetch {
         let config = URLSessionConfiguration.default
         config.urlCache = URLCache(memoryCapacity: 32 << 20, diskCapacity: 160 << 20)
         config.requestCachePolicy = .returnCacheDataElseLoad
-        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForRequest = 15
         config.httpAdditionalHeaders = ["User-Agent": "Pageturner/\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0") cover-fetch"]
         return URLSession(configuration: config)
     }()
 
     private static let memory = NSCache<NSURL, UIImage>()
+    private static let lock = NSLock()
     /// URLs that failed this run — without it a dead jacket is re-asked on
     /// every redraw of a shelf. Kept in memory only: a network hiccup clears
     /// on relaunch.
-    private static let misses = NSMutableSet()
+    private static var misses: Set<URL> = []
+    /// Fetches already under way — a grid asking for the same jacket makes
+    /// one request, not one per cell.
+    private static var inflight: [URL: Task<UIImage?, Never>] = [:]
     /// Below this the "cover" is a stand-in (a 1×1 tracking gif, an error
     /// image): counted as a miss so the next URL in the chain is tried.
     private static let minPixels: CGFloat = 40
 
     static func image(from url: URL) async -> UIImage? {
-        let key = url as NSURL
-        if let hit = memory.object(forKey: key) { return hit }
-        if misses.contains(key) { return nil }
+        if let hit = memory.object(forKey: url as NSURL) { return hit }
+        lock.lock()
+        if misses.contains(url) { lock.unlock(); return nil }
+        if let task = inflight[url] {
+            lock.unlock()
+            return await task.value
+        }
+        let task = Task<UIImage?, Never> { await fetch(url) }
+        inflight[url] = task
+        lock.unlock()
+        let image = await task.value
+        lock.lock()
+        inflight[url] = nil
+        lock.unlock()
+        return image
+    }
+
+    private static func fetch(_ url: URL) async -> UIImage? {
         guard let (data, response) = try? await session.data(from: url),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let image = UIImage(data: data),
               let size = image.cgImage.map({ CGSize(width: $0.width, height: $0.height) }),
               size.width >= minPixels, size.height >= minPixels
         else {
-            misses.add(key)
+            lock.lock()
+            misses.insert(url)
+            lock.unlock()
             return nil
         }
-        memory.setObject(image, forKey: key)
+        memory.setObject(image, forKey: url as NSURL)
         return image
     }
 

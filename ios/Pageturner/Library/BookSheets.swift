@@ -584,8 +584,15 @@ struct BookLookupSheet: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         } else {
+                            // a pick is only a jacket when it brings one
+                            let pickable = coverOnly ? candidates.filter { !$0.coverURLs.isEmpty } : candidates
+                            if pickable.isEmpty {
+                                Text("No jackets turned up for that — the matches have no cover art.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 126), spacing: 14)], spacing: 18) {
-                                ForEach(candidates) { c in
+                                ForEach(pickable) { c in
                                     Button { pick(c) } label: {
                                         VStack(spacing: 6) {
                                             RemoteCover(urls: c.coverURLs)
@@ -631,6 +638,11 @@ struct BookLookupSheet: View {
     }
 
     private func search() {
+        let ask = title.trimmingCharacters(in: .whitespaces)
+        guard !ask.isEmpty || !isbn.trimmingCharacters(in: .whitespaces).isEmpty else {
+            candidates = []
+            return
+        }
         searching = true
         candidates = nil
         Task {
