@@ -75,8 +75,9 @@ func runSpeechTextChecks() {
           backOnPage("Use it, e.g. here now", "now") == "now")
     check("a word the page never had has no range",
           backOnPage("Use it, e.g. here now", "example") == nil)
-    check("a year range maps its years",
-          backOnPage("the war of 1914–1918 ended", "1918") == "1918")
+    check("a year range said in words has no word on the page, and what follows still maps",
+          backOnPage("the war of 1914–1918 ended", "eighteen") == nil
+              && backOnPage("the war of 1914–1918 ended", "ended") == "ended")
     check("after a footnote marker the word is found",
           backOnPage("It was over.¹ She left.", "left") == "left")
     check("after a chapter numeral the word is found",
