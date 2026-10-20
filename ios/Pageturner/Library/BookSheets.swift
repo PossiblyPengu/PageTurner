@@ -406,11 +406,12 @@ struct BookEditSheet: View {
         searching = true
         candidates = nil
         Task {
-            let results = await MetadataLookup.search(title: title, author: author)
-            await MainActor.run {
-                candidates = results
-                searching = false
+            // the first source to answer shows at once; the rest add to the list as they come
+            let results = await MetadataLookup.search(title: title, author: author) { found in
+                if !found.isEmpty { candidates = found }
             }
+            candidates = results
+            searching = false
         }
     }
 

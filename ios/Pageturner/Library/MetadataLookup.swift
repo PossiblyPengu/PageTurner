@@ -24,12 +24,55 @@ struct MetadataCandidate: Identifiable, Hashable {
 /// Only ever called on an explicit user action — the edit sheet's "Find Details"
 /// or a bulk "Find details" on selected books — never in the background.
 enum MetadataLookup {
-    static func search(title: String, author: String) async -> [MetadataCandidate] {
-        async let bm = bookMasterCandidates(title: title, author: author)
-        async let gb = googleBooks(title: title, author: author)
-        async let ol = openLibrary(title: title, author: author)
-        let (b, g, o) = await (bm, gb, ol)
-        return dedupe(b + g + o)
+    /// Short timeouts: a source that is down or slow (Open Library often is) must not hold up the others.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 7
+        config.timeoutIntervalForResource = 10
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        return URLSession(configuration: config)
+    }()
+
+    /// Searches already made this run, by what was asked.
+    @MainActor private static var remembered: [String: [MetadataCandidate]] = [:]
+
+    /// All sources at once. `progress` hears the merged list each time one answers (the fastest shows at once, the
+    /// slowest only adds); `stopWhen` ends the search early once the list so far holds what the caller wanted.
+    static func search(
+        title: String, author: String,
+        progress: (@MainActor ([MetadataCandidate]) -> Void)? = nil,
+        stopWhen: (([MetadataCandidate]) -> Bool)? = nil
+    ) async -> [MetadataCandidate] {
+        let key = (title + "|" + author).lowercased()
+        if let hit = await MainActor.run(body: { remembered[key] }) {
+            await progress?(hit)
+            return hit
+        }
+        var slots: [[MetadataCandidate]] = [[], [], []]
+        var finished = 0
+        var stopped = false
+        await withTaskGroup(of: (Int, [MetadataCandidate]).self) { group in
+            group.addTask { (0, await bookMasterCandidates(title: title, author: author)) }
+            group.addTask { (1, await googleBooks(title: title, author: author)) }
+            group.addTask { (2, await openLibrary(title: title, author: author)) }
+            for await (index, list) in group {
+                slots[index] = list
+                finished += 1
+                let merged = dedupe(slots.flatMap { $0 })
+                await progress?(merged)
+                if let stopWhen, stopWhen(merged) {
+                    stopped = true
+                    group.cancelAll()
+                    break
+                }
+            }
+        }
+        let result = dedupe(slots.flatMap { $0 })
+        // a search cut short, or one where nothing came back (the network, not the book), is not worth remembering
+        if !stopped, !result.isEmpty {
+            await MainActor.run { remembered[key] = result }
+        }
+        return result
     }
 
     /// The same book from several sources collapses to one row — the first
@@ -86,7 +129,7 @@ enum MetadataLookup {
             URLQueryItem(name: "fields", value: "items(volumeInfo(title,authors,publishedDate,imageLinks,description,industryIdentifiers))"),
         ]
         guard let url = comp.url,
-              let (data, _) = try? await URLSession.shared.data(from: url),
+              let (data, _) = try? await session.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let items = json["items"] as? [[String: Any]]
         else { return [] }
@@ -125,7 +168,7 @@ enum MetadataLookup {
         if !author.isEmpty { items.append(URLQueryItem(name: "author", value: author)) }
         comp.queryItems = items
         guard let url = comp.url,
-              let (data, _) = try? await URLSession.shared.data(from: url),
+              let (data, _) = try? await session.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let docs = json["docs"] as? [[String: Any]]
         else { return [] }
@@ -151,7 +194,7 @@ enum MetadataLookup {
 
     /// Download a candidate's cover into the covers folder for `book`.
     static func applyCover(from url: URL, to book: Book, library: LibraryStore) async {
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
+        guard let (data, _) = try? await session.data(from: url),
               let image = UIImage(data: data),
               let jpeg = image.jpegData(compressionQuality: 0.85)
         else { return }
@@ -172,10 +215,12 @@ enum MetadataLookup {
     static func autoApply(to id: UUID, library: LibraryStore, title: String? = nil, author: String? = nil) async -> Bool {
         guard let book = library.books.first(where: { $0.id == id }) else { return false }
         let askTitle = title ?? book.title, askAuthor = author ?? book.author
-        let results = await search(title: askTitle, author: askAuthor)
-        guard let match = results.first(where: {
+        let agrees: (MetadataCandidate) -> Bool = {
             BMShelf.titlesAgree(askTitle, $0.title) && BMShelf.authorsAgree(askAuthor, $0.authors)
-        }) else { return false }
+        }
+        // the first source to name the book is enough: the others need not be waited for
+        let results = await search(title: askTitle, author: askAuthor, stopWhen: { $0.contains(where: agrees) })
+        guard let match = results.first(where: agrees) else { return false }
 
         // the search took a while: change only these fields on the book as it is
         // now, so a position saved meanwhile is not rolled back
@@ -209,11 +254,22 @@ extension MetadataLookup {
     /// author. One book at a time, so the sources are not hammered by a folder of hundreds.
     @MainActor
     static func enrichDriveBooks(_ ids: [UUID], library: LibraryStore) async {
-        for id in ids {
-            guard let book = library.books.first(where: { $0.id == id }) else { continue }
-            if await autoApply(to: id, library: library) { continue }
-            let (title, author) = splitName(book.title)
-            if title != book.title || !author.isEmpty { _ = await autoApply(to: id, library: library, title: title, author: author) }
+        // three at a time: a folder of hundreds is not done one slow answer after another
+        var next = 0
+        await withTaskGroup(of: Void.self) { group in
+            func start() {
+                guard next < ids.count else { return }
+                let id = ids[next]
+                next += 1
+                group.addTask { @MainActor in
+                    guard let book = library.books.first(where: { $0.id == id }) else { return }
+                    if await autoApply(to: id, library: library) { return }
+                    let (title, author) = splitName(book.title)
+                    if title != book.title || !author.isEmpty { _ = await autoApply(to: id, library: library, title: title, author: author) }
+                }
+            }
+            for _ in 0 ..< 3 { start() }
+            while await group.next() != nil { start() }
         }
     }
 
