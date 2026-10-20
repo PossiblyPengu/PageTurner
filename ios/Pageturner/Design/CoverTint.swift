@@ -28,3 +28,16 @@ extension UIImage {
             blue: CGFloat(pixel[2]) / 255, alpha: 1)
     }
 }
+
+/// The cover's colour fading into the sheet, so the page belongs to the book.
+struct CoverTintBackdrop: View {
+    let tint: Color
+
+    var body: some View {
+        LinearGradient(
+            colors: [tint.opacity(0.35), Color(.systemGroupedBackground)],
+            startPoint: .top, endPoint: .center
+        )
+        .ignoresSafeArea()
+    }
+}

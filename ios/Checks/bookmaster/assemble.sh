@@ -82,7 +82,8 @@ import Foundation
 /// The real one writes files and needs UIKit; the pull's cover fetch is
 /// network IO the checks never run.
 enum MetadataLookup {
-    static func applyCover(from urls: [URL], to book: Book, library: LibraryStore) async {}
+    @discardableResult
+    static func applyCover(from urls: [URL], to book: Book, library: LibraryStore) async -> Bool { false }
 }
 /// The real logger writes Documents/Logs and needs a real home dir; checks
 /// only need its calls to compile.

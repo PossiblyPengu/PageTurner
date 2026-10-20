@@ -29,6 +29,8 @@ struct BookMasterDetailView: View {
     /// The open log sheet was filled from the running timer, which stops when it saves.
     @State private var timedLog = false
     @State private var timerNow = Date()
+    @State private var tint: Color = .ptAccent
+    @State private var blurbExpanded = false
 
     /// The library's copy of this book, when there is one — for the Read button.
     private var local: Book? {
@@ -47,105 +49,126 @@ struct BookMasterDetailView: View {
     }
 
     var body: some View {
-        List {
-            if let detail {
-                headerSection(detail)
-                if let book = detail.book { shelfSection(book) }
-                if let book = local {
-                    Section {
-                        Button {
-                            router.open(book, library: library)
-                        } label: {
-                            Label(book.isAudio ? "Listen in Pageturner" : "Read in Pageturner",
-                                  systemImage: book.isAudio ? "headphones" : "book.open")
+        // grouped, so no one expression is a long chain the compiler has to solve at once
+        presented(
+            List {
+                if let detail {
+                    headerSection(detail)
+                    if let book = detail.book { shelfSection(book) }
+                    if let book = local {
+                        Section {
+                            Button {
+                                router.open(book, library: library)
+                            } label: {
+                                Label(book.isAudio ? "Listen in Pageturner" : "Read in Pageturner",
+                                      systemImage: book.isAudio ? "headphones" : "book.open")
+                            }
                         }
+                    } else {
+                        addFileSection
                     }
-                } else {
-                    addFileSection
+                    if let theirs = detail.theirs { theirsSection(theirs) }
+                    if !detail.sessions.isEmpty { sessionsSection(detail.sessions) }
+                    quotesSection(detail.quotes)
+                    commentsSection(detail)
+                    suggestSection
+                } else if loading {
+                    ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
                 }
-                if let theirs = detail.theirs { theirsSection(theirs) }
-                if !detail.sessions.isEmpty { sessionsSection(detail.sessions) }
-                quotesSection(detail.quotes)
-                commentsSection(detail)
-                suggestSection
-            } else if loading {
-                ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
+                if let info { Section { Text(info).foregroundStyle(.secondary) } }
+                if let error, detail == nil { Section { Text(error).foregroundStyle(.secondary) } }
             }
-            if let info { Section { Text(info).foregroundStyle(.secondary) } }
-            if let error, detail == nil { Section { Text(error).foregroundStyle(.secondary) } }
-        }
-        // a failed write is told where the reader is looking, not in a footer at the bottom of a long list
-        .alert("BookMaster", isPresented: Binding(get: { error != nil && detail != nil }, set: { if !$0 { error = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(error ?? "")
-        }
-        .navigationTitle(detail?.catalogue?.title ?? detail?.book?.title ?? title ?? "Book")
-        .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await load() }
-        .task { await load() }
-        .confirmationDialog(
-            "Remove from your shelf?", isPresented: $confirmRemove, titleVisibility: .visible
-        ) {
-            Button("Remove from Shelf", role: .destructive) { Task { await unshelve() } }
-        } message: {
-            Text("Its sessions, quotes and comments go with it on BookMaster. Any file here stays.")
-        }
-        .fileImporter(
-            isPresented: $importing,
-            allowedContentTypes: LibraryView.pickerTypes,
-            allowsMultipleSelection: true
-        ) { result in
-            guard case let .success(urls) = result else { return }
-            Task { await bringIn(urls) }
-        }
-        .sheet(isPresented: $logging, onDismiss: { loggedMinutes = nil; timedLog = false }) {
-            if let book = detail?.book {
-                BMLogSheet(row: book, initialMinutes: loggedMinutes) {
-                    loggedMinutes = nil
-                    if timedLog { BMReadingTimer.shared.stop() }
-                    Task { await load() }
+            .scrollContentBackground(.hidden)
+            .background(CoverTintBackdrop(tint: tint))
+            // a failed write is told where the reader is looking, not in a footer at the bottom of a long list
+            .alert("BookMaster", isPresented: Binding(get: { error != nil && detail != nil }, set: { if !$0 { error = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(error ?? "")
+            }
+            .navigationTitle(detail?.catalogue?.title ?? detail?.book?.title ?? title ?? "Book")
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable { await load() }
+            .task { await load() }
+        )
+    }
+
+    /// The dialogs and sheets the page presents, split off the List's chain.
+    private func presented<V: View>(_ content: V) -> some View {
+        content
+            .confirmationDialog(
+                "Remove from your shelf?", isPresented: $confirmRemove, titleVisibility: .visible
+            ) {
+                Button("Remove from Shelf", role: .destructive) { Task { await unshelve() } }
+            } message: {
+                Text("Its sessions, quotes and comments go with it on BookMaster. Any file here stays.")
+            }
+            .fileImporter(
+                isPresented: $importing,
+                allowedContentTypes: LibraryView.pickerTypes,
+                allowsMultipleSelection: true
+            ) { result in
+                guard case let .success(urls) = result else { return }
+                Task { await bringIn(urls) }
+            }
+            .sheet(isPresented: $logging, onDismiss: { loggedMinutes = nil; timedLog = false }) {
+                if let book = detail?.book {
+                    BMLogSheet(row: book, initialMinutes: loggedMinutes) {
+                        loggedMinutes = nil
+                        if timedLog { BMReadingTimer.shared.stop() }
+                        Task { await load() }
+                    }
                 }
             }
-        }
-        .sheet(isPresented: $editing) {
-            if let bookId = detail?.catalogue?.id {
-                BMEditSheet(bookId: bookId, detail: detail) { Task { await load() } }
+            .sheet(isPresented: $editing) {
+                if let bookId = detail?.catalogue?.id {
+                    BMEditSheet(bookId: bookId, detail: detail) { Task { await load() } }
+                }
             }
-        }
     }
 
     // MARK: Sections
 
     private func headerSection(_ detail: BMBookDetail) -> some View {
         Section {
-            HStack(spacing: 14) {
+            VStack(spacing: 16) {
                 cover
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(spacing: 4) {
                     Text(detail.catalogue?.title ?? detail.book?.title ?? title ?? "")
-                        .font(.headline)
+                        .font(.title2.weight(.bold))
+                        .multilineTextAlignment(.center)
                     if let author = detail.catalogue?.author ?? detail.book?.author ?? author,
                        !author.isEmpty {
-                        Text(author).foregroundStyle(.secondary)
+                        Text(author)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    HStack(spacing: 8) {
-                        if let year = detail.catalogue?.publishedYear { Text(String(year)) }
-                        if let pages = detail.catalogue?.totalPages { Text("· \(pages) pages") }
+                    let meta = [
+                        detail.catalogue?.publishedYear.map(String.init),
+                        detail.catalogue?.totalPages.map { "\($0) pages" },
+                    ].compactMap { $0 } + (detail.catalogue?.genreList.prefix(2) ?? [])
+                    if !meta.isEmpty {
+                        Text(meta.joined(separator: " · "))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
                 }
             }
-            if let genres = detail.catalogue?.genreList, !genres.isEmpty {
-                Text(genres.prefix(4).joined(separator: " · "))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .listRowBackground(Color.clear)
             if let blurb = detail.catalogue?.description, !blurb.isEmpty {
-                Text(blurb)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(6)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(blurb)
+                        .font(.subheadline)
+                        .lineLimit(blurbExpanded ? nil : 5)
+                    if blurb.count > 240 {
+                        Button(blurbExpanded ? "Less" : "More") {
+                            withAnimation { blurbExpanded.toggle() }
+                        }
+                        .font(.subheadline.weight(.medium))
+                    }
+                }
             }
         }
     }
@@ -156,10 +179,14 @@ struct BookMasterDetailView: View {
         let olid = detail?.catalogue?.openLibraryId ?? detail?.book?.openLibraryId
         return RemoteCover(
             urls: bmCoverURLs(coverUrl: detail?.catalogue?.coverUrl, isbn: isbn, openLibraryId: olid),
-            icon: (detail?.book?.isAudio ?? false) ? "headphones" : "book.closed")
-        .frame(width: 96, height: 144)
-        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+            icon: (detail?.book?.isAudio ?? false) ? "headphones" : "book.closed",
+            onLoad: { image in
+                if let c = image.averageColor { tint = Color(c) }
+            })
+        .frame(width: 186)
+        .aspectRatio(2 / 3, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: tint.opacity(0.35), radius: 18, y: 8)
     }
 
     /// Where the row stands, and the ways to move it — the edits BookMaster's

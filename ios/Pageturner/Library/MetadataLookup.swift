@@ -304,16 +304,20 @@ enum MetadataLookup {
 
     /// Download a candidate's cover into the covers folder for `book`. `urls`
     /// is the fallback chain: the first that answers with a real image wins.
-    static func applyCover(from urls: [URL], to book: Book, library: LibraryStore) async {
+    /// True only when an image was fetched and written — callers say so.
+    @discardableResult
+    static func applyCover(from urls: [URL], to book: Book, library: LibraryStore) async -> Bool {
         guard let image = await CoverFetch.firstImage(in: urls),
               let jpeg = image.jpegData(compressionQuality: 0.85)
-        else { return }
-        await MainActor.run {
+        else { return false }
+        return await MainActor.run {
             do {
                 try jpeg.write(to: library.coverURL(for: book))
                 library.coverChanged()
+                return true
             } catch {
                 Log.error("metadata", "cover write failed: \(error.localizedDescription)")
+                return false
             }
         }
     }

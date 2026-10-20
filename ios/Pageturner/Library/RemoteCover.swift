@@ -105,28 +105,37 @@ struct RemoteCover: View {
     /// Best guess first, fallbacks after — order is the fallback chain.
     let urls: [URL]
     var icon: String = "book.closed"
+    /// `.fill` crops to the box the way cells want; `.fit` keeps a whole jacket for previews.
+    var contentMode: ContentMode = .fill
+    /// Told the image that answered, when the caller wants it (a backdrop tint).
+    var onLoad: ((UIImage) -> Void)? = nil
     @State private var image: UIImage?
     @State private var finished = false
 
-    init(urls: [URL], icon: String = "book.closed") {
+    init(urls: [URL], icon: String = "book.closed",
+         contentMode: ContentMode = .fill, onLoad: ((UIImage) -> Void)? = nil) {
         self.urls = urls
         self.icon = icon
+        self.contentMode = contentMode
+        self.onLoad = onLoad
     }
 
-    init(url: URL?, icon: String = "book.closed") {
-        self.init(urls: url.map { [$0] } ?? [], icon: icon)
+    init(url: URL?, icon: String = "book.closed",
+         contentMode: ContentMode = .fill, onLoad: ((UIImage) -> Void)? = nil) {
+        self.init(urls: url.map { [$0] } ?? [], icon: icon, contentMode: contentMode, onLoad: onLoad)
     }
 
     var body: some View {
         // The flat colour is the base and the art an overlay on it: an overlay never changes its base's
         // size, so a jacket that is not quite 2:3 is cropped to the box instead of pushing the box
         // wider — a `scaledToFill` image on its own reports its overflowing size to a grid.
-        Color.secondary.opacity(0.15)
+        // a fitted jacket stands on its own; the grey is for the box an image fills (or hasn't yet)
+        Color.secondary.opacity(image != nil && contentMode == .fit ? 0 : 0.15)
             .overlay {
                 if let image {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFill()
+                        .aspectRatio(contentMode: contentMode)
                 } else if finished {
                     Image(systemName: icon).foregroundStyle(.secondary)
                 } else {
@@ -138,6 +147,7 @@ struct RemoteCover: View {
                 finished = false
                 image = await CoverFetch.firstImage(in: urls)
                 finished = true
+                if let image { onLoad?(image) }
             }
             .accessibilityHidden(true)
     }
