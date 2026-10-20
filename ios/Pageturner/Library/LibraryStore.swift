@@ -892,7 +892,7 @@ final class LibraryStore: ObservableObject {
     func addFromDrive(_ plans: [DriveBooks.Plan]) -> [Book] {
         let now = Date()
         var added: [Book] = []
-        for (n, plan) in plans.enumerated() where !plan.source.parts.isEmpty {
+        for (n, plan) in plans.enumerated() where !plan.source.parts.isEmpty && !holds(plan) {
             let id = UUID()
             let names = plan.source.parts.enumerated().map {
                 DriveBooks.localName(book: id, index: $0.offset, part: $0.element, audio: plan.isAudio)
@@ -909,6 +909,24 @@ final class LibraryStore: ObservableObject {
         inCloud.formUnion(added.map(\.id))
         save()
         return added
+    }
+
+    /// Whether the library already has this book, however it got here (the Files app, an earlier Drive download): the same
+    /// size of file, or the same title — taking a name like "David Wong - John Dies at the End" as the title alone, too.
+    func holds(_ plan: DriveBooks.Plan) -> Bool {
+        let size = plan.source.bytes
+        var titles: Set<String> = [Self.fold(plan.title)]
+        let (left, right) = MetadataLookup.splitName(plan.title)
+        if !right.isEmpty { titles.insert(Self.fold(left)); titles.insert(Self.fold(right)) }
+        titles.remove("")
+        return books.contains { book in
+            guard book.isAudio == plan.isAudio else { return false }
+            if size > 0, !(book.drive != nil && inCloud.contains(book.id)) {
+                let have = fileURLs(for: book).reduce(Int64(0)) { $0 + (Self.fileSize($1).map(Int64.init) ?? 0) }
+                if have == size { return true }
+            }
+            return titles.contains(Self.fold(book.title))
+        }
     }
 
     /// The files of a Drive book are all down: the book is available now, and what its files say about it (title,
