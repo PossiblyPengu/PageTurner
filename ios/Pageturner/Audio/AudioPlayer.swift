@@ -44,8 +44,8 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var clips: [AudioClip] = []
     private let library: LibraryStore
     private let urls: [URL]
-    /// The Authorization header for tracks streamed from Google Drive (nil when every track is on the phone).
-    private var streamHeaders: [String: String]?
+    /// Serves the tracks streamed from Google Drive (nil when every track is on the phone).
+    private var streamLoader: DriveStreamLoader?
     private var streamRefresh: Task<Void, Never>?
     private var streamRetries = 0
     private var player: AVPlayer?
@@ -85,7 +85,8 @@ final class AudioPlayer: ObservableObject {
         let local = library.fileURLs(for: book)
         if let source = book.drive, source.parts.count == local.count {
             urls = zip(local, source.parts).map { file, part in
-                FileManager.default.fileExists(atPath: file.path) ? file : (GoogleDrive.downloadURL(id: part.id) ?? file)
+                FileManager.default.fileExists(atPath: file.path)
+                    ? file : (DriveStreamLoader.url(file: part.id, size: part.size ?? 0, name: part.name) ?? file)
             }
         } else {
             urls = local
@@ -106,34 +107,43 @@ final class AudioPlayer: ObservableObject {
     var bookAuthor: String { book.author }
 
     /// A sign-in token for the tracks streamed from Drive. They last an hour; another is fetched before then.
-    private func refreshStreamHeaders() async {
+    private func refreshStreamToken() async {
         guard let token = try? await GoogleAuth.shared.accessToken() else { return }
-        streamHeaders = ["Authorization": "Bearer \(token)"]
+        if let streamLoader { streamLoader.setToken(token) }
+        else {
+            streamLoader = DriveStreamLoader(token: token, refresh: {
+                await MainActor.run { GoogleAuth.shared.discardAccessToken() }
+                return try? await GoogleAuth.shared.accessToken()
+            })
+        }
     }
 
-    /// An asset for a track: a file on the phone as it is, a Drive stream with the sign-in header.
-    nonisolated private static func makeAsset(_ url: URL, headers: [String: String]?) -> AVURLAsset {
-        guard !url.isFileURL, let headers else { return AVURLAsset(url: url) }
-        return AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+    /// An asset for a track: a file on the phone as it is, a Drive file through the loader that serves it.
+    nonisolated private static func makeAsset(_ url: URL, loader: DriveStreamLoader?) -> AVURLAsset {
+        let asset = AVURLAsset(url: url)
+        if url.scheme == DriveStreamLoader.scheme, let loader {
+            asset.resourceLoader.setDelegate(loader, queue: loader.queue)
+        }
+        return asset
     }
 
     func open() async {
         // cumulative offsets turn "track i, t seconds" into a global position
         defer { isLoading = false }
         if urls.contains(where: { !$0.isFileURL }) {
-            await refreshStreamHeaders()
-            guard streamHeaders != nil else {
+            await refreshStreamToken()
+            guard streamLoader != nil else {
                 notice = "Sign in to Google Drive (Settings → Google Drive) to play this book without downloading it."
                 return
             }
             streamRefresh = Task { [weak self] in
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 45 * 60 * 1_000_000_000)
-                    await self?.refreshStreamHeaders()
+                    await self?.refreshStreamToken()
                 }
             }
         }
-        let headers = streamHeaders
+        let loader = streamLoader
         var offsets: [TimeInterval] = []
         var total: TimeInterval = 0
         // the files are measured side by side — a long mp3 book would take seconds one by one
@@ -145,7 +155,7 @@ final class AudioPlayer: ObservableObject {
                 let i = next, url = urls[next]
                 next += 1
                 group.addTask {
-                    let d = try? await Self.makeAsset(url, headers: headers).load(.duration).seconds
+                    let d = try? await Self.makeAsset(url, loader: loader).load(.duration).seconds
                     return (i, d)
                 }
             }
@@ -168,7 +178,7 @@ final class AudioPlayer: ObservableObject {
         duration = total
         chapters = urls.count > 1
             ? AudioChapters.fromTracks(titles: trackNames, offsets: offsets, duration: total)
-            : await Self.embeddedChapters(of: urls.first, duration: total, headers: headers)
+            : await Self.embeddedChapters(of: urls.first, duration: total, loader: loader)
         guard !closed else { return }
         coverImage = library.cover(for: book)
         guard !urls.isEmpty else {
@@ -334,7 +344,7 @@ final class AudioPlayer: ObservableObject {
         guard urls.indices.contains(index) else { return }
         pausedAt = nil
         trackIndex = index
-        let item = AVPlayerItem(asset: Self.makeAsset(urls[index], headers: streamHeaders))
+        let item = AVPlayerItem(asset: Self.makeAsset(urls[index], loader: streamLoader))
         itemStatus = item.publisher(for: \.status)
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak item] status in
@@ -348,7 +358,7 @@ final class AudioPlayer: ObservableObject {
                         let wasPlaying = self.isPlaying
                         let at = max(0, self.position - self.trackOffsets[index])
                         Task { @MainActor in
-                            await self.refreshStreamHeaders()
+                            await self.refreshStreamToken()
                             guard !self.closed else { return }
                             self.load(track: index)
                             await self.player?.seek(to: CMTime(seconds: at, preferredTimescale: 600))
@@ -356,7 +366,9 @@ final class AudioPlayer: ObservableObject {
                         }
                         return
                     }
-                    let why = item.error?.localizedDescription ?? "unreadable file"
+                    let code = (item.error as NSError?).map { " (\($0.domain) \($0.code))" } ?? ""
+                    let why = (item.error?.localizedDescription ?? "unreadable file") + code
+                    Log.error("audio", "\(self.trackNames[index]) would not play: \(why) — \(self.urls[index].isFileURL ? "file" : "stream")")
                     self.notice = "Couldn't play \(self.trackNames[index]): \(why)"
                     self.pause()
                 }
@@ -547,9 +559,9 @@ final class AudioPlayer: ObservableObject {
 
     /// The markers inside a single audio file (m4b/m4a chapter tracks). A file
     /// without any, or one that won't say, has no chapters.
-    private static func embeddedChapters(of url: URL?, duration: TimeInterval, headers: [String: String]? = nil) async -> [AudioChapter] {
+    private static func embeddedChapters(of url: URL?, duration: TimeInterval, loader: DriveStreamLoader? = nil) async -> [AudioChapter] {
         guard let url else { return [] }
-        let asset = makeAsset(url, headers: headers)
+        let asset = makeAsset(url, loader: loader)
         guard let groups = try? await asset.loadChapterMetadataGroups(
             bestMatchingPreferredLanguages: Locale.preferredLanguages), !groups.isEmpty
         else { return [] }
