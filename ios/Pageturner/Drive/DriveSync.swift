@@ -64,6 +64,8 @@ final class DriveSync {
     private let nameKey = "drive-sync-name"
     private let seenKey = "drive-sync-seen"
     private let lastKey = "drive-sync-last"
+    /// Where the Drive's list of changes stood at the last full look: nothing changed since means nothing to list.
+    private let tokenKey = "drive-sync-token"
     private let statusKey = "drive-sync-status"
     private let seenMax = 5000
     private let gap: TimeInterval = 10 * 60
@@ -83,13 +85,14 @@ final class DriveSync {
         defaults.set(target.id, forKey: idKey)
         defaults.set(folder.name, forKey: nameKey)
         defaults.removeObject(forKey: seenKey)
+        defaults.removeObject(forKey: tokenKey)
         defaults.set(0.0, forKey: lastKey)
         folderName = folder.name
         await scan(library: library)
     }
 
     func stop() {
-        for key in [idKey, nameKey, seenKey, lastKey, statusKey] { defaults.removeObject(forKey: key) }
+        for key in [idKey, nameKey, seenKey, lastKey, statusKey, tokenKey] { defaults.removeObject(forKey: key) }
         folderName = nil
         status = nil
     }
@@ -99,12 +102,12 @@ final class DriveSync {
         guard isWatching, GoogleAuth.shared.signedIn, !LowPower.on,
               Date().timeIntervalSince1970 - defaults.double(forKey: lastKey) >= gap
         else { return }
-        await scan(library: library)
+        await scan(library: library, viaChanges: true)
     }
 
     /// Add anything new in the folder to the library. Nothing is downloaded: a book arrives as an entry that can be
     /// downloaded on its own (a zip or a text file cannot be an entry before it is opened, so those are left, and said so).
-    func scan(library: LibraryStore) async {
+    func scan(library: LibraryStore, viaChanges: Bool = false) async {
         guard !scanning, let id = defaults.string(forKey: idKey) else { return }
         guard GoogleAuth.shared.signedIn else {
             report("Sign in to Google Drive to check the folder.")
@@ -113,10 +116,23 @@ final class DriveSync {
         scanning = true
         defer { scanning = false }
         do {
+            // the automatic look first asks Drive whether anything changed at all: one small request, instead of
+            // listing every folder under the watched one. ("Check Now" always looks properly.)
+            if viaChanges, let token = defaults.string(forKey: tokenKey), let answer = try? await DriveClient.shared.changes(since: token),
+               !answer.any
+            {
+                if let next = answer.next { defaults.set(next, forKey: tokenKey) }
+                defaults.set(Date().timeIntervalSince1970, forKey: lastKey)
+                report("Checked \(Date().formatted(date: .abbreviated, time: .shortened)): nothing new.")
+                return
+            }
+            // marked before the look: a change made while it runs is seen next time
+            let marker = try? await DriveClient.shared.startToken()
             let found = try await DriveClient.shared.books(under: id)
             let seen = Set(defaults.stringArray(forKey: seenKey) ?? [])
             let fresh = Set(GoogleDrive.newFiles(found.map(\.file), seen: seen, now: Date()).map(\.id))
             defaults.set(Date().timeIntervalSince1970, forKey: lastKey)
+            if let marker { defaults.set(marker, forKey: tokenKey) }
             let wanted = found.filter { fresh.contains($0.file.id) }.map { DriveBooks.Found($0.file, folder: $0.folder) }
             guard !wanted.isEmpty else {
                 report("Checked \(Date().formatted(date: .abbreviated, time: .shortened)): nothing new.")

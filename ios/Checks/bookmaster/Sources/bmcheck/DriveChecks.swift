@@ -161,4 +161,12 @@ func runDriveChecks() {
           GoogleDrive.staleBackups(files, keep: 2).map(\.id) == ["1"] && GoogleDrive.staleBackups(files, keep: 3).isEmpty
           && GoogleDrive.staleBackups(files, keep: 0).map(\.id) == ["1", "2"])
     check("a size reads as a person writes it", GoogleDrive.sizeText(nil) == "" && GoogleDrive.sizeText(1_500_000).contains("MB"))
+
+    check("the change feed asks from a token, a page at a time",
+          GoogleDrive.changesURL(token: "123")?.absoluteString.contains("pageToken=123") == true
+              && GoogleDrive.startTokenURL?.path.hasSuffix("/changes/startPageToken") == true)
+    let none = try? JSONDecoder().decode(GoogleDrive.Changes.self, from: Data(#"{"changes":[],"newStartPageToken":"99"}"#.utf8))
+    check("no changes says so, and gives the next token", none == GoogleDrive.Changes(any: false, next: "99"))
+    let some = try? JSONDecoder().decode(GoogleDrive.Changes.self, from: Data(#"{"changes":[{"fileId":"a"}],"nextPageToken":"5"}"#.utf8))
+    check("a change is a change", some?.any == true)
 }

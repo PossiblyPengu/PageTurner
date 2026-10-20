@@ -24,7 +24,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 - Push, then read the run's result before pushing again — the workflow cancels an in-progress run
   on the same branch, so back-to-back pushes never report. Compiler errors are in the job log
   (`grep "error: "`); the job summary also lists diagnostics.
-- `.github/workflows/ios-sim.yml` is the nearest thing to looking at the app: a **Debug** build in the
+- `.github/workflows/ios-sim.yml` (two parallel halves, `screens` and `voices`, artifacts `simulator-screens-<half>`) is the nearest thing to looking at the app: a **Debug** build in the
   iOS Simulator, launched once per screen (`ios/scripts/simulator-shots.sh`) and photographed; the
   `simulator-screens` artifact holds PNGs, the app's log and any crash report. The launch arguments
   (`-PTDebugScreen`, `-PTDebugSeed`, `-PTDebugReaderSheet` (incl. `readaloud` with `-PTDebugHighlights sentence,line,word` and `-PTDebugVoice neural`), `-PTDebugReaderScroll` (scroll-mode layout for `reader`), `-PTDebugSettingsPush`, `-PTDebugVoiceSource`,
@@ -331,7 +331,11 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   asks only for what is missing. When the last part is in, `LibraryStore.driveDownloadFinished` reads the file (Readium / audio tags) for
   title, author, cover, blurb — onto what the reader has not changed (`Source.guessedTitle`) — and a local notification says so when the app
   is not in front. Settings → Google Drive has "Download over mobile data". "Remove Download" frees the files and keeps the book and its
-  place. A backup holds Drive books without their files and restores them as waiting entries. `AutoBackup` has a destination
+  place. **Listen Now** plays a Drive audiobook without downloading it: `AudioPlayer` streams each part not on the phone with an
+  `AVURLAssetHTTPHeaderFieldsKey` bearer (refreshed every 45 min; a refused stream is re-asked once or twice from where it was). A book
+  already on the phone whose files are the very same size as a Drive file is linked to it (`LibraryStore.existing(for:)`), not duplicated.
+  The watcher's automatic look first asks the Drive's change feed (`changes.list`, one entry) and lists nothing when nothing changed.
+  A backup holds Drive books without their files and restores them as waiting entries. `AutoBackup` has a destination
   ("backup-auto-dest": folder | drive; Drive needs the network, so the background task asks for it); `DriveBackupsView` restores one. The
   library's + is a menu (Files / Google Drive). The simulator run photographs the cloud badges (02), a book's page not started (03a) and part
   way down (03b).

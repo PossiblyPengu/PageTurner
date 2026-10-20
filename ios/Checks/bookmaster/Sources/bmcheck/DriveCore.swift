@@ -222,6 +222,50 @@ enum GoogleDrive {
         return parts?.url
     }
 
+    // MARK: Changes
+
+    /// Where the Drive's list of changes begins now — what a later `changesURL` asks from.
+    static var startTokenURL: URL? {
+        var parts = URLComponents(string: "\(apiBase)/changes/startPageToken")
+        parts?.queryItems = [URLQueryItem(name: "supportsAllDrives", value: "true")]
+        return parts?.url
+    }
+
+    /// The first page of what changed since `token`: one entry is enough to know that something did.
+    static func changesURL(token: String) -> URL? {
+        var parts = URLComponents(string: "\(apiBase)/changes")
+        parts?.queryItems = [
+            URLQueryItem(name: "pageToken", value: token),
+            URLQueryItem(name: "pageSize", value: "1"),
+            URLQueryItem(name: "fields", value: "nextPageToken,newStartPageToken,changes(fileId)"),
+            URLQueryItem(name: "supportsAllDrives", value: "true"),
+            URLQueryItem(name: "includeItemsFromAllDrives", value: "true"),
+        ]
+        return parts?.url
+    }
+
+    /// What Drive says about the changes since a token: whether there are any, and the token to ask from next time
+    /// (when there were none).
+    struct Changes: Decodable, Equatable {
+        var any: Bool
+        var next: String?
+
+        enum CodingKeys: String, CodingKey { case changes, newStartPageToken, nextPageToken }
+        struct Entry: Decodable {}
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let entries = (try? c.decode([Entry].self, forKey: .changes)) ?? []
+            any = !entries.isEmpty || (try? c.decode(String.self, forKey: .nextPageToken)) != nil
+            next = try? c.decode(String.self, forKey: .newStartPageToken)
+        }
+
+        init(any: Bool, next: String?) {
+            self.any = any
+            self.next = next
+        }
+    }
+
     static func deleteURL(id: String) -> URL? { URL(string: "\(apiBase)/files/\(id)?supportsAllDrives=true") }
 
     static let aboutURL = URL(string: "\(apiBase)/about?fields=user(displayName,emailAddress)")!

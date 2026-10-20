@@ -113,6 +113,25 @@ final class DriveClient {
         return books
     }
 
+    // MARK: Changes
+
+    /// A marker for "now" in the Drive's list of changes.
+    func startToken() async throws -> String {
+        guard let url = GoogleDrive.startTokenURL else { throw DriveError.offline }
+        let (data, _) = try await perform(URLRequest(url: url))
+        guard let token = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["startPageToken"] as? String else {
+            throw DriveError(message: "Google Drive sent something Pageturner could not read.")
+        }
+        return token
+    }
+
+    /// Whether anything in the Drive changed since `token` — one small request, instead of listing a whole folder tree.
+    func changes(since token: String) async throws -> GoogleDrive.Changes {
+        guard let url = GoogleDrive.changesURL(token: token) else { throw DriveError.offline }
+        let (data, _) = try await perform(URLRequest(url: url))
+        return try decode(GoogleDrive.Changes.self, from: data)
+    }
+
     // MARK: Downloading
 
     /// One file into `directory` under its own name (a number is added when two share a name). Throws when what
