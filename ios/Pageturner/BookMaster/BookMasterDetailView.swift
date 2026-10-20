@@ -184,41 +184,56 @@ struct BookMasterDetailView: View {
 
     private func headerSection(_ detail: BMBookDetail) -> some View {
         Section {
-            VStack(spacing: 16) {
-                cover
-                VStack(spacing: 4) {
-                    Text(detail.catalogue?.title ?? detail.book?.title ?? title ?? "")
-                        .font(.title2.weight(.bold))
-                        .multilineTextAlignment(.center)
-                    if let author = detail.catalogue?.author ?? detail.book?.author ?? author,
-                       !author.isEmpty {
-                        Text(author)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    let meta = [
-                        detail.catalogue?.publishedYear.map(String.init),
-                        detail.catalogue?.totalPages.map { "\($0) pages" },
-                    ].compactMap { $0 } + (detail.catalogue?.genreList.prefix(2) ?? [])
-                    if !meta.isEmpty {
-                        Text(meta.joined(separator: " · "))
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .listRowBackground(Color.clear)
+            hero(detail)
             if let blurb = detail.catalogue?.description, !blurb.isEmpty {
                 ExpandableText(blurb)
             }
         }
     }
 
+    /// The big jacket, the book's name and its facts — the same opening the
+    /// library's Book Info makes, on this catalogue's terms.
+    private func hero(_ detail: BMBookDetail) -> some View {
+        VStack(spacing: 16) {
+            cover
+            heroTitles(detail)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .listRowBackground(Color.clear)
+    }
+
+    private func heroTitles(_ detail: BMBookDetail) -> some View {
+        VStack(spacing: 4) {
+            Text(detail.catalogue?.title ?? detail.book?.title ?? title ?? "")
+                .font(.title2.weight(.bold))
+                .multilineTextAlignment(.center)
+            if let author = detail.catalogue?.author ?? detail.book?.author ?? author,
+               !author.isEmpty {
+                Text(author)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            let meta = [
+                detail.catalogue?.publishedYear.map(String.init),
+                detail.catalogue?.totalPages.map { "\($0) pages" },
+            ].compactMap { $0 } + (detail.catalogue?.genreList.prefix(2) ?? [])
+            if !meta.isEmpty {
+                Text(meta.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     /// The cover BookMaster knows: a pushed one is a URL of its own, then Open Library's.
     /// Tappable when the book has a catalogue row — the pick writes back to it.
+    /// (Split into steps — one long chain of modifiers is a type-checker timeout.)
     private var cover: some View {
+        coverBadgeable(coverArt)
+    }
+
+    private var coverArt: some View {
         let isbn = detail?.catalogue?.isbn ?? detail?.book?.isbn
         let olid = detail?.catalogue?.openLibraryId ?? detail?.book?.openLibraryId
         return RemoteCover(
@@ -230,22 +245,27 @@ struct BookMasterDetailView: View {
         .frame(width: 186)
         .aspectRatio(2 / 3, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(alignment: .bottomTrailing) {
-            if detail?.catalogue?.id != nil {
-                Image(systemName: "photo.badge.arrow.down")
-                    .font(.caption.weight(.bold))
-                    .padding(7)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .offset(x: 8, y: 8)
+    }
+
+    /// The photo badge and the tap, only while a catalogue row is there to write to.
+    private func coverBadgeable<V: View>(_ art: V) -> some View {
+        art
+            .overlay(alignment: .bottomTrailing) {
+                if detail?.catalogue?.id != nil {
+                    Image(systemName: "photo.badge.arrow.down")
+                        .font(.caption.weight(.bold))
+                        .padding(7)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .offset(x: 8, y: 8)
+                }
             }
-        }
-        .shadow(color: tint.opacity(0.35), radius: 18, y: 8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if detail?.catalogue?.id != nil { pickingCover = true }
-        }
-        .accessibilityLabel("Book cover")
-        .accessibilityHint(detail?.catalogue?.id != nil ? "Finds jacket art online" : "")
+            .shadow(color: tint.opacity(0.35), radius: 18, y: 8)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if detail?.catalogue?.id != nil { pickingCover = true }
+            }
+            .accessibilityLabel("Book cover")
+            .accessibilityHint(detail?.catalogue?.id != nil ? "Finds jacket art online" : "")
     }
 
     /// Where the row stands, and the ways to move it — the edits BookMaster's
