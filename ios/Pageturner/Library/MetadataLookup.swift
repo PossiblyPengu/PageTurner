@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 
 /// One possible match from an online metadata source.
-struct MetadataCandidate: Identifiable, Hashable {
+struct MetadataCandidate: Identifiable, Hashable, Codable {
     let id = UUID()
     var title: String
     var authors: String
@@ -17,6 +17,11 @@ struct MetadataCandidate: Identifiable, Hashable {
     /// The BookMaster shelf row this is — applying it pins the book there, so a
     /// later push can never write a duplicate.
     var bookmasterId: String?
+
+    /// `id` is only for the list on screen; what is kept on disk is the rest.
+    enum CodingKeys: String, CodingKey {
+        case title, authors, year, summary, isbn, openLibraryId, coverURL, source, bookmasterId
+    }
 }
 
 /// Book metadata lookup: BookMaster's own catalogue first when linked (its hits
@@ -33,18 +38,51 @@ enum MetadataLookup {
         return URLSession(configuration: config)
     }()
 
-    /// Searches already made this run, by what was asked.
-    @MainActor private static var remembered: [String: [MetadataCandidate]] = [:]
+    /// Searches already made, by what was asked: kept in the caches folder for two weeks, so a book looked up once is
+    /// never asked of the network again (and a library re-matched after a restore is quick).
+    private struct Remembered: Codable {
+        var at: Date
+        var list: [MetadataCandidate]
+    }
+    @MainActor private static var remembered: [String: Remembered] = loadRemembered()
+    private static let rememberedLimit = 200
+
+    private static var rememberedFile: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("metadata-lookup.json")
+    }
+
+    private static func loadRemembered() -> [String: Remembered] {
+        guard let data = try? Data(contentsOf: rememberedFile),
+              let saved = try? JSONDecoder().decode([String: Remembered].self, from: data)
+        else { return [:] }
+        let fresh = Date().addingTimeInterval(-14 * 86_400)
+        return saved.filter { $0.value.at > fresh }
+    }
+
+    @MainActor private static func recalled(_ key: String) -> [MetadataCandidate]? {
+        guard let hit = remembered[key], hit.at > Date().addingTimeInterval(-14 * 86_400) else { return nil }
+        return hit.list
+    }
+
+    @MainActor private static func remember(_ key: String, _ list: [MetadataCandidate]) {
+        remembered[key] = Remembered(at: Date(), list: list)
+        if remembered.count > rememberedLimit {
+            for old in remembered.sorted(by: { $0.value.at < $1.value.at }).prefix(remembered.count - rememberedLimit) {
+                remembered[old.key] = nil
+            }
+        }
+        if let data = try? JSONEncoder().encode(remembered) { try? data.write(to: rememberedFile, options: .atomic) }
+    }
 
     /// All sources at once. `progress` hears the merged list each time one answers (the fastest shows at once, the
     /// slowest only adds); `stopWhen` ends the search early once the list so far holds what the caller wanted.
     static func search(
-        title: String, author: String,
+        title: String, author: String, isbn: String? = nil,
         progress: (@MainActor ([MetadataCandidate]) -> Void)? = nil,
         stopWhen: (([MetadataCandidate]) -> Bool)? = nil
     ) async -> [MetadataCandidate] {
-        let key = (title + "|" + author).lowercased()
-        if let hit = await MainActor.run(body: { remembered[key] }) {
+        let key = (title + "|" + author + "|" + (isbn ?? "")).lowercased()
+        if let hit = await MainActor.run(body: { recalled(key) }) {
             await progress?(hit)
             return hit
         }
@@ -55,7 +93,9 @@ enum MetadataLookup {
             let (left, right) = splitName(title)
             if !right.isEmpty { asks += [(left, right), (right, left)] }
         }
-        var slots: [[MetadataCandidate]] = Array(repeating: [], count: asks.count * 3)
+        // an ISBN names the book outright: asked of the two sources that take one, beside the title and author
+        let extra = isbn.flatMap { ISBN.normalize($0) }
+        var slots: [[MetadataCandidate]] = Array(repeating: [], count: asks.count * 3 + (extra == nil ? 0 : 2))
         var finished = 0
         var stopped = false
         await withTaskGroup(of: (Int, [MetadataCandidate]).self) { group in
@@ -63,6 +103,10 @@ enum MetadataLookup {
                 group.addTask { (n * 3, await bookMasterCandidates(title: ask.title, author: ask.author)) }
                 group.addTask { (n * 3 + 1, await googleBooks(title: ask.title, author: ask.author)) }
                 group.addTask { (n * 3 + 2, await openLibrary(title: ask.title, author: ask.author)) }
+            }
+            if let extra {
+                group.addTask { (asks.count * 3, await googleBooks(query: "isbn:\(extra)")) }
+                group.addTask { (asks.count * 3 + 1, await openLibrary(items: [URLQueryItem(name: "isbn", value: extra)])) }
             }
             for await (index, list) in group {
                 slots[index] = list
@@ -79,7 +123,7 @@ enum MetadataLookup {
         let result = dedupe(slots.flatMap { $0 })
         // a search cut short, or one where nothing came back (the network, not the book), is not worth remembering
         if !stopped, !result.isEmpty {
-            await MainActor.run { remembered[key] = result }
+            await MainActor.run { remember(key, result) }
         }
         return result
     }
@@ -131,6 +175,10 @@ enum MetadataLookup {
     private static func googleBooks(title: String, author: String) async -> [MetadataCandidate] {
         var q = "intitle:\(title)"
         if !author.isEmpty { q += " inauthor:\(author)" }
+        return await googleBooks(query: q)
+    }
+
+    private static func googleBooks(query q: String) async -> [MetadataCandidate] {
         guard var comp = URLComponents(string: "https://www.googleapis.com/books/v1/volumes") else { return [] }
         comp.queryItems = [
             URLQueryItem(name: "q", value: q),
@@ -168,14 +216,17 @@ enum MetadataLookup {
     // MARK: - Open Library
 
     private static func openLibrary(title: String, author: String) async -> [MetadataCandidate] {
+        var items = [URLQueryItem(name: "title", value: title)]
+        if !author.isEmpty { items.append(URLQueryItem(name: "author", value: author)) }
+        return await openLibrary(items: items)
+    }
+
+    private static func openLibrary(items asked: [URLQueryItem]) async -> [MetadataCandidate] {
         guard var comp = URLComponents(string: "https://openlibrary.org/search.json") else { return [] }
-        var items = [
-            URLQueryItem(name: "title", value: title),
+        comp.queryItems = asked + [
             URLQueryItem(name: "limit", value: "8"),
             URLQueryItem(name: "fields", value: "key,title,author_name,first_publish_year,cover_i,isbn"),
         ]
-        if !author.isEmpty { items.append(URLQueryItem(name: "author", value: author)) }
-        comp.queryItems = items
         guard let url = comp.url,
               let (data, _) = try? await session.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -225,14 +276,15 @@ enum MetadataLookup {
         guard let book = library.books.first(where: { $0.id == id }) else { return false }
         let askTitle = title ?? book.title, askAuthor = author ?? book.author
         let (left, right) = askAuthor.isEmpty ? splitName(askTitle) : (askTitle, "")
+        let ownISBN = book.isbn
         let agrees: (MetadataCandidate) -> Bool = {
-            (BMShelf.titlesAgree(askTitle, $0.title) && BMShelf.authorsAgree(askAuthor, $0.authors))
+            (ownISBN != nil && $0.isbn == ownISBN) || (BMShelf.titlesAgree(askTitle, $0.title) && BMShelf.authorsAgree(askAuthor, $0.authors))
                 || (!right.isEmpty
                     && ((BMShelf.titlesAgree(left, $0.title) && BMShelf.authorsAgree(right, $0.authors))
                         || (BMShelf.titlesAgree(right, $0.title) && BMShelf.authorsAgree(left, $0.authors))))
         }
         // the first source to name the book is enough: the others need not be waited for
-        let results = await search(title: askTitle, author: askAuthor, stopWhen: { $0.contains(where: agrees) })
+        let results = await search(title: askTitle, author: askAuthor, isbn: book.isbn, stopWhen: { $0.contains(where: agrees) })
         guard let match = results.first(where: agrees) else { return false }
 
         // the search took a while: change only these fields on the book as it is

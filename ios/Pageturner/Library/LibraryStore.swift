@@ -892,7 +892,11 @@ final class LibraryStore: ObservableObject {
     func addFromDrive(_ plans: [DriveBooks.Plan]) -> [Book] {
         let now = Date()
         var added: [Book] = []
-        for (n, plan) in plans.enumerated() where !plan.source.parts.isEmpty && !holds(plan) {
+        for (n, plan) in plans.enumerated() where !plan.source.parts.isEmpty {
+            if let have = existing(for: plan) {
+                if have.exact { link(have.book.id, to: plan.source) }
+                continue
+            }
             let id = UUID()
             let names = plan.source.parts.enumerated().map {
                 DriveBooks.localName(book: id, index: $0.offset, part: $0.element, audio: plan.isAudio)
@@ -911,21 +915,36 @@ final class LibraryStore: ObservableObject {
         return added
     }
 
-    /// Whether the library already has this book, however it got here (the Files app, an earlier Drive download): the same
-    /// size of file, or the same title — taking a name like "David Wong - John Dies at the End" as the title alone, too.
-    func holds(_ plan: DriveBooks.Plan) -> Bool {
+    /// The book the library already has for this one, however it got here (the Files app, an earlier Drive download): the
+    /// same size of file, or the same title — taking a name like "David Wong - John Dies at the End" as the title alone,
+    /// too. `exact`: the files are the very same size, so the copy on the phone *is* the Drive file.
+    func existing(for plan: DriveBooks.Plan) -> (book: Book, exact: Bool)? {
         let size = plan.source.bytes
         var titles: Set<String> = [Self.fold(plan.title)]
         let (left, right) = MetadataLookup.splitName(plan.title)
         if !right.isEmpty { titles.insert(Self.fold(left)); titles.insert(Self.fold(right)) }
         titles.remove("")
-        return books.contains { book in
-            guard book.isAudio == plan.isAudio else { return false }
-            if size > 0, !(book.drive != nil && inCloud.contains(book.id)) {
+        var byTitle: Book?
+        for book in books where book.isAudio == plan.isAudio {
+            if size > 0, !inCloud.contains(book.id) {
                 let have = fileURLs(for: book).reduce(Int64(0)) { $0 + (Self.fileSize($1).map(Int64.init) ?? 0) }
-                if have == size { return true }
+                if have == size { return (book, true) }
             }
-            return titles.contains(Self.fold(book.title))
+            if byTitle == nil, titles.contains(Self.fold(book.title)) { byTitle = book }
+        }
+        return byTitle.map { ($0, false) }
+    }
+
+    func holds(_ plan: DriveBooks.Plan) -> Bool { existing(for: plan) != nil }
+
+    /// A book already in the library turns out to be this Drive file: it keeps its place and notes, and learns where it
+    /// came from — so "Remove Download" can free its space and the Drive can give it back.
+    private func link(_ id: UUID, to source: GoogleDrive.Source) {
+        mutate(id) { book in
+            guard book.drive == nil, book.fileNames.count == source.parts.count else { return }
+            var linked = source
+            linked.finished = true
+            book.drive = linked
         }
     }
 
