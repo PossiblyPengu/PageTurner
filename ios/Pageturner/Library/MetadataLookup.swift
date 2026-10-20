@@ -27,7 +27,9 @@ struct MetadataCandidate: Identifiable, Hashable, Codable {
     enum CodingKeys: String, CodingKey {
         case title, authors, year, summary, isbn, openLibraryId, coverURL, coverURLs, source, bookmasterId
     }
+}
 
+extension MetadataCandidate {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         title = try c.decode(String.self, forKey: .title)
