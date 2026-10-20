@@ -372,12 +372,7 @@ struct LibraryView: View {
                 }
                 .accessibilityLabel("Add books")
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { router.showSettings = true } label: {
-                    Image(systemName: "gearshape")
-                }
-                .accessibilityLabel("Settings")
-            }
+            SettingsToolbarItem(router: router)
         }
     }
 

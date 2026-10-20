@@ -6,6 +6,9 @@
 # it reports whether it stayed alive and collects crash reports and the app's log.
 set -u
 UDID=$1; APP=$2; OUT=$3
+# which half of the run this is: "screens" (every screen, the page turns, large text), "voices" (the neural voice
+# download, read-aloud on the page and its probes — the slow part), or "all" (the default)
+SET=${4:-all}
 BUNDLE=io.github.possiblypengu.pageturner
 mkdir -p "$OUT/logs"
 FAILED=0
@@ -55,6 +58,7 @@ probe() {
     --predicate 'process == "Pageturner"' 2>/dev/null | tail -n 400 > "$OUT/logs/$name.txt" || true
 }
 
+if [[ $SET != voices ]]; then
 # first launch: an empty library
 shot 01-empty 6
 
@@ -147,6 +151,11 @@ shot 33-large-player 8 -PTDebugScreen player
 shot 34-large-voices 12 -PTDebugScreen settings -PTDebugSettingsPush voices
 xcrun simctl ui "$UDID" content_size large 2>/dev/null || true
 
+fi
+
+if [[ $SET != screens ]]; then
+# the voices half starts from a seeded library of its own
+[[ $SET == voices ]] && shot 54-seed 26 -PTDebugSeed 1 -PTDebugScreen library
 # neural voices: download one inside the simulator, make a sentence with it on sherpa-onnx (Piper on
 # ONNX Runtime) and check there was speech — then the Neural tab, with that voice saved
 shot 55-neural-probe 120 -PTDebugNeuralProbe en_US-lessac-low
@@ -181,11 +190,14 @@ xcrun simctl spawn "$UDID" log show --style compact --last 2m \
   --predicate 'process == "Pageturner" AND eventMessage CONTAINS "PTNarrated"' > "$OUT/readaloud-away.txt" 2>/dev/null || true
 grep -q "PTNarrated" "$OUT/readaloud-away.txt" || { echo "::error::read-aloud did not go on after the reader was left"; FAILED=1; }
 
+fi
+
 # crash reports from the host (the simulator writes them there)
 mkdir -p "$OUT/crashes"
 find ~/Library/Logs/DiagnosticReports -name 'Pageturner*' -newer "$APP" -exec cp {} "$OUT/crashes/" \; 2>/dev/null || true
 if ls "$OUT/crashes"/* >/dev/null 2>&1; then echo "::error::crash reports found"; FAILED=1; fi
 
+if [[ $SET != screens ]]; then
 # experiments that can take the app down in a simulator with no sound hardware: their crash
 # reports are kept apart and never fail the run
 mkdir -p "$OUT/probe-crashes"
@@ -198,6 +210,7 @@ xcrun simctl spawn "$UDID" log show --style compact --last 10m \
 probe 59-neural-play 60 -PTDebugNeuralProbe en_US-lessac-low -PTDebugNeuralPlay 1
 find ~/Library/Logs/DiagnosticReports -name 'Pageturner*' -newer "$MARK" -exec cp {} "$OUT/probe-crashes/" \; 2>/dev/null || true
 if ls "$OUT/probe-crashes"/* >/dev/null 2>&1; then echo "::warning::a probe crashed the app (see probe-crashes)"; fi
+fi
 
 xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
 exit $FAILED

@@ -488,10 +488,7 @@ struct BookMasterBooksView: View {
                 Button { pushing = .find } label: { Image(systemName: "plus") }
                     .accessibilityLabel("Find or add a book")
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
-                    .accessibilityLabel("Settings")
-            }
+            SettingsToolbarItem(router: router)
         }
     }
 

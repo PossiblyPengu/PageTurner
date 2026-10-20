@@ -49,7 +49,6 @@ struct BookMasterTogetherView: View {
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("Together")
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     /// Where the page leads: the chat, the in-app browser, and the buttons that open them.
@@ -74,10 +73,7 @@ struct BookMasterTogetherView: View {
                 .accessibilityLabel(unread > 0 ? "Notifications, \(unread) unread" : "Notifications")
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
-                .accessibilityLabel("Settings")
-        }
+        SettingsToolbarItem(router: router)
     }
 
     /// Loading, and going where a tapped notification (`pageturner://open`) said.

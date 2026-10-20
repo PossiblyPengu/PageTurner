@@ -48,12 +48,7 @@ struct BookMasterStatsView: View {
                 }
             }
             .navigationTitle("Stats")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { router.showSettings = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("Settings")
-                }
-            }
+            .toolbar { SettingsToolbarItem(router: router) }
             .sheet(isPresented: $goalSheet) { BMGoalSheet { Task { await load() } } }
             .sheet(isPresented: $importing) {
                 BMImportSheet { message in

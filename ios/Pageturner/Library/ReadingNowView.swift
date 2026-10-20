@@ -94,14 +94,7 @@ struct ReadingNowView: View {
             }
             .ptSoftScrollEdges()
             .navigationTitle("Reading")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { router.showSettings = true } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
-            }
+            .toolbar { SettingsToolbarItem(router: router) }
         }
     }
 }

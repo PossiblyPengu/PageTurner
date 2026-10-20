@@ -21,8 +21,14 @@ permissions:
 
 jobs:
   screens:
+    name: screens (${{ matrix.set }})
     runs-on: macos-15
     timeout-minutes: 60
+    # two machines at once: the voices half (a voice download, read-aloud on the page) is the slow part
+    strategy:
+      fail-fast: false
+      matrix:
+        set: [screens, voices]
     steps:
       - uses: actions/checkout@v4
 
@@ -81,13 +87,13 @@ jobs:
         run: |
           mkdir -p shots
           bash ios/scripts/simulator-shots.sh "${{ steps.sim.outputs.udid }}" \
-            "$PWD/ios/build-sim/Build/Products/Debug-iphonesimulator/Pageturner.app" "$PWD/shots"
+            "$PWD/ios/build-sim/Build/Products/Debug-iphonesimulator/Pageturner.app" "$PWD/shots" "${{ matrix.set }}"
 
       - name: Upload screenshots
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: simulator-screens
+          name: simulator-screens-${{ matrix.set }}
           path: shots
           if-no-files-found: ignore
