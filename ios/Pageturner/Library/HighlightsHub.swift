@@ -86,6 +86,7 @@ struct HighlightsHubView: View {
             .ptSoftScrollEdges()
             .navigationTitle("Highlights")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
             .searchable(text: $query, prompt: "Text, notes and books")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

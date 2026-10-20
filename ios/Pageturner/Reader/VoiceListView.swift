@@ -51,6 +51,7 @@ struct VoiceListView: View {
 
     private func chrome<V: View>(_ content: V) -> some View {
         content
+            .scrollDismissesKeyboard(.interactively)
             .searchable(text: $query, prompt: source == .device ? "Search voices" : "Search neural voices")
             .navigationTitle("Voice")
             .navigationBarTitleDisplayMode(.inline)

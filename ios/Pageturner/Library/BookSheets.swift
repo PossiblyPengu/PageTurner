@@ -714,6 +714,7 @@ struct BookLookupSheet: View {
                 resultsSection
             }
             .ptSoftScrollEdges()
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(coverOnly ? "Pick a Cover" : "Find Details")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(

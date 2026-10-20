@@ -133,6 +133,7 @@ struct BookMasterBooksView: View {
             }
             #endif
             .navigationTitle("Books")
+            .scrollDismissesKeyboard(.interactively)
             .searchable(text: $query, prompt: "Search the shelf")
             .toolbar { toolbar }
             .safeAreaInset(edge: .bottom) {

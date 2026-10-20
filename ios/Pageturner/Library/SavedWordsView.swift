@@ -78,6 +78,7 @@ struct SavedWordsView: View {
         .ptSoftScrollEdges()
         .navigationTitle("Saved Words")
         .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
         .searchable(text: $query, prompt: "Words and books")
         .toolbar {
             if !all.isEmpty {

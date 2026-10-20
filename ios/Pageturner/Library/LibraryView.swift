@@ -145,6 +145,7 @@ struct LibraryView: View {
                 .allowsHitTesting(finding == nil)
                 .navigationTitle(selecting ? "\(selected.count) Selected" : "Library")
                 // the folded-in Search tab: browsing filters step aside for it
+                .scrollDismissesKeyboard(.interactively)
                 .searchable(text: $query, prompt: "Books and audiobooks")
                 .toolbar { toolbar }
                 .safeAreaInset(edge: .bottom) {

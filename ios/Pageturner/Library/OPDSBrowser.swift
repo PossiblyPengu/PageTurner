@@ -312,6 +312,7 @@ struct OPDSFeedView: View {
         .ptSoftScrollEdges()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
         .searchable(text: $query, prompt: "Search this catalogue")
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { _, text in

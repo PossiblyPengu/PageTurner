@@ -71,6 +71,7 @@ struct BookMasterSearchView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .searchable(text: $query, prompt: "Title, author or ISBN")
         .task(id: query) {
             if query.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -126,7 +127,9 @@ struct BookMasterSearchView: View {
         if let pin = hit.userBookId {
             NavigationLink { BookMasterDetailView(pin: pin) } label: {
                 Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                    .frame(minWidth: 32, minHeight: 32).contentShape(Rectangle())
             }
+            .accessibilityLabel("Open \(hit.title) on your shelf")
         } else {
             Menu {
                 ForEach(BMShelfStatus.allCases) { s in
@@ -136,7 +139,9 @@ struct BookMasterSearchView: View {
                 Image(systemName: "plus.circle.fill")
                     .font(.title3)
                     .foregroundStyle(Color.ptAccent)
+                    .frame(minWidth: 32, minHeight: 32).contentShape(Rectangle())
             }
+            .accessibilityLabel("Add \(hit.title) to a shelf")
             .disabled(busy)
         }
     }

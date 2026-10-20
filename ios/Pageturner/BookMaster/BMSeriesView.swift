@@ -183,7 +183,9 @@ struct BMSeriesDetailView: View {
             if let pin = book.userBookId {
                 NavigationLink { BookMasterDetailView(pin: pin) } label: {
                     Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                        .frame(minWidth: 32, minHeight: 32).contentShape(Rectangle())
                 }
+                .accessibilityLabel("Open \(book.title ?? "book") on your shelf")
             }
         }
     }
