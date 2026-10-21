@@ -801,7 +801,18 @@ final class AudioPlayer: ObservableObject {
 
     private func updateNowPlaying() {
         if artworkItem == nil, let image = library.cover(for: book) {
-            artworkItem = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            artworkItem = MPMediaItemArtwork(boundsSize: image.size) { size in
+                // the system asks for any shape — banner square, screen rectangle.
+                // Letterbox the jacket into the request: handing back the raw
+                // file lets a mismatched ask stretch the art.
+                let format = UIGraphicsImageRendererFormat()
+                format.scale = image.scale
+                return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                    let s = min(size.width / image.size.width, size.height / image.size.height)
+                    let w = image.size.width * s, h = image.size.height * s
+                    image.draw(in: CGRect(x: (size.width - w) / 2, y: (size.height - h) / 2, width: w, height: h))
+                }
+            }
         }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: currentChapter?.title ?? book.title,

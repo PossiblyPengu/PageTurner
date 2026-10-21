@@ -137,7 +137,9 @@ struct NowPlayingView: View {
     private var artwork: some View {
         Group {
             if let cover = player.coverImage {
-                Image(uiImage: cover).resizable().scaledToFill()
+                // the jacket's own shape — m4b art is often square but fetched
+                // covers are 2:3, and a forced square crop cut them short
+                Image(uiImage: cover).resizable().scaledToFit()
             } else {
                 ZStack {
                     LinearGradient(
@@ -147,10 +149,10 @@ struct NowPlayingView: View {
                         .font(.system(size: 72))
                         .foregroundStyle(.white.opacity(0.9))
                 }
+                .aspectRatio(1, contentMode: .fit)
             }
         }
         .frame(maxWidth: 300, maxHeight: 300)
-        .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .shadow(color: tint.opacity(player.isPlaying ? 0.5 : 0.2), radius: player.isPlaying ? 30 : 12, y: player.isPlaying ? 14 : 6)
         .scaleEffect(player.isPlaying ? 1 : 0.88)
