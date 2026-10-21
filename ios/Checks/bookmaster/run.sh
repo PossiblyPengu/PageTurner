@@ -8,7 +8,7 @@ cd "$HERE"
 command -v swift >/dev/null || { echo "swift not found — install a Swift 6 toolchain (swift.org/install)"; exit 2; }
 ./assemble.sh
 # a failed build must stop the run — otherwise the previous binary would be run and report green
-if ! swift build > .build.log 2>&1; then grep -E "error" .build.log | head -30; echo "build failed"; exit 1; fi
+if ! swift build > .build.log 2>&1; then grep -E "error:" .build.log | head -30; echo "build failed"; exit 1; fi
 tail -3 .build.log
 if [ "$1" = data ]; then BM_ONLY=data .build/debug/bmcheck; exit $?; fi
 : "${BOOKMASTER_REPO:?set BOOKMASTER_REPO to a BookMaster checkout}"
