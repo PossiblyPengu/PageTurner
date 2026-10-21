@@ -265,12 +265,12 @@ func runCatalogueChecks() {
               == "https://m.media-amazon.com/images/I/71-1WBgjGoL._SL1500_.jpg")
     check("an edition's ocaid finds its archive.org scan",
           CoverLinks.archiveScan("dune0000fran")
-              == [URL(string: "https://archive.org/services/img/dune0000fran")])
+              == [URL(string: "https://archive.org/services/img/dune0000fran")!])
 
     var rich = hit("Dune", "Frank Herbert", cover: "https://covers.openlibrary.org/b/id/1-L.jpg")
     rich.isbn = "9780441172719"
     rich.extraCoverURLs = [URL(string: "https://covers.openlibrary.org/b/id/2-L.jpg")!]
-    rich.tailCoverURLs = [URL(string: "https://archive.org/services/img/dune0000fran")]
+    rich.tailCoverURLs = [URL(string: "https://archive.org/services/img/dune0000fran")!]
     check("jackets run own art, sibling editions, guesses, then last resorts",
           rich.coverURLs[0].absoluteString.contains("/id/1-")
               && rich.coverURLs[1].absoluteString.contains("/id/2-")
