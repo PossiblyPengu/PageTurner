@@ -763,7 +763,9 @@ struct BookLookupSheet: View {
             if searching {
                 HStack {
                     ProgressView()
-                    Text("Searching Open Library, Google Books and Apple Books…")
+                    Text(book.isAudio
+                        ? "Searching Open Library, Apple Books, Google Books and Audible…"
+                        : "Searching Open Library, Apple Books and Google Books…")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -967,7 +969,7 @@ struct BookLookupSheet: View {
         Task {
             // the first source to answer shows at once; the rest add to the list as they come
             let results = await MetadataLookup.search(
-                title: askTitle, author: author, isbn: askISBN,
+                title: askTitle, author: author, isbn: askISBN, audio: book.isAudio,
                 progress: { found in if !found.isEmpty { candidates = found } })
             candidates = results
             searching = false

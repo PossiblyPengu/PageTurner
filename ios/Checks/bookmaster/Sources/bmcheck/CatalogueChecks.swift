@@ -251,4 +251,29 @@ func runCatalogueChecks() {
           merged.count == 1 && merged[0].year == "1965" && merged[0].isbn == "9780441172719")
     check("a title-less husk is dropped",
           MetadataLookup.dedupe([cand("!!!", "", source: "Open Library")]).isEmpty)
+
+    section("Cover links")
+    check("a 978 ISBN-13 becomes its ISBN-10 for Amazon's lookup",
+          CoverLinks.amazon("9780441172719")
+              == [URL(string: "https://images-na.ssl-images-amazon.com/images/P/0441172717.01.LZZZZZZZ.jpg")!])
+    check("an ISBN-10 is used as it stands",
+          CoverLinks.amazon("0441172717")
+              == [URL(string: "https://images-na.ssl-images-amazon.com/images/P/0441172717.01.LZZZZZZZ.jpg")!])
+    check("a 979 ISBN-13 has no ten-digit form", CoverLinks.amazon("9791090636071").isEmpty)
+    check("Audible art asks for the biggest marker first",
+          CoverLinks.audibleArt("https://m.media-amazon.com/images/I/71-1WBgjGoL.jpg").first?.absoluteString
+              == "https://m.media-amazon.com/images/I/71-1WBgjGoL._SL1500_.jpg")
+    check("an edition's ocaid finds its archive.org scan",
+          CoverLinks.archiveScan("dune0000fran")
+              == [URL(string: "https://archive.org/services/img/dune0000fran")])
+
+    var rich = hit("Dune", "Frank Herbert", cover: "https://covers.openlibrary.org/b/id/1-L.jpg")
+    rich.isbn = "9780441172719"
+    rich.extraCoverURLs = [URL(string: "https://covers.openlibrary.org/b/id/2-L.jpg")!]
+    rich.tailCoverURLs = [URL(string: "https://archive.org/services/img/dune0000fran")]
+    check("jackets run own art, sibling editions, guesses, then last resorts",
+          rich.coverURLs[0].absoluteString.contains("/id/1-")
+              && rich.coverURLs[1].absoluteString.contains("/id/2-")
+              && rich.coverURLs.last?.absoluteString.contains("archive.org") == true
+              && rich.coverURLs.contains { $0.absoluteString.contains("images-na.ssl-images-amazon.com") })
 }

@@ -28,12 +28,21 @@ struct CatalogueHit: Hashable {
     var bookId: String? = nil
     var status: String? = nil
 
-    /// Jacket guesses, best first: the hit's own art, then Open Library's by
-    /// ISBN and work id — each 404ing cleanly into the next.
+    /// Real jackets from sibling editions of the same work — tried after the
+    /// chosen edition's own art, before the by-ISBN guesses.
+    var extraCoverURLs: [URL] = []
+    /// Scans and other last resorts — real images, but slow and low-fi.
+    var tailCoverURLs: [URL] = []
+
+    /// Jacket guesses, best first: the hit's own art, its sibling editions',
+    /// then Open Library's by ISBN and work id, Amazon's ISBN-10 lookup, and
+    /// the scans — each 404ing cleanly into the next.
     var coverURLs: [URL] {
         var seen = Set<URL>()
         return ((coverUrl.flatMap { URL(string: $0) }.map { [$0] } ?? [])
-            + CoverLinks.isbn(isbn) + CoverLinks.openLibraryWork(openLibraryId))
+            + extraCoverURLs
+            + CoverLinks.isbn(isbn) + CoverLinks.openLibraryWork(openLibraryId)
+            + CoverLinks.amazon(isbn) + tailCoverURLs)
             .filter { seen.insert($0).inserted }
     }
 }
@@ -196,7 +205,7 @@ enum CatalogueSearch {
     /// results look identical whichever app made the call.
     private static let searchFields =
         "key,title,author_name,cover_i,first_publish_year,number_of_pages_median,subject,isbn," +
-        "editions,editions.title,editions.cover_i,editions.language"
+        "editions,editions.title,editions.cover_i,editions.language,editions.ocaid"
 
     /// The free-text search. Nil on failure rather than empty: a refused
     /// search and a genuine miss are different answers, and only the second
@@ -232,9 +241,10 @@ enum CatalogueSearch {
 
     private static func normaliseOpenLibrary(_ doc: [String: Any], query: String) -> CatalogueHit {
         let author = (doc["author_name"] as? [String])?.first ?? "Unknown"
+        let editionDocs = ((doc["editions"] as? [String: Any])?["docs"]) as? [[String: Any]] ?? []
         // The edition that best matches the query, so a work filed under a
         // translation's title can still show the one that was searched for.
-        let edition = (((doc["editions"] as? [String: Any])?["docs"]) as? [[String: Any]])?.first
+        let edition = editionDocs.first
         let shown = BookRank.preferEdition(
             work: (title: doc["title"] as? String ?? "Unknown",
                    coverI: doc["cover_i"] as? Int),
@@ -258,6 +268,16 @@ enum CatalogueSearch {
             cover = coverFromIsbn(isbn)
         }
 
+        // Sibling editions' jackets are real covers — the work's other
+        // editions often have art where the shown one has none. And an
+        // edition's `ocaid` is its archive.org scan, a last resort that is
+        // frequently the only cover an old book has anywhere.
+        let siblingCovers = editionDocs.compactMap { $0["cover_i"] as? Int }
+            .filter { $0 != shown.coverI }
+            .prefix(6).flatMap { CoverLinks.coverID($0) }
+        let scans = editionDocs.compactMap { $0["ocaid"] as? String }
+            .prefix(4).flatMap { CoverLinks.archiveScan($0) }
+
         return CatalogueHit(
             key: "ol:\(olid)",
             source: "Open Library",
@@ -269,7 +289,8 @@ enum CatalogueSearch {
             genres: ((doc["subject"] as? [String]) ?? []).prefix(5).map { $0 },
             publishedYear: doc["first_publish_year"] as? Int,
             isbn: isbn,
-            totalPages: doc["number_of_pages_median"] as? Int)
+            totalPages: doc["number_of_pages_median"] as? Int,
+            extraCoverURLs: siblingCovers, tailCoverURLs: scans)
     }
 
     /// The cover for an ISBN, if Open Library holds one. `default=false` turns

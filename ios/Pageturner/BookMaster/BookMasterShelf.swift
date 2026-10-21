@@ -31,11 +31,11 @@ struct BMShelfRow: Codable, Hashable, Identifiable {
     var isAudio: Bool { format == "audio" }
 
     /// Jacket guesses for the row, best first: the stored cover when
-    /// BookMaster knows one, then Open Library's by ISBN and work id — each
-    /// guess 404ing cleanly so the next is tried.
+    /// BookMaster knows one, then Open Library's by ISBN and work id and the
+    /// Amazon ISBN-10 last resort — each guess 404ing cleanly so the next is tried.
     var coverURLs: [URL] {
         var urls = coverUrl.flatMap { URL(string: $0) }.map { [$0] } ?? []
-        urls += CoverLinks.isbn(isbn) + CoverLinks.openLibraryWork(openLibraryId)
+        urls += CoverLinks.isbn(isbn) + CoverLinks.openLibraryWork(openLibraryId) + CoverLinks.amazon(isbn)
         return urls
     }
 

@@ -157,9 +157,11 @@ enum MetadataLookup {
     /// All sources at once. `progress` hears the merged list each time one answers (the fastest shows at once, the
     /// slowest only adds); `stopWhen` ends the search early once the list so far holds what the caller wanted.
     /// `interactive` is the fast lane for a search the reader is watching —
-    /// bulk fills take the polite one.
+    /// bulk fills take the polite one. `audio` adds Audible's catalogue —
+    /// a real source of hi-res audio jackets a print search needn't pay for.
     static func search(
         title: String, author: String, isbn: String? = nil, interactive: Bool = true,
+        audio: Bool = false,
         progress: (@MainActor ([MetadataCandidate]) -> Void)? = nil,
         stopWhen: (([MetadataCandidate]) -> Bool)? = nil
     ) async -> [MetadataCandidate] {
@@ -177,7 +179,9 @@ enum MetadataLookup {
         }
         // an ISBN names the book outright: asked of the two sources that take one, beside the title and author
         let extra = isbn.flatMap { ISBN.normalize($0) }
-        var slots: [[MetadataCandidate]] = Array(repeating: [], count: asks.count * 2 + (extra == nil ? 0 : 2))
+        let extraSlots = extra == nil ? 0 : 2
+        let audioSlots = audio ? asks.count + extraSlots / 2 : 0
+        var slots: [[MetadataCandidate]] = Array(repeating: [], count: asks.count * 2 + extraSlots + audioSlots)
         var stopped = false
         await withTaskGroup(of: (Int, [MetadataCandidate]).self) { group in
             for (n, ask) in asks.enumerated() {
@@ -187,6 +191,12 @@ enum MetadataLookup {
             if let extra {
                 group.addTask { (asks.count * 2, await catalogue(extra, interactive: interactive)) }
                 group.addTask { (asks.count * 2 + 1, await googleBooks(query: "isbn:\(extra)")) }
+            }
+            for (n, ask) in asks.enumerated() where audio {
+                group.addTask { (asks.count * 2 + extraSlots + n, await audible(title: ask.title, author: ask.author)) }
+            }
+            if audio, let extra {
+                group.addTask { (asks.count * 2 + extraSlots + asks.count, await audible(query: extra)) }
             }
             for await (index, list) in group {
                 slots[index] = list
@@ -201,7 +211,20 @@ enum MetadataLookup {
             }
         }
         let deduped = dedupe(slots.flatMap { $0 })
-        let result = await MainActor.run { pinToShelf(deduped) }
+        var result = await MainActor.run { pinToShelf(deduped) }
+        // Wikimedia's copy of a cover rides on the ISBN — one extra ask, only
+        // where a typed or scanned ISBN gave it something to find
+        if let extra {
+            let wiki = await wikimediaCovers(isbn: extra)
+            if !wiki.isEmpty {
+                result = result.map { c in
+                    guard ISBN.normalize(c.isbn ?? "") == extra else { return c }
+                    var c = c
+                    c.coverURLs.append(contentsOf: wiki.filter { !c.coverURLs.contains($0) })
+                    return c
+                }
+            }
+        }
         // a search cut short, or one where nothing came back (the network, not the book), is not worth remembering
         if !stopped, !result.isEmpty {
             await MainActor.run { remember(key, result) }
@@ -264,7 +287,7 @@ enum MetadataLookup {
         comp.queryItems = [
             URLQueryItem(name: "q", value: q),
             URLQueryItem(name: "maxResults", value: "8"),
-            URLQueryItem(name: "fields", value: "items(volumeInfo(title,authors,publishedDate,imageLinks,description,industryIdentifiers))"),
+            URLQueryItem(name: "fields", value: "items(id,volumeInfo(title,authors,publishedDate,imageLinks,description,industryIdentifiers))"),
         ]
         guard let url = comp.url,
               let (data, _) = try? await session.data(from: url),
@@ -279,11 +302,20 @@ enum MetadataLookup {
             let authors = (info["authors"] as? [String] ?? []).joined(separator: ", ")
             let year = String((info["publishedDate"] as? String ?? "").prefix(4))
             var covers: [URL] = []
+            // the publisher's frontcover serves the art at real size, far above
+            // the 128px imageLinks thumbnail
+            if let vid = item["id"] as? String,
+               let front = URL(string: "https://books.google.com/books/publisher/content?id=\(vid)&printsec=frontcover&img=1&zoom=3") {
+                covers.append(front)
+            }
             if let links = info["imageLinks"] as? [String: Any],
                let thumb = (links["thumbnail"] as? String) ?? (links["smallThumbnail"] as? String),
-               let url = URL(string: thumb.replacingOccurrences(of: "http://", with: "https://"))
+               // Google serves covers over http — force https for ATS; edge=curl
+               // is a decorative fold-shadow baked into the thumbnail
+               let url = URL(string: thumb
+                                .replacingOccurrences(of: "&edge=curl", with: "")
+                                .replacingOccurrences(of: "http://", with: "https://"))
             {
-                // Google serves covers over http — force https for ATS
                 covers.append(url)
             }
             let identifiers = (info["industryIdentifiers"] as? [[String: Any]] ?? [])
@@ -294,6 +326,58 @@ enum MetadataLookup {
                 title: t, authors: authors, year: year,
                 summary: BookText.plain(fromHTML: info["description"] as? String ?? ""),
                 isbn: isbn, coverURLs: covers, source: "Google Books")
+        }
+    }
+
+    // MARK: - Audible
+
+    /// Audible's catalogue through the community Audnexus mirror — a free-text
+    /// search returning the audiobook's own square art, its audio ISBN and its
+    /// blurb. Only asked when the caller says the book is audio: for a print
+    /// book its hits would only ever be the same work on CD.
+    private static func audible(title: String, author: String) async -> [MetadataCandidate] {
+        await audible(query: [title, author].filter { !$0.isEmpty }.joined(separator: " "))
+    }
+
+    private static func audible(query q: String) async -> [MetadataCandidate] {
+        guard !q.isEmpty,
+              var comp = URLComponents(string: "https://api.audnex.us/books/search") else { return [] }
+        comp.queryItems = [URLQueryItem(name: "q", value: q)]
+        guard let url = comp.url,
+              let (data, _) = try? await session.data(from: url),
+              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return [] }
+        return items.prefix(8).compactMap { item in
+            guard let t = item["title"] as? String, !t.isEmpty else { return nil }
+            let authors = ((item["authors"] as? [[String: Any]]) ?? [])
+                .compactMap { $0["name"] as? String }.joined(separator: ", ")
+            let isbn = ISBN.best(of: [(item["isbn"] as? String) ?? ""])
+            var covers = CoverLinks.audibleArt(item["image"] as? String)
+            covers += CoverLinks.isbn(isbn)
+            return MetadataCandidate(
+                title: t, authors: authors,
+                year: String((item["releaseDate"] as? String ?? "").prefix(4)),
+                summary: BookText.plain(fromHTML: (item["description"] as? String) ?? (item["summary"] as? String) ?? ""),
+                isbn: isbn, coverURLs: covers, source: "Audible")
+        }
+    }
+
+    // MARK: - Wikimedia
+
+    /// Cover scans Wikimedia Commons holds for an ISBN, through Inventaire's
+    /// image endpoint — `/img/entities/<hash>` under `inventaire.io`. One ask
+    /// per search, only when an ISBN was given.
+    private static func wikimediaCovers(isbn: String) async -> [URL] {
+        guard var comp = URLComponents(string: "https://inventaire.io/api/entities/images") else { return [] }
+        comp.queryItems = [URLQueryItem(name: "uris", value: "isbn:\(isbn)")]
+        guard let url = comp.url,
+              let (data, _) = try? await session.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let images = json["images"] as? [String: Any]
+        else { return [] }
+        return images.values.flatMap { entry in
+            ((entry as? [String: Any])?["claims"] as? [String] ?? [])
+                .compactMap { URL(string: "https://inventaire.io" + $0) }
         }
     }
 
@@ -336,7 +420,8 @@ enum MetadataLookup {
         }
         // the first source to name the book is enough: the others need not be waited for
         let results = await search(title: askTitle, author: askAuthor, isbn: book.isbn,
-                                   interactive: false, stopWhen: { $0.contains(where: agrees) })
+                                   interactive: false, audio: book.isAudio,
+                                   stopWhen: { $0.contains(where: agrees) })
         guard let match = results.first(where: agrees) else { return false }
 
         // the search took a while: change only these fields on the book as it is
