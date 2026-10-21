@@ -47,7 +47,10 @@ describe.skipIf(!hasPython)("safe iOS publication", () => {
     expect(rolling).toBeGreaterThan(publish);
     expect(commands.some((c) => c.includes("delete"))).toBe(false);
     const source = JSON.parse(readFileSync(join(dir, "altstore.json")));
-    expect(source.apps[0].downloadURL).toBe("https://github.com/owner/repo/releases/download/ios-build-42/Pageturner.ipa");
+    // SideStore's quick fields point at the rolling alias (always the newest build); the
+    // versions row keeps this build's own URL so the history it grows installs what it names.
+    expect(source.apps[0].downloadURL).toBe("https://github.com/owner/repo/releases/download/ios-latest/Pageturner.ipa");
+    expect(source.apps[0].versions[0].downloadURL).toBe("https://github.com/owner/repo/releases/download/ios-build-42/Pageturner.ipa");
     expect(source.apps[0].versions[0].buildVersion).toBe("110");
   });
 
