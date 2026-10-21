@@ -149,6 +149,39 @@ enum DebugScenario {
         """)
     }
 
+    /// The matches `45-lookup` shows: real Open Library jackets (the sim is online), one pinned to the
+    /// debug shelf, one the book itself, one card of two editions, one folded-in Google Books name, and
+    /// one with no art at all.
+    static func lookupCandidates() -> [MetadataCandidate] {
+        func isbnCover(_ isbn: String) -> [URL] { URL(string: "https://covers.openlibrary.org/b/isbn/\(isbn)-L.jpg").map { [$0] } ?? [] }
+        var moby = MetadataCandidate(
+            title: "Moby-Dick", authors: "Herman Melville", year: "1851",
+            summary: "The whale, again.", openLibraryId: "OL99999W",
+            coverURLs: isbnCover("9781503280786"), source: "Open Library",
+            contributors: ["Google Books"])
+        moby.isbn = "9781503280786"
+        var piranesi = MetadataCandidate(
+            title: "Piranesi", authors: "Susanna Clarke", year: "2020",
+            coverURLs: isbnCover("9781635575637"), source: "Open Library")
+        piranesi.bookmasterId = "u2"   // pinned: the debug shelf holds it
+        var neuromancer1 = MetadataCandidate(
+            title: "Neuromancer", authors: "William Gibson", year: "1984",
+            openLibraryId: "OL88888W", coverURLs: isbnCover("9780441569595"), source: "Open Library")
+        neuromancer1.isbn = "9780441569595"
+        var neuromancer2 = MetadataCandidate(
+            title: "Neuromancer", authors: "William Gibson", year: "1994",
+            openLibraryId: "OL88888W", coverURLs: isbnCover("9780739383522"), source: "Open Library")
+        neuromancer2.isbn = "9780739383522"
+        let leftHand = MetadataCandidate(
+            title: "The Left Hand of Darkness", authors: "Ursula K. Le Guin", year: "1969",
+            summary: "A lone human emissary on a planet of winter.",
+            coverURLs: isbnCover("9780441478125"), source: "Google Books")
+        let nameOfWind = MetadataCandidate(
+            title: "The Name of the Wind", authors: "Patrick Rothfuss", year: "2007",
+            summary: "A hero tells how heroism led him astray.", source: "Apple Books")
+        return [moby, piranesi, neuromancer1, neuromancer2, leftHand, nameOfWind]
+    }
+
     static func run(library: LibraryStore, router: AppRouter, selectTab: @escaping (AppTab) -> Void) async {
         if defaults.bool(forKey: "PTDebugSpeechProbe") { Task { await SpeechProbe.run() } }
         if let voice = defaults.string(forKey: "PTDebugNeuralProbe") {
@@ -196,6 +229,14 @@ enum DebugScenario {
             }
             router.detail = cloudBook
         case "edit": router.editing = text
+        // the lookup sheet with a fixed result set: the shelf pin, a folded-in second source,
+        // a multi-edition card, the current match and one with no art — `debugLookup` in
+        // LibraryView reads -PTDebugScreen and shows it
+        case "lookup":
+            if let text {
+                library.mutate(text.id) { $0.openLibraryId = "OL99999W" }
+            }
+            selectTab(.library)
         case "shelves": if let text { router.openShelves([text.id]) }
         case "reader": router.reading = text; selectTab(.reading)
         case "pdf": router.reading = library.books.first { $0.ext == "pdf" }; selectTab(.reading)

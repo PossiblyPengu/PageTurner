@@ -52,7 +52,9 @@ struct VoiceListView: View {
     private func chrome<V: View>(_ content: V) -> some View {
         content
             .scrollDismissesKeyboard(.interactively)
-            .searchable(text: $query, prompt: source == .device ? "Search voices" : "Search neural voices")
+            // pinned under the title: in a sheet the automatic spot docks over the list's last row
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: source == .device ? "Search voices" : "Search neural voices")
             .navigationTitle("Voice")
             .navigationBarTitleDisplayMode(.inline)
             .tint(.ptAccent)

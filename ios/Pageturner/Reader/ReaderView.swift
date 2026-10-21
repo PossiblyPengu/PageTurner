@@ -21,10 +21,14 @@ struct ReaderView: View {
     /// The way out of the book: the Reading tab is the book's home, so leaving
     /// it is a tab switch, not a dismissal.
     private let onBack: () -> Void
+    private let library: LibraryStore
+    /// The cover's small lean-in while the book loads.
+    @State private var opening = false
 
     init(book: Book, library: LibraryStore, onBack: @escaping () -> Void) {
         // a book still being read aloud after its reader was left comes back as the same reader
         _model = StateObject(wrappedValue: ReadAloudHost.shared.take(for: book) ?? ReaderModel(book: book, library: library))
+        self.library = library
         self.onBack = onBack
     }
 
@@ -40,6 +44,7 @@ struct ReaderView: View {
     private var layout: some View {
         ZStack {
             content
+                .ptAnimation(.smooth(duration: 0.4), value: model.phase)
             // the evening light and the ruler sit over the page, under the controls
             ReaderVeil(dim: model.settings.dim, warmth: model.settings.warmth)
             if model.settings.ruler, model.phase == .ready {
@@ -226,13 +231,12 @@ struct ReaderView: View {
     private var content: some View {
         switch model.phase {
         case .loading:
-            ProgressView("Opening…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemBackground).ignoresSafeArea())
+            openingCover
         case .ready:
             if let controller = model.navigatorController {
                 NavigatorRepresentable(controller: controller)
                     .ignoresSafeArea()
+                    .transition(.opacity)
             }
         case let .failed(message):
             VStack(spacing: 16) {
@@ -252,6 +256,41 @@ struct ReaderView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemBackground).ignoresSafeArea())
         }
+    }
+
+    /// While the book loads: its jacket leans in over the page's own colour, so the flip
+    /// to the text is a settling fade, not a spinner on blank.
+    private var openingCover: some View {
+        VStack(spacing: 24) {
+            Spacer(minLength: 0)
+            BookCoverView(book: model.book, cover: library.coverThumbnail(for: model.book, maxPixels: 720),
+                          showsBadges: false, corner: 16)
+                .frame(width: 200)
+                .scaleEffect(opening ? 1 : 0.9)
+                .opacity(opening ? 1 : 0)
+            Text(model.book.title)
+                .font(.system(.title3, design: .serif).weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .padding(.horizontal, 40)
+                .opacity(opening ? 1 : 0)
+            ProgressView().controlSize(.small)
+                .opacity(opening ? 0.7 : 0)
+            Spacer(minLength: 0)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(pageBackground.ignoresSafeArea())
+        .onAppear { withAnimation(.smooth(duration: 0.45)) { opening = true } }
+        .transition(.opacity)
+    }
+
+    /// The page's own colour while it is coming up.
+    private var pageBackground: Color {
+        let hex = model.activeSettings.theme.background
+        return Color(red: Double((hex >> 16) & 0xFF) / 255,
+                     green: Double((hex >> 8) & 0xFF) / 255,
+                     blue: Double(hex & 0xFF) / 255)
     }
 
     /// Back, the title, and the page's tools — floating on glass over the page.
@@ -694,7 +733,7 @@ struct ReaderView: View {
     }
 }
 
-private extension View {
+extension View {
     /// Hide the app's tab bar while the reader's own chrome is down — iOS 18 renamed
     /// the modifier but kept the meaning.
     @ViewBuilder

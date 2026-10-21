@@ -63,6 +63,8 @@ struct BMLinkPrompt: View {
             Button { router.showLink = true } label: {
                 Label("Link BookMaster", systemImage: "link")
                     .frame(maxWidth: .infinity)
+                    // hug the button's edges at giant text instead of breaking mid-title
+                    .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.75)
             }
             .buttonStyle(.borderedProminent)
             .tint(.ptAccent)

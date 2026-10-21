@@ -18,6 +18,8 @@ struct LibraryView: View {
     @State private var findTask: Task<Void, Never>?
     /// The books "Find Details" couldn't match, offered by the result alert.
     @State private var findMisses: [UUID] = []
+    /// The lookup sheet's fixture, for the simulator screenshot run only.
+    @State private var debugLookup: Book?
     /// The misses being walked through one lookup sheet at a time — `reviewBook`
     /// is the one on screen, `reviewPicked` says its sheet ended on a pick (a
     /// pick steps the queue on, a cancel ends the review).
@@ -148,18 +150,27 @@ struct LibraryView: View {
                 .scrollDismissesKeyboard(.interactively)
                 .searchable(text: $query, prompt: "Books and audiobooks")
                 .toolbar { toolbar }
+                // selecting takes over the bottom edge — the floating tab bar would bleed
+                // through the glass capsule under it
+                .tabBarChrome(!selecting)
                 .safeAreaInset(edge: .bottom) {
                     if selecting { selectionBar }
                 }
                 .overlay { if let finding { findingCard(finding) } }
             ))
             #if DEBUG
-            // CI simulator run: start in select mode with two books ticked (Debug/DebugScenario.swift)
+            // CI simulator run: start in select mode with two books ticked, or show the
+            // lookup sheet over a fixed set of matches (Debug/DebugScenario.swift)
             .task {
-                guard UserDefaults.standard.string(forKey: "PTDebugLibraryMode") == "select" else { return }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                selecting = true
-                selected = Set(library.books.prefix(2).map(\.id))
+                if UserDefaults.standard.string(forKey: "PTDebugLibraryMode") == "select" {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    selecting = true
+                    selected = Set(library.books.prefix(2).map(\.id))
+                }
+                if UserDefaults.standard.string(forKey: "PTDebugScreen") == "lookup" {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    debugLookup = library.books.first { $0.title == "Moby-Dick" } ?? library.books.first
+                }
             }
             #endif
         }
@@ -173,6 +184,13 @@ struct LibraryView: View {
             .sheet(isPresented: $showHighlights) { HighlightsHubView() }
             .sheet(isPresented: $showCatalogs) { NavigationStack { OPDSCatalogsView() } }
             // the misses "Find Details" couldn't match, one lookup sheet at a time
+            #if DEBUG
+            // the simulator run's photograph of this sheet: a fixed answer set, no network
+            .sheet(item: $debugLookup) { book in
+                BookLookupSheet(book: book, initialResults: DebugScenario.lookupCandidates(),
+                                onPick: { _, _ in })
+            }
+            #endif
             .sheet(item: $reviewBook, onDismiss: reviewSheetClosed) { book in
                 BookLookupSheet(book: book, modeSwitchable: true,
                     onPick: { candidate, coverOnly in
@@ -461,6 +479,8 @@ struct LibraryView: View {
         .padding(.vertical, 6)
         .ptGlassCapsule()
         .padding(.bottom, 6)
+        // the floating chat button would sit on the rightmost action while this is up
+        .hidesChatButton()
         .disabled(selected.isEmpty || finding != nil)
     }
 

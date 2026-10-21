@@ -73,22 +73,41 @@ struct DuplicatesSheet: View {
 struct BackupReminder: View {
     let onBackUp: () -> Void
     let onLater: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "externaldrive.badge.checkmark").foregroundStyle(Color.ptAccent).font(.title3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Back up your library").font(.subheadline.weight(.semibold))
+        // a side column of buttons leaves the text a sliver at accessibility sizes — stack instead
+        if typeSize.isAccessibilityCategory {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "externaldrive.badge.checkmark").foregroundStyle(Color.ptAccent)
+                    Text("Back up your library").font(.subheadline.weight(.semibold))
+                }
                 Text("A sideloaded app can be wiped when its signing lapses. A backup keeps your books, places and highlights.")
                     .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 18) {
+                    Button("Back Up", action: onBackUp).font(.subheadline.weight(.semibold))
+                    Button("Later", action: onLater).font(.caption).foregroundStyle(.secondary)
+                }
             }
-            Spacer(minLength: 0)
-            VStack(spacing: 6) {
-                Button("Back Up", action: onBackUp).font(.subheadline.weight(.semibold))
-                Button("Later", action: onLater).font(.caption).foregroundStyle(.secondary)
+            .padding(12)
+            .background(Color.ptAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        } else {
+            HStack(spacing: 12) {
+                Image(systemName: "externaldrive.badge.checkmark").foregroundStyle(Color.ptAccent).font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Back up your library").font(.subheadline.weight(.semibold))
+                    Text("A sideloaded app can be wiped when its signing lapses. A backup keeps your books, places and highlights.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                VStack(spacing: 6) {
+                    Button("Back Up", action: onBackUp).font(.subheadline.weight(.semibold))
+                    Button("Later", action: onLater).font(.caption).foregroundStyle(.secondary)
+                }
             }
+            .padding(12)
+            .background(Color.ptAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .padding(12)
-        .background(Color.ptAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }

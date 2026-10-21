@@ -69,6 +69,8 @@ shot 03-detail 6 -PTDebugScreen detail
 shot 03a-detail-cloud 6 -PTDebugScreen clouddetail
 shot 03b-detail-downloading 6 -PTDebugScreen clouddetail -PTDebugCloudState downloading
 shot 04-edit 6 -PTDebugScreen edit
+# the metadata/cover lookup over a fixed answer set: shelf pin, contributors, a multi-edition card
+shot 45-lookup 16 -PTDebugSeed 1 -PTDebugScreen lookup
 shot 05-shelves 6 -PTDebugScreen shelves
 shot 06-stats 6 -PTDebugScreen stats
 shot 07-together 6 -PTDebugScreen together

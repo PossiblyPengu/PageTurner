@@ -677,9 +677,11 @@ struct BookLookupSheet: View {
     }
 
     /// `seeded` lets the edit sheet start the search from its working fields
-    /// rather than the stored book's.
+    /// rather than the stored book's. `initialResults` is the screenshot
+    /// fixture: results already on hand — no search is run for them.
     init(book: Book, seeded: (title: String, author: String, isbn: String)? = nil,
          coverOnly: Bool = false, modeSwitchable: Bool = false,
+         initialResults: [MetadataCandidate]? = nil,
          onPick: @escaping (MetadataCandidate, _ coverOnly: Bool) -> Void,
          onPickCropped: ((UIImage) -> Void)? = nil) {
         self.book = book
@@ -690,6 +692,7 @@ struct BookLookupSheet: View {
         _title = State(initialValue: seeded?.title ?? book.title)
         _author = State(initialValue: seeded?.author ?? book.author)
         _isbn = State(initialValue: seeded?.isbn ?? book.isbn ?? "")
+        _candidates = State(initialValue: initialResults)
     }
 
     var body: some View {
@@ -749,7 +752,7 @@ struct BookLookupSheet: View {
                         dismiss()
                     } })
             }
-            .task { search() }
+            .task { if candidates == nil { search() } }
         }
         // a grid of jackets wants the height: at the medium stop one row shows under the fields
         .presentationDetents([.large])
