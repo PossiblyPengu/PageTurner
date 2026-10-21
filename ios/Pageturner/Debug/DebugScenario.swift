@@ -53,7 +53,11 @@ enum DebugScenario {
          {"userBookId":"u3","bookId":"b3","title":"The Dispossessed","author":"Ursula K. Le Guin","status":"want_to_read","upNext":2},
          {"userBookId":"u4","bookId":"b4","title":"Hyperion","author":"Dan Simmons","status":"reading","percent":64,"format":"paper"},
          {"userBookId":"u5","bookId":"b5","title":"Emma","author":"Jane Austen","status":"read","rating":4},
-         {"userBookId":"u6","bookId":"b6","title":"Walden","author":"Henry David Thoreau","status":"abandoned"}]
+         {"userBookId":"u6","bookId":"b6","title":"Walden","author":"Henry David Thoreau","status":"abandoned"},
+         {"userBookId":"u11","bookId":"b11","title":"The Left Hand of Darkness","author":"Ursula K. Le Guin","status":"want_to_read","isbn":"9780441478125"},
+         {"userBookId":"u12","bookId":"b12","title":"Neuromancer","author":"William Gibson","status":"want_to_read","isbn":"9780441569595"},
+         {"userBookId":"u13","bookId":"b13","title":"Foundation","author":"Isaac Asimov","status":"want_to_read","isbn":"9780553293357"},
+         {"userBookId":"u14","bookId":"b14","title":"The Name of the Wind","author":"Patrick Rothfuss","status":"want_to_read","isbn":"9780756404741"}]
         """) ?? []
         let together: BMTogether? = decode("""
         {"partner":{"name":"Sam","online":true,"reading":{"title":"Dune","author":"Frank Herbert","percent":41}},
@@ -179,7 +183,7 @@ enum DebugScenario {
             Log.event("qlvector", "the cipher opens what the web's recipe made")
             selectTab(.together)
         // the Books tab hosts the shelf and pushes the rest itself
-        case "shelf", "bmbook", "bmquotes", "bmdiscover", "bmsearch", "bmseries":
+        case "shelf", "bmbook", "bmquotes", "bmdiscover", "bmsearch", "bmseries", "bmpick":
             selectTab(.books)
         case "settings": router.showSettings = true
         case "detail": router.detail = text

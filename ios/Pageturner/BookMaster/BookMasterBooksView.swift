@@ -16,6 +16,9 @@ struct BookMasterBooksView: View {
     @State private var selecting = false
     @State private var selected: Set<String> = []
     @State private var pick: BMShelfRow?
+    /// The case-opening sheet is up; its winner is carried to `pick` when it settles.
+    @State private var reeling = false
+    @State private var picked: BMShelfRow?
     @State private var pushing: Push?
     @State private var error: String?
     @State private var confirmRemove = false
@@ -120,6 +123,12 @@ struct BookMasterBooksView: View {
             .navigationDestination(item: $pick) { row in
                 BookMasterDetailView(pin: row.userBookId)
             }
+            // the winner is set while the reel is still dismissing — push it after
+            .sheet(isPresented: $reeling, onDismiss: {
+                if let picked { pick = picked; self.picked = nil }
+            }) {
+                BMPickReel(books: toRead) { picked = $0 }
+            }
             #if DEBUG
             .task {
                 switch UserDefaults.standard.string(forKey: "PTDebugScreen") {
@@ -128,6 +137,7 @@ struct BookMasterBooksView: View {
                 case "bmsearch": pushing = .find
                 case "bmseries": pushing = .series
                 case "bmbook": pushing = .book
+                case "bmpick": reeling = true
                 default: break
                 }
             }
@@ -322,7 +332,7 @@ struct BookMasterBooksView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { pick = toRead.randomElement() } label: {
+                Button { reeling = true } label: {
                     Label("Pick for me", systemImage: "dice.fill")
                 }
                 .buttonStyle(.borderedProminent).tint(.ptAccent)
