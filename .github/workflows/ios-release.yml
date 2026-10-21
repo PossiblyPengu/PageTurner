@@ -125,12 +125,19 @@ jobs:
           } > notes.md
           cat notes.md
 
-      # The source the release carries points at the ios-stable alias, not this
-      # tag — adding it follows every stable update, not just this version.
+      # The source's own fields point at the ios-stable alias so adding it follows every
+      # stable update; each `versions` row keeps its own tag's IPA, so history installs
+      # the version it names. The published feed is merged in, keeping the older rows.
       - name: Publish the release and the stable source
         run: |
           SURL="https://github.com/$REPO/releases/download/ios-stable/Pageturner.ipa"
-          python3 ios/scripts/make-altstore-source.py out/Pageturner.ipa "$REPO" "$SURL" out/altstore.json stable
+          TURL="https://github.com/$REPO/releases/download/$TAG/Pageturner.ipa"
+          FEED="https://github.com/$REPO/releases/download/ios-stable/altstore.json"
+          curl -sfL "$FEED" -o out/altstore-prev.json 2>/dev/null || rm -f out/altstore-prev.json
+          python3 ios/scripts/make-altstore-source.py out/Pageturner.ipa "$REPO" "$TURL" out/altstore.json stable \
+            --alias-url "$SURL" --source-url "$FEED" --news-url "https://github.com/$REPO/releases/tag/$TAG" \
+            $([ -s notes.md ] && printf '%s' "--notes notes.md") \
+            $([ -f out/altstore-prev.json ] && printf '%s' "--previous out/altstore-prev.json")
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             gh release upload "$TAG" out/Pageturner.ipa out/altstore.json --repo "$REPO" --clobber
             gh release edit "$TAG" --repo "$REPO" --latest

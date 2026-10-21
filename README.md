@@ -53,10 +53,12 @@ To link BookMaster, tap the gear in the library → **Link BookMaster** (or the 
 
 ### Update without reinstalling by hand
 
-Add a source once in AltStore or SideStore (Sources → +) and new builds show up as updates:
+Add a source once in AltStore or SideStore (Sources → +) and new builds show up as updates — [pageturner.pages.dev](https://pageturner.pages.dev/about.html) has tap-to-add buttons for both apps:
 
-- Stable: `https://github.com/PossiblyPengu/PageTurner/releases/download/ios-stable/altstore.json`
-- Nightly: `https://github.com/PossiblyPengu/PageTurner/releases/download/ios-latest/altstore.json`
+- Stable: `https://pageturner.pages.dev/altstore.json`
+- Nightly: `https://pageturner.pages.dev/altstore-nightly.json`
+
+(Those redirect to the rolling-release feeds, so `releases/download/ios-stable/altstore.json` and `releases/download/ios-latest/altstore.json` work too.) The feed lists recent versions with notes and the permissions the IPA actually declares; a news entry per stable release is what makes the apps badge the update.
 
 Every green build on `main` publishes the nightly source (the **Publish iOS build** workflow does the same by hand for any run you pick); every `v*` tag refreshes the stable one. Every build has a higher build number than the one before, which is what makes the app offer it as an update. A tag must equal `version` in `package.json` — `npm run version 2.8.0`, commit, tag `v2.8.0`, push both.
 

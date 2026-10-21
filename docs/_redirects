@@ -1,0 +1,6 @@
+# Short, stable addresses for the AltStore / SideStore feeds and the signed-user IPA.
+# The feeds themselves live as rolling-release assets; these paths never change.
+/altstore.json          https://github.com/PossiblyPengu/PageTurner/releases/download/ios-stable/altstore.json   302
+/altstore-nightly.json  https://github.com/PossiblyPengu/PageTurner/releases/download/ios-latest/altstore.json    302
+/Pageturner.ipa         https://github.com/PossiblyPengu/PageTurner/releases/download/ios-stable/Pageturner.ipa   302
+/Pageturner-beta.ipa    https://github.com/PossiblyPengu/PageTurner/releases/download/ios-latest/Pageturner.ipa   302

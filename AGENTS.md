@@ -24,6 +24,11 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 - Push, then read the run's result before pushing again — the workflow cancels an in-progress run
   on the same branch, so back-to-back pushes never report. Compiler errors are in the job log
   (`grep "error: "`); the job summary also lists diagnostics.
+- AltStore/SideStore feeds: `ios/scripts/make-altstore-source.py` writes `altstore.json` (versions history,
+  news, `appPermissions.privacy` = the IPA's own `NS*UsageDescription` keys — AltStore refuses a mismatch).
+  `ios.yml` rolls it onto the `ios-latest` release each green build (`ios/scripts/publish-release.sh`);
+  `ios-release.yml` rolls `ios-stable` per tag. `docs/_redirects` exposes both as
+  `pageturner.pages.dev/altstore[-nightly].json`; source screenshots live in `docs/ios/`.
 - `.github/workflows/ios-sim.yml` (two parallel halves, `screens` and `voices`, artifacts `simulator-screens-<half>`) is the nearest thing to looking at the app: a **Debug** build in the
   iOS Simulator, launched once per screen (`ios/scripts/simulator-shots.sh`) and photographed; the
   `simulator-screens` artifact holds PNGs, the app's log and any crash report. The launch arguments

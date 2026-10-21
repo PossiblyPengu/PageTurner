@@ -18,6 +18,13 @@
   li { margin: .35rem 0; }
   a { color: var(--accent); }
   .links { margin-top: 2rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); display: flex; gap: 1.2rem; flex-wrap: wrap; }
+  .install { margin-top: 2rem; padding: 1.1rem 1.25rem; border: 1px solid var(--rule); border-radius: 14px; }
+  .install h2 { font-size: 1.05rem; margin: 0 0 .4rem; }
+  .install p { color: var(--muted); margin: .3rem 0 .9rem; font-size: .95rem; }
+  .install .btns { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: .55rem .95rem; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); text-decoration: none; font-weight: 600; font-size: .95rem; }
+  .btn.primary { background: var(--accent); color: var(--bg); }
+  .install code { font-size: .82rem; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -31,6 +38,17 @@
     <li>Optional: link BookMaster to keep your reading in sync and chat with another reader; connect Google Drive to add books from it and back your library up.</li>
     <li>No account, no ads, no tracking. Your library lives on your device.</li>
   </ul>
+  <section class="install">
+    <h2>Put it on your iPhone</h2>
+    <p>Sideload the IPA with AltStore or SideStore, then add the source once — new builds arrive as updates.</p>
+    <div class="btns">
+      <a class="btn primary" href="altstore://source?url=https%3A%2F%2Fpageturner.pages.dev%2Faltstore.json">Add to AltStore</a>
+      <a class="btn primary" href="sidestore://source?url=https%3A%2F%2Fpageturner.pages.dev%2Faltstore.json">Add to SideStore</a>
+      <a class="btn" href="Pageturner.ipa">Download the IPA</a>
+    </div>
+    <p style="margin-top:.9rem">Living on the edge? The nightly feed follows every build:
+      <code>pageturner.pages.dev/altstore-nightly.json</code></p>
+  </section>
   <div class="links">
     <a href="./">Open the web app</a>
     <a href="https://github.com/PossiblyPengu/PageTurner/releases/latest">Get the iPhone app</a>
