@@ -53,6 +53,10 @@ struct LibrarySettingsPage: View {
     @State private var showFolderPicker = false
     @State private var message: String?
     @State private var confirmResetStats = false
+    @State private var hardcoverToken = ""
+    @State private var hardcoverSaved = HardcoverClient.hasToken
+    @State private var hardcoverBusy = false
+    @State private var hardcoverResult: String?
     @AppStorage(SpotlightIndexer.enabledKey) private var spotlight = true
     @AppStorage("stats-tracking") private var statsTracking = true
     private let watcher = FolderWatcher.shared
@@ -60,6 +64,7 @@ struct LibrarySettingsPage: View {
     var body: some View {
         Form {
             autoImport
+            hardcover
             searchAndStats
         }
         .navigationTitle("Library & import")
@@ -103,6 +108,50 @@ struct LibrarySettingsPage: View {
             switch result {
             case let .success(url): Task { await watcher.watch(url, library: library) }
             case let .failure(error): message = error.localizedDescription
+            }
+        }
+    }
+
+    private var hardcover: some View {
+        Section {
+            SecureField("API token", text: $hardcoverToken)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if !hardcoverToken.isEmpty {
+                Button("Save and Test") { saveHardcover() }
+                    .disabled(hardcoverBusy)
+            }
+            if hardcoverSaved {
+                Button("Remove Token", role: .destructive) {
+                    HardcoverVault.remove()
+                    hardcoverToken = ""
+                    hardcoverSaved = false
+                    hardcoverResult = nil
+                }
+            }
+            if let hardcoverResult { Text(hardcoverResult).font(.footnote).foregroundStyle(.secondary) }
+        } header: {
+            Text("Hardcover")
+        } footer: {
+            Text("Adds Hardcover’s catalogue — modern books, series and covers — to Find Details. Get a free token at hardcover.app/account/api and paste it here. It stays in this iPhone’s Keychain and is sent only to Hardcover.")
+        }
+    }
+
+    private func saveHardcover() {
+        hardcoverBusy = true
+        hardcoverResult = "Testing…"
+        HardcoverVault.write(hardcoverToken)
+        Task {
+            let problem = await HardcoverClient.test()
+            hardcoverBusy = false
+            if let problem {
+                HardcoverVault.remove()
+                hardcoverSaved = false
+                hardcoverResult = problem
+            } else {
+                hardcoverSaved = true
+                hardcoverToken = ""
+                hardcoverResult = "Connected. Hardcover is on."
             }
         }
     }

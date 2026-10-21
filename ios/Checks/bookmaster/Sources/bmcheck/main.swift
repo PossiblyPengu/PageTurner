@@ -147,6 +147,7 @@ func runData() async {
     runVoiceDSPChecks()
     runPlayheadChecks()
     runCatalogueChecks()
+    runHardcoverChecks()
     runTextBook()
 }
 

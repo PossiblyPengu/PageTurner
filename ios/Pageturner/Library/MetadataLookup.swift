@@ -165,7 +165,8 @@ enum MetadataLookup {
         progress: (@MainActor ([MetadataCandidate]) -> Void)? = nil,
         stopWhen: (([MetadataCandidate]) -> Bool)? = nil
     ) async -> [MetadataCandidate] {
-        let key = (title + "|" + author + "|" + (isbn ?? "")).lowercased()
+        // a list made without Hardcover is not what a reader with a token should be handed back
+        let key = (title + "|" + author + "|" + (isbn ?? "") + (HardcoverClient.hasToken ? "|hc" : "")).lowercased()
         if let hit = await MainActor.run(body: { recalled(key) }) {
             await progress?(hit)
             return hit
@@ -181,7 +182,11 @@ enum MetadataLookup {
         let extra = isbn.flatMap { ISBN.normalize($0) }
         let extraSlots = extra == nil ? 0 : 2
         let audioSlots = audio ? asks.count + extraSlots / 2 : 0
-        var slots: [[MetadataCandidate]] = Array(repeating: [], count: asks.count * 2 + extraSlots + audioSlots)
+        // Hardcover answers only with the reader's own token (Settings → Library & import)
+        let hardcover = HardcoverClient.hasToken
+        let hardcoverBase = asks.count * 2 + extraSlots + audioSlots
+        let hardcoverSlots = hardcover ? asks.count + extraSlots / 2 : 0
+        var slots: [[MetadataCandidate]] = Array(repeating: [], count: hardcoverBase + hardcoverSlots)
         var stopped = false
         await withTaskGroup(of: (Int, [MetadataCandidate]).self) { group in
             for (n, ask) in asks.enumerated() {
@@ -197,6 +202,12 @@ enum MetadataLookup {
             }
             if audio, let extra {
                 group.addTask { (asks.count * 2 + extraSlots + asks.count, await audible(query: extra)) }
+            }
+            if hardcover {
+                for (n, ask) in asks.enumerated() {
+                    group.addTask { (hardcoverBase + n, await hardcoverBooks([ask.title, ask.author].filter { !$0.isEmpty }.joined(separator: " "))) }
+                }
+                if let extra { group.addTask { (hardcoverBase + asks.count, await hardcoverBooks(extra)) } }
             }
             for await (index, list) in group {
                 slots[index] = list
@@ -326,6 +337,18 @@ enum MetadataLookup {
                 title: t, authors: authors, year: year,
                 summary: BookText.plain(fromHTML: info["description"] as? String ?? ""),
                 isbn: isbn, coverURLs: covers, source: "Google Books")
+        }
+    }
+
+    // MARK: - Hardcover
+
+    private static func hardcoverBooks(_ query: String) async -> [MetadataCandidate] {
+        await HardcoverClient.search(query).map { hit in
+            MetadataCandidate(
+                title: hit.title, authors: hit.authors, year: hit.year, summary: hit.summary,
+                isbn: hit.isbn.flatMap { ISBN.normalize($0) },
+                coverURLs: (hit.coverURL.map { [$0] } ?? []) + CoverLinks.isbn(hit.isbn) + CoverLinks.amazon(hit.isbn),
+                source: "Hardcover")
         }
     }
 
