@@ -19,7 +19,9 @@ enum HardcoverCore {
     /// A token as Hardcover shows it ("Bearer eyJ…") or bare: the header always carries "Bearer <token>".
     static func authorization(_ raw: String) -> String? {
         var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if t.lowercased().hasPrefix("bearer ") { t = String(t.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+        if t.lowercased().hasPrefix("bearer"), t.dropFirst(6).first?.isWhitespace ?? true {
+            t = String(t.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+        }
         return t.isEmpty ? nil : "Bearer \(t)"
     }
 
