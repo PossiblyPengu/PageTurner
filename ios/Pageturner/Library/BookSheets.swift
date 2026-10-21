@@ -789,7 +789,7 @@ struct BookLookupSheet: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    let shown = pickable.filter { active == nil || chipKey($0) == active }
+                    let shown = pickable.filter { active == nil || sourceKeys($0).contains(active!) }
                     let groups = editionGroups(of: shown)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 126), spacing: 14)], spacing: 18) {
                         ForEach(groups) { set in card(set) }
@@ -836,6 +836,19 @@ struct BookLookupSheet: View {
                                 .padding(6)
                         }
                     }
+                    .overlay(alignment: .bottomLeading) {
+                        // already on the reader's BookMaster shelf — a pin the pick lands on
+                        if set.editions.contains(where: { $0.bookmasterId != nil })
+                           && !set.editions.contains(where: isCurrent) {
+                            Text("On shelf")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .ptGlassCapsule()
+                                .padding(6)
+                        }
+                    }
                     .overlay(alignment: .bottomTrailing) {
                         if set.editions.count > 1 {
                             Text("\(set.editions.count) editions")
@@ -850,7 +863,7 @@ struct BookLookupSheet: View {
                     .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
                 Text(c.title).font(.caption.weight(.medium)).lineLimit(2)
                 Text(c.authors).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                Text([c.year, c.source].filter { !$0.isEmpty }.joined(separator: " · "))
+                Text([c.year, sourceKeys(c).joined(separator: " · ")].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .top)
@@ -894,17 +907,17 @@ struct BookLookupSheet: View {
             || (ISBN.normalize(c.isbn ?? "") != nil && ISBN.normalize(c.isbn ?? "") == book.isbn)
     }
 
-    /// The chip a match sorts under: a match pinned to the reader's shelf
-    /// sorts under "BookMaster", the rest go by the name the source gave.
-    private func chipKey(_ c: MetadataCandidate) -> String {
-        c.source.contains("BookMaster") ? "BookMaster" : c.source
+    /// The names a match answers to in the sources bar — its own catalogue
+    /// plus every other one folded in by dedupe. A shelf pin is a fact about
+    /// the book, not a source, so a name carrying "BookMaster" never chips.
+    private func sourceKeys(_ c: MetadataCandidate) -> [String] {
+        ([c.source] + c.contributors).filter { !$0.contains("BookMaster") }
     }
 
     /// The chip names, in the order the matches first bring them.
     private func sources(in pickable: [MetadataCandidate]) -> [String] {
         pickable.reduce(into: [String]()) { keys, c in
-            let key = chipKey(c)
-            if !keys.contains(key) { keys.append(key) }
+            for key in sourceKeys(c) where !keys.contains(key) { keys.append(key) }
         }
     }
 
@@ -1049,7 +1062,9 @@ private struct CoverPreviewSheet: View {
                     Text(shown.authors)
                         .foregroundStyle(.secondary)
                 }
-                Text([shown.year, shown.source].filter { !$0.isEmpty }.joined(separator: " · "))
+                Text([shown.year,
+                      ([shown.source] + shown.contributors).filter { !$0.contains("BookMaster") }.joined(separator: " · ")]
+                        .filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
 

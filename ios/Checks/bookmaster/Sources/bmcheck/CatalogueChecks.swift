@@ -206,4 +206,49 @@ func runCatalogueChecks() {
     check("pin flags the shelved hit only",
           books[0].userBookId == "ub1" && books[0].bookId == "b1" && books[0].status == "reading"
               && books[1].userBookId == nil)
+
+    section("Metadata dedupe (the sources line)")
+    func cand(_ title: String, _ author: String, source: String, year: String = "",
+              isbn: String? = nil, covers: [String] = []) -> MetadataCandidate {
+        MetadataCandidate(title: title, authors: author, year: year, isbn: isbn,
+                          coverURLs: covers.compactMap { URL(string: $0) }, source: source)
+    }
+    var merged = MetadataLookup.dedupe([
+        cand("Dune", "Frank Herbert", source: "Open Library", year: "1965",
+             covers: ["https://covers.openlibrary.org/b/id/1-L.jpg"]),
+        cand("Dune", "Frank Herbert", source: "Google Books",
+             covers: ["https://books.google.com/books/content?id=x"]),
+    ])
+    check("two catalogues' same book folds to one", merged.count == 1)
+    check("the folded-in source is still named",
+          merged.count == 1 && merged[0].source == "Open Library"
+              && merged[0].contributors == ["Google Books"])
+    check("its jacket joins the fallback chain",
+          merged.count == 1 && merged[0].coverURLs.count == 2
+              && merged[0].coverURLs[0].absoluteString.contains("openlibrary"))
+
+    merged = MetadataLookup.dedupe([
+        cand("Dune", "Frank Herbert", source: "Open Library"),
+        cand("Dune", "Frank Herbert", source: "Apple Books", year: "1965"),
+        cand("Dune", "Frank Herbert", source: "Google Books"),
+        cand("Dune Messiah", "Frank Herbert", source: "Open Library"),
+    ])
+    check("a three-way fold keeps every name, a different book keeps its row",
+          merged.count == 2 && merged[0].contributors == ["Apple Books", "Google Books"]
+              && merged[0].year == "1965" && merged[1].contributors.isEmpty)
+
+    var folded = cand("Dune", "Frank Herbert", source: "Apple Books")
+    folded.contributors = ["Google Books"]
+    merged = MetadataLookup.dedupe([cand("Dune", "Frank Herbert", source: "Open Library"), folded])
+    check("a folded-in match's own contributors come along",
+          merged.count == 1 && merged[0].contributors == ["Apple Books", "Google Books"])
+
+    merged = MetadataLookup.dedupe([
+        cand("Dune", "Frank Herbert", source: "Open Library", isbn: "9780441172719"),
+        cand("Dune", "Frank Herbert", source: "Google Books", year: "1965"),
+    ])
+    check("the survivor borrows what it lacked",
+          merged.count == 1 && merged[0].year == "1965" && merged[0].isbn == "9780441172719")
+    check("a title-less husk is dropped",
+          MetadataLookup.dedupe([cand("!!!", "", source: "Open Library")]).isEmpty)
 }

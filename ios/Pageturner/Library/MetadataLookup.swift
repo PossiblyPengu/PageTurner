@@ -18,6 +18,10 @@ struct MetadataCandidate: Identifiable, Hashable, Codable {
     var coverURLs: [URL] = []
     var coverURL: URL? { coverURLs.first }
     var source: String
+    /// Other catalogues that named the same book — the same title and author
+    /// under a second source merges into one card (`dedupe`), and this says who
+    /// was folded in, so the sources bar can still name them.
+    var contributors: [String] = []
     /// The BookMaster shelf row this is — applying it pins the book there, so a
     /// later push can never write a duplicate. Found by matching the candidate
     /// against the shelf copy the app keeps, not by asking BookMaster.
@@ -26,7 +30,7 @@ struct MetadataCandidate: Identifiable, Hashable, Codable {
     /// `id` is only for the list on screen; what is kept on disk is the rest.
     /// `coverURL` is read for lists cached by older builds, which kept one.
     enum CodingKeys: String, CodingKey {
-        case title, authors, year, summary, isbn, openLibraryId, coverURL, coverURLs, source, bookmasterId
+        case title, authors, year, summary, isbn, openLibraryId, coverURL, coverURLs, source, contributors, bookmasterId
     }
 }
 
@@ -45,6 +49,7 @@ extension MetadataCandidate {
             coverURLs = [url]
         }
         source = try c.decode(String.self, forKey: .source)
+        contributors = try c.decodeIfPresent([String].self, forKey: .contributors) ?? []
         bookmasterId = try c.decodeIfPresent(String.self, forKey: .bookmasterId)
     }
 
@@ -58,7 +63,42 @@ extension MetadataCandidate {
         try c.encodeIfPresent(openLibraryId, forKey: .openLibraryId)
         try c.encode(coverURLs, forKey: .coverURLs)
         try c.encode(source, forKey: .source)
+        try c.encodeIfPresent(contributors.isEmpty ? nil : contributors, forKey: .contributors)
         try c.encodeIfPresent(bookmasterId, forKey: .bookmasterId)
+    }
+}
+
+extension MetadataLookup {
+    /// The same book from several sources collapses to one row — the first
+    /// source's, with whatever it lacked (a blurb, an ISBN, a cover) filled in
+    /// and the folded-in sources remembered as `contributors`, so the sources
+    /// bar still names everyone who answered.
+    static func dedupe(_ candidates: [MetadataCandidate]) -> [MetadataCandidate] {
+        var index: [String: Int] = [:]
+        var out: [MetadataCandidate] = []
+        for c in candidates {
+            let key = (c.title + "|" + c.authors)
+                .lowercased()
+                .filter { $0.isLetter || $0.isNumber }
+            guard !key.isEmpty else { continue }
+            if let i = index[key] {
+                if out[i].summary.isEmpty { out[i].summary = c.summary }
+                if out[i].isbn == nil { out[i].isbn = c.isbn }
+                if out[i].openLibraryId == nil { out[i].openLibraryId = c.openLibraryId }
+                // merge cover guesses, keeping the survivor's own first
+                out[i].coverURLs.append(contentsOf: c.coverURLs.filter { !out[i].coverURLs.contains($0) })
+                if out[i].year.isEmpty { out[i].year = c.year }
+                // the folded-in match keeps a name in the sources line
+                for name in [c.source] + c.contributors
+                where name != out[i].source && !out[i].contributors.contains(name) {
+                    out[i].contributors.append(name)
+                }
+                continue
+            }
+            index[key] = out.count
+            out.append(c)
+        }
+        return out
     }
 }
 
@@ -169,31 +209,6 @@ enum MetadataLookup {
         return result
     }
 
-    /// The same book from several sources collapses to one row — the first
-    /// source's, with whatever it lacked (a blurb, an ISBN, a cover) filled in.
-    static func dedupe(_ candidates: [MetadataCandidate]) -> [MetadataCandidate] {
-        var index: [String: Int] = [:]
-        var out: [MetadataCandidate] = []
-        for c in candidates {
-            let key = (c.title + "|" + c.authors)
-                .lowercased()
-                .filter { $0.isLetter || $0.isNumber }
-            guard !key.isEmpty else { continue }
-            if let i = index[key] {
-                if out[i].summary.isEmpty { out[i].summary = c.summary }
-                if out[i].isbn == nil { out[i].isbn = c.isbn }
-                if out[i].openLibraryId == nil { out[i].openLibraryId = c.openLibraryId }
-                // merge cover guesses, keeping the survivor's own first
-                out[i].coverURLs.append(contentsOf: c.coverURLs.filter { !out[i].coverURLs.contains($0) })
-                if out[i].year.isEmpty { out[i].year = c.year }
-                continue
-            }
-            index[key] = out.count
-            out.append(c)
-        }
-        return out
-    }
-
     // MARK: - The catalogues
 
     /// Open Library and Apple Books through `CatalogueSearch`, as candidates.
@@ -229,9 +244,9 @@ enum MetadataLookup {
             var c = c
             c.bookmasterId = row.userBookId
             // the shelf row's own jacket — including one this app pushed up —
-            // is the strongest guess of all
+            // is the strongest guess of all. The pin is a fact, not a source:
+            // the card badges it rather than renaming where the match came from.
             c.coverURLs.insert(contentsOf: row.coverURLs.filter { !c.coverURLs.contains($0) }, at: 0)
-            c.source = "On your BookMaster shelf"
             return c
         }
     }

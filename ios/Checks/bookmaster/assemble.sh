@@ -67,6 +67,10 @@ open(f"{out}/BookMasterClient.swift", "w").write(s)
 t = open(f"{src}/Library/LibraryStore.swift").read()
 body = "\n".join(l for l in t[:t.index("/// The library: book files")].split("\n") if not l.startswith("import "))
 open(f"{out}/BookModel.swift", "w").write("import Foundation\n" + body)
+# the match type and the dedupe fold — everything before the UIKit-bearing enum
+m = open(f"{src}/Library/MetadataLookup.swift").read()
+body = m[m.index("/// One possible match"):m.index("/// Book metadata lookup:")]
+open(f"{out}/MetadataSources.swift", "w").write("import Foundation\n" + body)
 PY
 cat > "$OUT/LibraryStub.swift" <<'SW'
 import Foundation
