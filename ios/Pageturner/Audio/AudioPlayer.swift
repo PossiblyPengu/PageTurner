@@ -72,6 +72,9 @@ final class AudioPlayer: ObservableObject {
     /// BookMaster's place) from our own saves.
     private var checkpoint = PlaybackProgress()
     private var libraryChanges: AnyCancellable?
+    /// Watches the library's cover counter so a jacket changed mid-listen
+    /// reaches the player and the lock screen.
+    private var coverWatch: AnyCancellable?
     /// Consecutive seconds the player said "paused" while we believed it was playing.
     private var stalledTicks = 0
     private var routeObserver: NSObjectProtocol?
@@ -108,6 +111,16 @@ final class AudioPlayer: ObservableObject {
             guard let self, !self.closed, let latest = books.first(where: { $0.id == self.book.id }) else { return }
             self.adopt(latest)
         }
+        // a jacket picked mid-listen swaps in without reopening the player
+        coverWatch = library.$coverRevision
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, !self.closed else { return }
+                self.coverImage = self.library.cover(for: self.book)
+                self.artworkItem = nil      // the lock screen asks for the new art
+                self.updateNowPlaying()
+            }
     }
 
     var trackCount: Int { urls.count }
@@ -689,6 +702,7 @@ final class AudioPlayer: ObservableObject {
         releaseSessionTask = nil
         closed = true
         libraryChanges?.cancel()
+        coverWatch?.cancel()
         AudioFocus.shared.unregister("audiobook")   // the lock-screen buttons pass on, or are cleared
         setSleepTimer(minutes: nil)
         itemStatus?.cancel()

@@ -68,7 +68,8 @@ struct NowPlayingView: View {
             showChapters = true
         }
         #endif
-        .task(id: player.coverImage == nil) {
+        // keyed to the image instance so a mid-listen jacket swap re-tints
+        .task(id: player.coverImage.map { ObjectIdentifier($0) }) {
             if let color = player.coverImage?.averageColor { tint = Color(color) }
         }
         .onChange(of: voiceBoost) { _, _ in player.refreshVoiceTap() }

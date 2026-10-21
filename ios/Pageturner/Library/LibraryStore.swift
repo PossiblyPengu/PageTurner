@@ -1068,8 +1068,12 @@ final class LibraryStore: ObservableObject {
     /// A cover file changed on disk — views read covers by path, so nudge them to look again.
     /// A cover was replaced — the thumbnails are stale (rare enough that
     /// dropping them all is simpler than tracking which size keys exist).
+    /// `coverRevision` lets the player and other holders of a decoded cover
+    /// notice the swap without watching every `books` change.
+    @Published private(set) var coverRevision = 0
     func coverChanged() {
         coverThumbs.removeAllObjects()
+        coverRevision += 1
         objectWillChange.send()
     }
 
