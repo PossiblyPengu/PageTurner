@@ -286,11 +286,12 @@ struct ReaderView: View {
     }
 
     /// The page's own colour while it is coming up.
-    private var pageBackground: Color {
+    private var pageBackground: SwiftUI.Color {
         let hex = model.activeSettings.theme.background
-        return Color(red: Double((hex >> 16) & 0xFF) / 255,
-                     green: Double((hex >> 8) & 0xFF) / 255,
-                     blue: Double(hex & 0xFF) / 255)
+        // ReadiumShared.Color shares the name — the background is for SwiftUI here
+        return SwiftUI.Color(red: Double((hex >> 16) & 0xFF) / 255,
+                             green: Double((hex >> 8) & 0xFF) / 255,
+                             blue: Double(hex & 0xFF) / 255)
     }
 
     /// Back, the title, and the page's tools — floating on glass over the page.
