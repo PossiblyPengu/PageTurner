@@ -77,7 +77,7 @@ struct BackupReminder: View {
 
     var body: some View {
         // a side column of buttons leaves the text a sliver at accessibility sizes — stack instead
-        if typeSize.isAccessibilityCategory {
+        if typeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "externaldrive.badge.checkmark").foregroundStyle(Color.ptAccent)
