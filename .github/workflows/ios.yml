@@ -17,6 +17,7 @@ concurrency:
 jobs:
   build:
     uses: ./.github/workflows/ios-build.yml
+    secrets: inherit
 
   # Every green build on main becomes the rolling `ios-latest` release (Pageturner.ipa and an AltStore / SideStore
   # source whose links never change), so a source added once to SideStore offers each build as an update.

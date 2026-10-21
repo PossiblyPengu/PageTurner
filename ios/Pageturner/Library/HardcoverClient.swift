@@ -31,7 +31,18 @@ enum HardcoverVault {
 }
 
 enum HardcoverClient {
-    static var hasToken: Bool { HardcoverVault.read().flatMap(HardcoverCore.authorization) != nil }
+    /// The token in use: the reader's own (Settings), else the one the build carried in its Info.plist — put there by
+    /// the release build from a repository secret, blank in a build made without it. A build setting that was never
+    /// filled stays the literal "$(HARDCOVER_TOKEN)", which is no token.
+    static var authorization: String? {
+        if let mine = HardcoverVault.read().flatMap(HardcoverCore.authorization) { return mine }
+        let built = Bundle.main.object(forInfoDictionaryKey: "HardcoverToken") as? String ?? ""
+        return built.contains("$(") ? nil : HardcoverCore.authorization(built)
+    }
+
+    static var hasToken: Bool { authorization != nil }
+    /// Whether the reader has put in a token of their own.
+    static var hasOwnToken: Bool { HardcoverVault.read().flatMap(HardcoverCore.authorization) != nil }
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -43,7 +54,7 @@ enum HardcoverClient {
     /// Hits for a free-text query (a title and author, or an ISBN). Empty without a token, or on any failure.
     static func search(_ query: String) async -> [HardcoverHit] {
         guard !query.isEmpty,
-              let auth = HardcoverVault.read().flatMap(HardcoverCore.authorization),
+              let auth = authorization,
               let url = URL(string: HardcoverCore.endpoint),
               let body = HardcoverCore.body(query: query)
         else { return [] }
@@ -60,7 +71,7 @@ enum HardcoverClient {
 
     /// Settings' "Test": nil when the token works, else a sentence saying what is wrong.
     static func test() async -> String? {
-        guard let auth = HardcoverVault.read().flatMap(HardcoverCore.authorization) else { return "No token saved." }
+        guard let auth = authorization else { return "No token saved." }
         guard let url = URL(string: HardcoverCore.endpoint),
               let body = HardcoverCore.body(query: "The Hobbit", perPage: 1)
         else { return "Could not build the request." }

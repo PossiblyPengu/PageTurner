@@ -84,6 +84,7 @@ jobs:
   build:
     needs: prepare
     uses: ./.github/workflows/ios-build.yml
+    secrets: inherit
     with:
       ref: ${{ needs.prepare.outputs.sha }}
 

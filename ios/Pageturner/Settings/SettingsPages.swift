@@ -54,7 +54,7 @@ struct LibrarySettingsPage: View {
     @State private var message: String?
     @State private var confirmResetStats = false
     @State private var hardcoverToken = ""
-    @State private var hardcoverSaved = HardcoverClient.hasToken
+    @State private var hardcoverSaved = HardcoverClient.hasOwnToken
     @State private var hardcoverBusy = false
     @State private var hardcoverResult: String?
     @AppStorage(SpotlightIndexer.enabledKey) private var spotlight = true
@@ -122,7 +122,7 @@ struct LibrarySettingsPage: View {
                     .disabled(hardcoverBusy)
             }
             if hardcoverSaved {
-                Button("Remove Token", role: .destructive) {
+                Button("Remove My Token", role: .destructive) {
                     HardcoverVault.remove()
                     hardcoverToken = ""
                     hardcoverSaved = false
@@ -133,7 +133,7 @@ struct LibrarySettingsPage: View {
         } header: {
             Text("Hardcover")
         } footer: {
-            Text("Adds Hardcover’s catalogue — modern books, series and covers — to Find Details. Get a free token at hardcover.app/account/api and paste it here. It stays in this iPhone’s Keychain and is sent only to Hardcover.")
+            Text("Hardcover’s catalogue — modern books, series and covers — is part of Find Details. A token is built into the app; if you would rather use your own, get a free one at hardcover.app/account/api and paste it here. It stays in this iPhone’s Keychain and is sent only to Hardcover.")
         }
     }
 

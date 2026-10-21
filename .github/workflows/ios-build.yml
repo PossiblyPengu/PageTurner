@@ -9,6 +9,10 @@ on:
         description: "The commit to build. Blank: the caller's own (a release builds the commit it has just made)."
         type: string
         default: ""
+    secrets:
+      HARDCOVER_TOKEN:
+        description: "Hardcover API token baked into the app so Find Details can ask Hardcover. Optional."
+        required: false
 
 permissions:
   contents: read
@@ -53,6 +57,8 @@ jobs:
       # The build number is this run's number, so every build is newer than the last and AltStore / SideStore
       # (which update only when it rises) see each one as an update.
       - name: Build unsigned app
+        env:
+          HARDCOVER_TOKEN: ${{ secrets.HARDCOVER_TOKEN }}
         run: |
           set -o pipefail
           cd ios
@@ -66,6 +72,7 @@ jobs:
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            HARDCOVER_TOKEN="$HARDCOVER_TOKEN" \
             build 2>&1 | tee xcodebuild.log
 
       # The Readium sources the build resolved, so the UI code can be written
