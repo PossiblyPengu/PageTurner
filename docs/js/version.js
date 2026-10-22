@@ -3,5 +3,5 @@
  * Source of truth: the "version" and "build" fields in package.json.
  */
 
-export const VERSION = "2.18.0";
-export const BUILD = 94;
+export const VERSION = "2.20.0";
+export const BUILD = 95;
