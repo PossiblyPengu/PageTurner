@@ -21,6 +21,10 @@ struct BookDetailSheet: View {
     /// Play an audiobook from the Drive without downloading it.
     var onStream: (() -> Void)? = nil
     var onRemoveDownload: () -> Void = {}
+    /// A finished book whose file is its only copy: removing the file removes the book. Nil hides it.
+    var onClearFile: (() -> Void)? = nil
+    /// A BookMaster shelf move (want to read, abandoned) for a linked book. Nil hides it.
+    var onShelfMove: ((BMShelfStatus) -> Void)? = nil
     /// Looks the book up online (a Drive book has only a name until it is downloaded); true when something was found.
     var onLookup: (() async -> Void)? = nil
     @State private var lookingUp = false
@@ -33,6 +37,8 @@ struct BookDetailSheet: View {
     @State private var coverFailed = false
     @State private var tint: Color = .ptAccent
     @State private var confirmRestart = false
+    @State private var confirmWantToRead = false
+    @State private var confirmClearFile = false
     @State private var detent: PresentationDetent = .large
 
     private var isFinished: Bool { (book.progression ?? 0) >= 0.995 }
@@ -337,10 +343,37 @@ struct BookDetailSheet: View {
                                 Text("Your place in this book is forgotten.")
                             }
                     }
+                    if let onShelfMove, BookMaster.shared.isLinked {
+                        if book.bmStatus != BMShelfStatus.wantToRead.rawValue {
+                            Button("Move to Want to Read") {
+                                // back to not started: a place worth keeping asks first
+                                if (book.progression ?? 0) > 0.001 { confirmWantToRead = true }
+                                else { onShelfMove(.wantToRead) }
+                            }
+                            .confirmationDialog("Back to Want to Read?", isPresented: $confirmWantToRead, titleVisibility: .visible) {
+                                Button("Move to Want to Read", role: .destructive) { onShelfMove(.wantToRead) }
+                            } message: {
+                                Text("Your place in this book is forgotten.")
+                            }
+                        }
+                        if book.bmStatus != BMShelfStatus.abandoned.rawValue {
+                            Button("Mark as Abandoned") { onShelfMove(.abandoned) }
+                        }
+                    }
                     Button(book.collections.isEmpty ? "Add to a Shelf…" : "Shelves: \(book.collections.joined(separator: ", "))", action: onShelves)
                     Button("Edit Details", action: onEdit)
                     if book.drive != nil, cloud == nil {
                         Button("Remove Download", action: onRemoveDownload)
+                    }
+                    if isFinished, book.drive == nil, cloud == nil, !library.missing.contains(book.id),
+                       let onClearFile {
+                        Button("Remove File", role: .destructive) { confirmClearFile = true }
+                            .confirmationDialog("Remove the file of “\(book.title)”?",
+                                                isPresented: $confirmClearFile, titleVisibility: .visible) {
+                                Button("Remove File", role: .destructive, action: onClearFile)
+                            } message: {
+                                Text("The file is the book’s only copy — the book is removed from the library with it. Your BookMaster shelf isn’t touched.")
+                            }
                     }
                     if BookMaster.shared.isLinked {
                         Button("Comments & Suggestions") { showNotes = true }

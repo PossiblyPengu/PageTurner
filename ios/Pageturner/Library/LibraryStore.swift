@@ -1002,6 +1002,28 @@ final class LibraryStore: ObservableObject {
         inCloud.insert(id)
     }
 
+    /// Free the space a finished book's files take, in the way its storage allows: a book with a Drive
+    /// copy keeps its place in the library and can come down again, while one whose file is its only
+    /// copy is removed from the library with it. What is open, playing or read aloud from those files
+    /// is put away by the caller first (see `AppRouter.clearFinished`).
+    func clearFinishedFiles(_ book: Book) {
+        if book.drive != nil {
+            removeDownload(book.id)
+        } else {
+            delete(book)
+        }
+    }
+
+    /// Finished books whose files are on this device, with the bytes each would free — what the
+    /// settings sweep counts and clears.
+    func clearableFinished() -> [(book: Book, bytes: Int64)] {
+        books.compactMap { book in
+            guard (book.progression ?? 0) >= 0.995, !inCloud.contains(book.id) else { return nil }
+            let bytes = fileURLs(for: book).reduce(Int64(0)) { $0 + (Self.fileSize($1).map(Int64.init) ?? 0) }
+            return bytes > 0 ? (book, bytes) : nil
+        }
+    }
+
     // MARK: - Shelves
 
     private func saveShelves() { UserDefaults.standard.set(shelves, forKey: "shelves") }

@@ -84,6 +84,20 @@ import Foundation
             var b = books[i]; change(&b); if b != books[i] { books[i] = b }
         }
     }
+    /// Change one book's record (see the real mutate): the shelf move uses it for the bm fields.
+    func updateBookMaster(_ id: UUID, _ change: (inout Book) -> Void) {
+        guard let i = books.firstIndex(where: { $0.id == id }) else { return }
+        var b = books[i]; change(&b); if b != books[i] { books[i] = b }
+    }
+    /// Back to the start — the shelf move to want_to_read uses it.
+    func restart(_ id: UUID) {
+        guard let i = books.firstIndex(where: { $0.id == id }) else { return }
+        books[i].progression = 0
+        books[i].locatorJSON = nil
+        books[i].audioPosition = nil
+        books[i].lastOpenedAt = nil
+        ResumeOffer.decline(&books[i])
+    }
     /// Where a downloaded jacket would live — a path is all the pull checks.
     func coverURL(for book: Book) -> URL { URL(fileURLWithPath: "/tmp/\(book.id.uuidString).jpg") }
 }

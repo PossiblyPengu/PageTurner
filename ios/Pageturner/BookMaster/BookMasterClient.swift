@@ -806,6 +806,20 @@ final class BookMaster {
         return outcomes
     }
 
+    /// A book back on "want to read" has no place any more — a parked progress
+    /// push that still holds one would land later and stand the row back up at
+    /// "reading" where it was. The next real push is not throttled against what
+    /// was last sent either.
+    func dropQueuedProgress(bookKey: String, ref: BMBookRef) {
+        lastPush.removeValue(forKey: bookKey)
+        guard let user,
+              let probe = try? JSONEncoder().encode(
+                  BMProgressPush(username: user.username, book: ref, percent: 0, format: "ebook"))
+        else { return }
+        queue.removeAll { $0.kind == "progress" && Self.sameBook($0.body, probe) }
+        saveQueue()
+    }
+
     private func enqueue(_ entry: QueueEntry) {
         var entry = entry
         if entry.id == nil { entry.id = UUID() }

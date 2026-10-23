@@ -93,7 +93,9 @@ struct RootView: View {
             router.open(book, library: library)
         case let .finish(id):
             router.tab = .library
-            library.markFinished(id)
+            if let book = library.books.first(where: { $0.id == id }) {
+                router.markFinished(book, library: library)
+            }
         case let .restart(id):
             router.tab = .library
             library.restart(id)
@@ -177,7 +179,7 @@ struct RootView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.openShelves([book.id]) }
             },
             onFinish: {
-                library.markFinished(book.id)
+                router.markFinished(book, library: library)
                 router.detail = nil
             },
             onRestart: {
@@ -195,6 +197,13 @@ struct RootView: View {
             onRemoveDownload: {
                 router.detail = nil
                 router.removeDownload(book, library: library)
+            },
+            onClearFile: {
+                router.detail = nil
+                router.clearFinished(book, library: library)
+            },
+            onShelfMove: { status in
+                bookMaster.moveToShelf(status, bookID: book.id, library: library)
             },
             onLookup: { await MetadataLookup.enrichDriveBooks([book.id], library: library) })
     }

@@ -167,6 +167,10 @@ struct BookGrid: View {
     private let downloads = DriveDownloads.shared
     /// Starting over throws the place away, so it asks first.
     @State private var restarting: Book?
+    /// Back to "want to read" forgets the place too, so it asks first.
+    @State private var wantToRead: Book?
+    /// Removing a local file removes the book with it, so it asks first.
+    @State private var clearing: Book?
 
     /// Wider cells at accessibility sizes, so titles under the covers have room.
     private var columns: [GridItem] {
@@ -230,13 +234,28 @@ struct BookGrid: View {
                             }
                         }
                         if (book.progression ?? 0) < 0.995 {
-                            Button { library.markFinished(book.id) } label: {
+                            Button { router.markFinished(book, library: library) } label: {
                                 Label(book.isAudio ? "Mark as Listened" : "Mark as Finished", systemImage: "checkmark.circle")
                             }
                         }
                         if (book.progression ?? 0) > 0 {
                             Button { restarting = book } label: {
                                 Label(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning", systemImage: "arrow.counterclockwise")
+                            }
+                        }
+                        if BookMaster.shared.isLinked {
+                            if book.bmStatus != BMShelfStatus.wantToRead.rawValue {
+                                Button {
+                                    if (book.progression ?? 0) > 0.001 { wantToRead = book }
+                                    else { BookMaster.shared.moveToShelf(.wantToRead, bookID: book.id, library: library) }
+                                } label: {
+                                    Label("Move to Want to Read", systemImage: "bookmark")
+                                }
+                            }
+                            if book.bmStatus != BMShelfStatus.abandoned.rawValue {
+                                Button { BookMaster.shared.moveToShelf(.abandoned, bookID: book.id, library: library) } label: {
+                                    Label("Mark as Abandoned", systemImage: "pause.circle")
+                                }
                             }
                         }
                         Divider()
@@ -253,6 +272,11 @@ struct BookGrid: View {
                         if book.drive != nil, !library.inCloud.contains(book.id) {
                             Button { router.removeDownload(book, library: library) } label: {
                                 Label("Remove Download", systemImage: "icloud.and.arrow.up")
+                            }
+                        }
+                        if book.drive == nil, (book.progression ?? 0) >= 0.995, !library.missing.contains(book.id) {
+                            Button { clearing = book } label: {
+                                Label("Remove File", systemImage: "doc.badge.minus")
                             }
                         }
                         Button(role: .destructive) { router.askDelete([book]) } label: {
@@ -275,6 +299,25 @@ struct BookGrid: View {
             }
         } message: { _ in
             Text("Your place in this book is forgotten.")
+        }
+        .confirmationDialog(
+            "Back to Want to Read?", isPresented: Binding(get: { wantToRead != nil }, set: { if !$0 { wantToRead = nil } }),
+            titleVisibility: .visible, presenting: wantToRead
+        ) { book in
+            Button("Move to Want to Read", role: .destructive) {
+                BookMaster.shared.moveToShelf(.wantToRead, bookID: book.id, library: library)
+            }
+        } message: { _ in
+            Text("Your place in this book is forgotten.")
+        }
+        .confirmationDialog(
+            "Remove the file of “\(clearing?.title ?? "")”?",
+            isPresented: Binding(get: { clearing != nil }, set: { if !$0 { clearing = nil } }),
+            titleVisibility: .visible, presenting: clearing
+        ) { book in
+            Button("Remove File", role: .destructive) { router.clearFinished(book, library: library) }
+        } message: { _ in
+            Text("The file is the book’s only copy — the book is removed from the library with it. Your BookMaster shelf isn’t touched.")
         }
     }
 

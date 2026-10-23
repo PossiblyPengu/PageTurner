@@ -147,6 +147,38 @@ final class AppRouter {
         library.removeDownload(book.id)
     }
 
+    /// "Mark as Finished" — records it and tells BookMaster; when the "clear files of
+    /// finished books" setting is on, the files go too.
+    func markFinished(_ book: Book, library: LibraryStore) {
+        library.markFinished(book.id)
+        if AppPrefs.autoClearFinished { clearFinished(book, library: library) }
+    }
+
+    /// Clear a finished book's files: a Drive copy goes back to the Drive (the book stays),
+    /// any other finished book leaves the library with it. What is playing, read to or open
+    /// from them is put away first.
+    func clearFinished(_ book: Book, library: LibraryStore) {
+        if PlaybackCoordinator.shared.bookID == book.id { PlaybackCoordinator.shared.stop() }
+        ReadAloudHost.shared.stop(bookID: book.id)
+        if reading?.id == book.id { reading = nil }
+        if detail?.id == book.id { detail = nil }
+        if editing?.id == book.id { editing = nil }
+        library.clearFinishedFiles(book)
+    }
+
+    /// The settings sweep: every finished book's files cleared. `kept` stayed in the library
+    /// (Drive copies), `removed` left it, `freed` is the space given back.
+    @discardableResult
+    func clearFinishedBooks(library: LibraryStore) -> (kept: Int, removed: Int, freed: Int64) {
+        var kept = 0, removed = 0, freed: Int64 = 0
+        for target in library.clearableFinished() {
+            freed += target.bytes
+            if target.book.drive != nil { kept += 1 } else { removed += 1 }
+            clearFinished(target.book, library: library)
+        }
+        return (kept, removed, freed)
+    }
+
     /// The now-playing strip for a book being read aloud was tapped: the book, at the place the voice has reached.
     func openNarration() {
         guard let book = ReadAloudHost.shared.held?.book else { return }
@@ -155,10 +187,18 @@ final class AppRouter {
     }
 
     /// Leaving an open book: back to the library, with the position kept so the
-    /// Reading tab's list can offer it again.
-    func leaveReading() {
+    /// Reading tab's list can offer it again. A book that was finished behind the
+    /// reader or player frees its files here, when the setting is on — never out
+    /// from under audio still playing (a re-listen).
+    func leaveReading(library: LibraryStore) {
+        let playback = PlaybackCoordinator.shared
+        let leaving = reading ?? playback.bookID.flatMap { id in library.books.first { $0.id == id } }
         reading = nil
         tab = .library
+        if AppPrefs.autoClearFinished, let book = leaving,
+           (book.progression ?? 0) >= 0.995, playback.player?.isPlaying != true {
+            clearFinished(book, library: library)
+        }
     }
 
     private func launch(_ book: Book, library: LibraryStore) {

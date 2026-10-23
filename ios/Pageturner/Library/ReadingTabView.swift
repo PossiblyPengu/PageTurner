@@ -11,11 +11,11 @@ struct ReadingTabView: View {
 
     var body: some View {
         if let book = router.reading {
-            ReaderView(book: book, library: library) { router.leaveReading() }
+            ReaderView(book: book, library: library) { router.leaveReading(library: library) }
                 // a different book needs a new reader, not a reused one
                 .id(book.id)
         } else if let player = playback.player {
-            NowPlayingView(player: player, onStop: { playback.stop() }) { router.leaveReading() }
+            NowPlayingView(player: player, onStop: { playback.stop() }) { router.leaveReading(library: library) }
         } else {
             ReadingNowView(onBrowse: { router.tab = .library })
         }
