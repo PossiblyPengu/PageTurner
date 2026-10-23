@@ -25,7 +25,12 @@ final class Readium {
         var errorDescription: String? {
             switch self {
             case .notAFile: return "That isn't a file on this device."
-            case let .unreadable(detail): return "The file couldn't be read. (\(detail))"
+            case let .unreadable(detail):
+                // a truncated or fake book file reaches Readium as a ZIPFoundation ArchiveError
+                if detail.contains("ArchiveError") {
+                    return "The file is incomplete or damaged — download it again and re-import it."
+                }
+                return "The file couldn't be read. (\(detail))"
             case let .unsupported(detail): return "This format isn't supported yet. (\(detail))"
             }
         }

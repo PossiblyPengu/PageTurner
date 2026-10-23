@@ -50,20 +50,25 @@ struct SettingsPageForm<Content: View>: View {
 /// Settings → Library & import: what is added on its own, and what is searched and counted.
 struct LibrarySettingsPage: View {
     @EnvironmentObject private var library: LibraryStore
+    @Environment(AppRouter.self) private var router
     @State private var showFolderPicker = false
     @State private var message: String?
     @State private var confirmResetStats = false
+    @State private var confirmClearFinished = false
+    @State private var clearedMessage: String?
     @State private var hardcoverToken = ""
     @State private var hardcoverSaved = HardcoverClient.hasOwnToken
     @State private var hardcoverBusy = false
     @State private var hardcoverResult: String?
     @AppStorage(SpotlightIndexer.enabledKey) private var spotlight = true
     @AppStorage("stats-tracking") private var statsTracking = true
+    @AppStorage("auto-clear-finished") private var autoClearFinished = false
     private let watcher = FolderWatcher.shared
 
     var body: some View {
         Form {
             autoImport
+            finishedBooks
             hardcover
             searchAndStats
         }
@@ -86,6 +91,66 @@ struct LibrarySettingsPage: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(message ?? "")
+        }
+        .alert("Finished books", isPresented: Binding(
+            get: { clearedMessage != nil },
+            set: { if !$0 { clearedMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(clearedMessage ?? "")
+        }
+        .confirmationDialog(
+            "Clear finished books' files?", isPresented: $confirmClearFinished, titleVisibility: .visible
+        ) {
+            Button("Clear Files", role: .destructive, action: sweepFinished)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(clearConfirmText)
+        }
+    }
+
+    /// Finished books still holding files, and the byte count they would free.
+    private var clearable: (count: Int, local: Int, freed: Int64) {
+        let targets = library.clearableFinished()
+        return (targets.count, targets.filter { $0.book.drive == nil }.count,
+                targets.reduce(Int64(0)) { $0 + $1.bytes })
+    }
+
+    private var clearConfirmText: String {
+        let c = clearable
+        var text = "Frees about \(GoogleDrive.sizeText(c.freed))."
+        if c.local > 0 {
+            text += " \(c.local == 1 ? "One book has" : "\(c.local) books have") no Google Drive copy — \(c.local == 1 ? "it is" : "they are") removed from the library with \(c.local == 1 ? "its" : "their") file."
+        }
+        text += " Your BookMaster shelf isn’t touched."
+        return text
+    }
+
+    private func sweepFinished() {
+        let result = router.clearFinishedBooks(library: library)
+        var parts = ["Freed \(GoogleDrive.sizeText(result.freed))"]
+        if result.kept > 0 {
+            parts.append("\(result.kept) \(result.kept == 1 ? "book stays" : "books stay") in the library — \(result.kept == 1 ? "its" : "their") files are back in Google Drive")
+        }
+        if result.removed > 0 {
+            parts.append("\(result.removed) \(result.removed == 1 ? "book was" : "books were") removed from the library")
+        }
+        clearedMessage = parts.joined(separator: "; ") + "."
+    }
+
+    private var finishedBooks: some View {
+        let c = clearable
+        return Section {
+            Toggle("Clear files when a book is finished", isOn: $autoClearFinished)
+            Button("Clear Finished Books’ Files…", role: .destructive) { confirmClearFinished = true }
+                .disabled(c.count == 0)
+        } header: {
+            Text("Finished books")
+        } footer: {
+            Text(c.count == 0
+                 ? "Free the space of books you have finished: a Google Drive copy goes back to the Drive (the book stays and can come down again), a book whose file is its only copy leaves the library with it."
+                 : "Finished books hold \(GoogleDrive.sizeText(c.freed)) across \(c.count) \(c.count == 1 ? "book" : "books"). A Google Drive copy goes back to the Drive; a book whose file is its only copy leaves the library with it.")
         }
     }
 

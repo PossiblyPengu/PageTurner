@@ -263,6 +263,37 @@ extension BookMaster {
         return true
     }
 
+    /// A library book moved to another shelf — the way out of Reading now. "Want to read" means
+    /// never started: the local place is forgotten with it (left standing, the next position push
+    /// would flip the row back to "reading"). "Abandoned" sets it aside and keeps the place.
+    /// The book's BookMaster fields follow the row the bridge answers with; on a failure nothing
+    /// local changes and the reason is shown.
+    func moveToShelf(_ status: BMShelfStatus, bookID: UUID, library: LibraryStore) {
+        guard let book = library.books.first(where: { $0.id == bookID }) else { return }
+        Task {
+            do {
+                let reply = try await shelve(pin: book.bookmasterId, ref: book.bookMasterRef, status: status)
+                library.updateBookMaster(bookID) { b in
+                    if let row = reply.userBook {
+                        b.bookmasterId = row.userBookId
+                        b.bmStatus = row.status
+                        b.bmRating = row.rating
+                        b.bmRemotePercent = row.percent
+                        b.bmUpNext = row.upNext != nil
+                    } else {
+                        b.bmStatus = status.rawValue
+                    }
+                }
+                if status == .wantToRead {
+                    dropQueuedProgress(bookKey: book.id.uuidString, ref: book.bookMasterRef)
+                    library.restart(bookID)
+                }
+            } catch {
+                notice = error.localizedDescription
+            }
+        }
+    }
+
     // A cover URL that gave nothing (a 404, not an image) is not asked again on every pull.
     private static let coverMissKey = "bm-cover-miss"
     private static let coverMissHours: Double = 6

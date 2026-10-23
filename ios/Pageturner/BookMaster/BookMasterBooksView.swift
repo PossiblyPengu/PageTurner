@@ -509,6 +509,7 @@ struct BookMasterBooksView: View {
             barButton("To read", "bookmark") { bulk(status: "want_to_read") }
             barButton("Reading", "book") { bulk(status: "reading") }
             barButton("Finished", "checkmark") { bulk(status: "read") }
+            barButton("Set aside", "pause.circle") { bulk(status: "abandoned") }
             barButton("Remove", "trash") { confirmRemove = true }
         }
         .padding(.horizontal, 8)

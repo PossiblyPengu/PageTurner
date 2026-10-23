@@ -80,6 +80,10 @@ enum AppPrefs {
     /// Whether read-aloud passes over a line that is only a page number.
     static var speechSkipsPageNumbers: Bool { enabled("speech-skip-page-numbers") }
 
+    /// Whether finishing a book frees its files without asking: a Drive copy goes back to
+    /// the Drive, any other finished book leaves the library. Off until asked for.
+    static var autoClearFinished: Bool { defaults.object(forKey: "auto-clear-finished") as? Bool ?? false }
+
     private static func enabled(_ key: String) -> Bool {
         defaults.object(forKey: key) as? Bool ?? true
     }
