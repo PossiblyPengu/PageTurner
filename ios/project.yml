@@ -51,7 +51,7 @@ targets:
       properties:
         CFBundleDisplayName: Pageturner
         # Hardcover's API token, put in by the build from the repository secret of the same name (blank when absent)
-        HardcoverToken: $(HARDCOVER_TOKEN)
+        HardcoverToken: $(HARDCOVER_API)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
@@ -152,7 +152,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.possiblypengu.pageturner
         MARKETING_VERSION: "2.18.0"
         CURRENT_PROJECT_VERSION: "94"
-        HARDCOVER_TOKEN: ""
+        HARDCOVER_API: ""
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_PREVIEWS: NO

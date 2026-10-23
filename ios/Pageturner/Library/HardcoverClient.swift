@@ -33,7 +33,7 @@ enum HardcoverVault {
 enum HardcoverClient {
     /// The token in use: the reader's own (Settings), else the one the build carried in its Info.plist — put there by
     /// the release build from a repository secret, blank in a build made without it. A build setting that was never
-    /// filled stays the literal "$(HARDCOVER_TOKEN)", which is no token.
+    /// filled stays the literal "$(HARDCOVER_API)", which is no token.
     static var authorization: String? {
         if let mine = HardcoverVault.read().flatMap(HardcoverCore.authorization) { return mine }
         let built = Bundle.main.object(forInfoDictionaryKey: "HardcoverToken") as? String ?? ""

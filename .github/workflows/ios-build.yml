@@ -10,7 +10,7 @@ on:
         type: string
         default: ""
     secrets:
-      HARDCOVER_TOKEN:
+      HARDCOVER_API:
         description: "Hardcover API token baked into the app so Find Details can ask Hardcover. Optional."
         required: false
 
@@ -58,7 +58,7 @@ jobs:
       # (which update only when it rises) see each one as an update.
       - name: Build unsigned app
         env:
-          HARDCOVER_TOKEN: ${{ secrets.HARDCOVER_TOKEN }}
+          HARDCOVER_API: ${{ secrets.HARDCOVER_API }}
         run: |
           set -o pipefail
           cd ios
@@ -72,7 +72,7 @@ jobs:
             -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            HARDCOVER_TOKEN="$HARDCOVER_TOKEN" \
+            HARDCOVER_API="$HARDCOVER_API" \
             build 2>&1 | tee xcodebuild.log
 
       # The Readium sources the build resolved, so the UI code can be written
