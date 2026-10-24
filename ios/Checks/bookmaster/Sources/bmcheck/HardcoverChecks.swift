@@ -45,3 +45,10 @@ func runHardcoverChecks() {
     check("a work id's jacket is a /w/ path", CoverLinks.openLibraryWork("OL45804W").first?.absoluteString.contains("/w/olid/OL45804W-L.jpg") == true)
     check("an edition id's jacket stays a /b/ path", CoverLinks.openLibraryWork("OL123M").first?.absoluteString.contains("/b/olid/OL123M-L.jpg") == true)
 }
+
+@MainActor
+func runSweepReaderChecks() {
+    section("Sweep: footnote marks and words")
+    let spoken = SpeechText.spoken("It ended.¹ Then more.")
+    check("a footnote mark is not spoken", !spoken.contains("¹"), spoken)
+}

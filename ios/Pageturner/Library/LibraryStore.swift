@@ -536,8 +536,11 @@ final class LibraryStore: ObservableObject {
             // files delivered to Documents/Inbox (AirDrop, Mail, "Open in") are copies the app made its own of
             let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let inbox = docs.appendingPathComponent("Inbox").resolvingSymlinksInPath().path + "/"
-            for url in batch where url.resolvingSymlinksInPath().path.hasPrefix(inbox) {
-                try? fm.removeItem(at: url)
+            // an inbox copy that failed to import stays, so it can be tried again
+            if failures.isEmpty {
+                for url in batch where url.resolvingSymlinksInPath().path.hasPrefix(inbox) {
+                    try? fm.removeItem(at: url)
+                }
             }
             for root in scopedRoots { root.stopAccessingSecurityScopedResource() }
             scopedRoots = []
@@ -844,6 +847,22 @@ final class LibraryStore: ObservableObject {
         incoming.bmUpNext = books[i].bmUpNext
         books[i] = incoming
         save()
+    }
+
+    /// Save what reading changed — the place, the marks the reader made, the sitting's time — onto the book as it is
+    /// stored now. The reader holds its own copy of the whole `Book` from when it opened; writing that back with
+    /// `update` would undo a title, shelf or note edited meanwhile.
+    func saveReading(_ book: Book) {
+        mutate(book.id) {
+            $0.lastOpenedAt = book.lastOpenedAt
+            $0.locatorJSON = book.locatorJSON
+            $0.progression = book.progression
+            $0.bookmarks = book.bookmarks
+            $0.highlights = book.highlights
+            $0.words = book.words
+            $0.pages = book.pages
+            $0.resumeDismissedAt = book.resumeDismissedAt
+        }
     }
 
     /// The answer to "BookMaster has you at N% — jump there?": take its place

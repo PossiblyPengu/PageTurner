@@ -94,7 +94,9 @@ enum SpeechText {
         var index = text.startIndex
         while index < text.endIndex {
             let c = text[index]
-            let inWord = c.isLetter || c.isNumber || c == "'" || c == "’" || c == "\u{00AD}"
+            // footnote marks (superscript digits) are cut from the spoken text, so they are not words of it
+            let mark = c.unicodeScalars.allSatisfy { [0xB9, 0xB2, 0xB3, 0x2070].contains(Int($0.value)) || (0x2074 ... 0x2079).contains(Int($0.value)) }
+            let inWord = !mark && (c.isLetter || c.isNumber || c == "'" || c == "’" || c == "\u{00AD}")
             if inWord, start == nil { start = index }
             if !inWord, let from = start { out.append(from ..< index); start = nil }
             index = text.index(after: index)

@@ -148,6 +148,7 @@ func runData() async {
     runPlayheadChecks()
     runCatalogueChecks()
     runHardcoverChecks()
+    runSweepReaderChecks()
     runTextBook()
 }
 

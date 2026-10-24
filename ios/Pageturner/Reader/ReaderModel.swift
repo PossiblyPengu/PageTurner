@@ -176,7 +176,7 @@ final class ReaderModel: ObservableObject {
             }
 
             book.lastOpenedAt = Date()
-            library.update(book)
+            library.saveReading(book)
             canReadAloud = ReadAloud.canSpeak(publication)
             isSearchable = publication.isSearchable
             toc = (try? await publication.tableOfContents().get()) ?? []
@@ -267,7 +267,9 @@ final class ReaderModel: ObservableObject {
         container.canCurl = { [weak self] in
             guard let self else { return false }
             // never while text is selected: a drag then belongs to the selection handles
-            return self.settings.pageTurn == .curl && !(self.navigator?.presentation.scroll ?? true)
+            // Reduce Motion turns pages with a fade (the tap path), so a drag has no peel to follow either
+            return self.settings.pageTurn == .curl && !UIAccessibility.isReduceMotionEnabled
+                && !(self.navigator?.presentation.scroll ?? true)
                 && (self.navigator as? SelectableNavigator)?.currentSelection == nil
         }
         container.onCurlStep = { [weak self] forward in
@@ -475,7 +477,7 @@ final class ReaderModel: ObservableObject {
             }
             guard let count, count > 0, book.pages == nil else { return }
             book.pages = count
-            library.update(book)
+            library.saveReading(book)
         }
     }
 
@@ -925,7 +927,7 @@ final class ReaderModel: ObservableObject {
     func readerLetGo() {
         saveTask?.cancel()
         saveTask = nil
-        library.update(book)
+        library.saveReading(book)
         endSession()
     }
 
@@ -967,7 +969,7 @@ final class ReaderModel: ObservableObject {
         saveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
-            library.update(book)
+            library.saveReading(book)
         }
     }
 
@@ -981,7 +983,7 @@ final class ReaderModel: ObservableObject {
             book.locatorJSON = try? locator.jsonString()
             book.progression = locator.locations.totalProgression
         }
-        library.update(book)
+        library.saveReading(book)
     }
 
     /// Locking the screen can leave the page's webview holding a stale
