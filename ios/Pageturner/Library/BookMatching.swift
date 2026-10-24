@@ -25,7 +25,7 @@ enum BookMatch {
         // Apostrophes are dropped rather than spaced out, so that "Ender's
         // Game" folds to "enders game" and not to "ender s game".
         s = s.replacingOccurrences(of: #"['‘’]"#, with: "", options: .regularExpression)
-        s = s.replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"[^\p{L}\p{N}]+"#, with: " ", options: .regularExpression)
         return s.trimmingCharacters(in: .whitespaces)
     }
 

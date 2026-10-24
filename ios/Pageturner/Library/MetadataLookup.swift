@@ -166,10 +166,12 @@ enum MetadataLookup {
         stopWhen: (([MetadataCandidate]) -> Bool)? = nil
     ) async -> [MetadataCandidate] {
         // a list made without Hardcover is not what a reader with a token should be handed back
-        let key = (title + "|" + author + "|" + (isbn ?? "") + (HardcoverClient.hasToken ? "|hc" : "")).lowercased()
+        let key = (title + "|" + author + "|" + (isbn ?? "") + (HardcoverClient.hasToken ? "|hc" : "") + (audio ? "|aud" : "")).lowercased()
         if let hit = await MainActor.run(body: { recalled(key) }) {
-            await progress?(hit)
-            return hit
+            // pins are worked out fresh: the shelf may have changed since the list was kept
+            let pinned = await MainActor.run { pinToShelf(hit) }
+            await progress?(pinned)
+            return pinned
         }
         // a name with the author in it ("David Wong - John Dies at the End") is asked as it stands, as title and
         // author, and the other way round: files are named either way
@@ -221,14 +223,13 @@ enum MetadataLookup {
                 }
             }
         }
-        let deduped = dedupe(slots.flatMap { $0 })
-        var result = await MainActor.run { pinToShelf(deduped) }
+        var deduped = dedupe(slots.flatMap { $0 })
         // Wikimedia's copy of a cover rides on the ISBN — one extra ask, only
         // where a typed or scanned ISBN gave it something to find
         if let extra {
             let wiki = await wikimediaCovers(isbn: extra)
             if !wiki.isEmpty {
-                result = result.map { c in
+                deduped = deduped.map { c in
                     guard ISBN.normalize(c.isbn ?? "") == extra else { return c }
                     var c = c
                     c.coverURLs.append(contentsOf: wiki.filter { !c.coverURLs.contains($0) })
@@ -237,10 +238,11 @@ enum MetadataLookup {
             }
         }
         // a search cut short, or one where nothing came back (the network, not the book), is not worth remembering
-        if !stopped, !result.isEmpty {
-            await MainActor.run { remember(key, result) }
+        // (kept without the shelf pins, which are worked out when the list is handed out)
+        if !stopped, !Task.isCancelled, !deduped.isEmpty {
+            await MainActor.run { remember(key, deduped) }
         }
-        return result
+        return await MainActor.run { pinToShelf(deduped) }
     }
 
     // MARK: - The catalogues

@@ -38,4 +38,10 @@ func runHardcoverChecks() {
     check("a bad token's errors-only answer is an empty list",
           HardcoverCore.parse(Data(#"{"errors":[{"message":"Unable to verify token"}]}"#.utf8)).isEmpty)
     check("garbage is an empty list", HardcoverCore.parse(Data("nope".utf8)).isEmpty)
+
+    section("Sweep: covers and matching")
+    check("a Cyrillic title folds to its own letters, not to nothing", BookMatch.fold("Война и мир") == "война и мир")
+    check("two Cyrillic titles do not match each other", !BookMatch.titlesMatch("Война и мир", "Преступление и наказание"))
+    check("a work id's jacket is a /w/ path", CoverLinks.openLibraryWork("OL45804W").first?.absoluteString.contains("/w/olid/OL45804W-L.jpg") == true)
+    check("an edition id's jacket stays a /b/ path", CoverLinks.openLibraryWork("OL123M").first?.absoluteString.contains("/b/olid/OL123M-L.jpg") == true)
 }

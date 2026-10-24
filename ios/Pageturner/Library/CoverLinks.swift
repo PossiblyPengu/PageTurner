@@ -7,8 +7,8 @@ enum CoverLinks {
     /// `?default=false` turns Open Library's blank stand-in into a 404, so a
     /// missing cover falls through to the next guess instead of rendering as
     /// an empty box. Sizes run big first.
-    private static func ol(_ spec: String) -> [URL] {
-        ["-L", "-M"].compactMap { URL(string: "https://covers.openlibrary.org/b/\(spec)\($0).jpg?default=false") }
+    private static func ol(_ spec: String, kind: String = "b") -> [URL] {
+        ["-L", "-M"].compactMap { URL(string: "https://covers.openlibrary.org/\(kind)/\(spec)\($0).jpg?default=false") }
     }
 
     static func coverID(_ id: Int) -> [URL] {
@@ -22,7 +22,8 @@ enum CoverLinks {
 
     static func openLibraryWork(_ olid: String?) -> [URL] {
         guard let olid, !olid.isEmpty else { return [] }
-        return ol("olid/\(olid)")
+        // a work id (OL…W) is a /w/ path; /b/olid answers only edition ids
+        return ol("olid/\(olid)", kind: olid.uppercased().hasSuffix("W") ? "w" : "b")
     }
 
     /// Amazon's product-image lookup by ISBN-10 — a last resort: old books'

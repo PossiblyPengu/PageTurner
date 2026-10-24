@@ -630,8 +630,13 @@ struct BookEditSheet: View {
 
     /// Take everything the match knows; blanks in the match leave the field alone.
     private func apply(_ candidate: MetadataCandidate) {
+        // a different book than the one linked: the old Open Library and shelf links are not its
+        if !BookMatch.titlesMatch(title, candidate.title) {
+            openLibraryId = nil
+            pin = nil
+        }
         title = candidate.title
-        author = candidate.authors
+        if !candidate.authors.isEmpty { author = candidate.authors }
         if !candidate.year.isEmpty { year = candidate.year }
         if !candidate.summary.isEmpty { summary = candidate.summary }
         if let isbn = candidate.isbn { self.isbn = isbn }
@@ -697,6 +702,7 @@ struct BookLookupSheet: View {
     @State private var refining = false
     @State private var scanning = false
     @State private var searching = false
+    @State private var searchTask: Task<Void, Never>?
     @State private var candidates: [MetadataCandidate]?
     @State private var sourceFilter: String?
     /// The edition set open full size — one match, or the editions of a work.
@@ -1002,11 +1008,14 @@ struct BookLookupSheet: View {
         let asISBN = ISBN.normalize(ask) != nil
         let askTitle = asISBN ? "" : title
         let askISBN = asISBN ? title : isbn
-        Task {
+        // one search at a time: a newer one stops the older, which must not write over it
+        searchTask?.cancel()
+        searchTask = Task {
             // the first source to answer shows at once; the rest add to the list as they come
             let results = await MetadataLookup.search(
                 title: askTitle, author: author, isbn: askISBN, audio: book.isAudio,
-                progress: { found in if !found.isEmpty { candidates = found } })
+                progress: { found in if !Task.isCancelled, !found.isEmpty { candidates = found } })
+            guard !Task.isCancelled else { return }
             candidates = results
             searching = false
         }

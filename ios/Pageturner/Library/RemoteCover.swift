@@ -122,9 +122,10 @@ enum CoverFetch {
     private static func fetch(_ url: URL) async -> UIImage? {
         // no reply at all: nothing learned about the jacket, so nothing remembered
         guard let (data, response) = try? await session.data(from: url) else { return nil }
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let image = decode(data)
-        else {
+        guard let http = response as? HTTPURLResponse else { return nil }
+        // a rate limit or a server error says nothing about the jacket: not remembered as a miss
+        if http.statusCode == 408 || http.statusCode == 429 || http.statusCode >= 500 { return nil }
+        guard (200..<300).contains(http.statusCode), let image = decode(data) else {
             rememberMiss(url)
             return nil
         }
@@ -204,9 +205,12 @@ struct RemoteCover: View {
             .clipped()
             .task(id: urls) {
                 finished = false
-                image = await CoverFetch.firstImage(in: urls)
+                let found = await CoverFetch.firstImage(in: urls)
+                // a task cancelled by newer URLs must not paint over their picture
+                guard !Task.isCancelled else { return }
+                image = found
                 finished = true
-                if let image { onLoad?(image) }
+                if let found { onLoad?(found) }
             }
             .accessibilityHidden(true)
     }

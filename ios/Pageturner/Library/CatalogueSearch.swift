@@ -333,6 +333,8 @@ enum CatalogueSearch {
         for attempt in 0 ... 1 {
             await lane.pace(attempt == 0 ? gap : gap * 4)
             guard let (data, res) = try? await session.data(from: url) else {
+                // a search stopped early is not a throttled one: no backed-off retry
+                if Task.isCancelled { return nil }
                 if attempt == 0 { continue } else { return nil }
             }
             let status = (res as? HTTPURLResponse)?.statusCode ?? 0

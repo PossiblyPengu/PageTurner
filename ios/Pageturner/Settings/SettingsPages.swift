@@ -205,13 +205,15 @@ struct LibrarySettingsPage: View {
     private func saveHardcover() {
         hardcoverBusy = true
         hardcoverResult = "Testing…"
+        // the token in use stays put until the new one has passed its test
+        let previous = HardcoverVault.read()
         HardcoverVault.write(hardcoverToken)
         Task {
             let problem = await HardcoverClient.test()
             hardcoverBusy = false
             if let problem {
-                HardcoverVault.remove()
-                hardcoverSaved = false
+                if let previous { HardcoverVault.write(previous) } else { HardcoverVault.remove() }
+                hardcoverSaved = previous != nil
                 hardcoverResult = problem
             } else {
                 hardcoverSaved = true
