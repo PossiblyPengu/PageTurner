@@ -124,6 +124,11 @@ final class DriveBrowserModel {
     private func add(_ items: [DriveTransfer.Item], library: LibraryStore) async -> Bool {
         let result = DriveBooks.plan(items.map { DriveBooks.Found($0.file, folder: $0.folder) }, known: library.driveFileIDs)
         let added = library.addFromDrive(result.books)
+        if !added.isEmpty {
+            // names are all there is to go on until a book is downloaded: look the books up for authors and covers
+            let ids = added.map(\.id)
+            Task { await MetadataLookup.enrichDriveBooks(ids, library: library) }
+        }
         guard result.direct.isEmpty else {
             working = true
             error = nil
@@ -136,11 +141,6 @@ final class DriveBrowserModel {
                 error = failures.joined(separator: "\n")
             }
             return failures.isEmpty
-        }
-        if !added.isEmpty {
-            // names are all there is to go on until a book is downloaded: look the books up for authors and covers
-            let ids = added.map(\.id)
-            Task { await MetadataLookup.enrichDriveBooks(ids, library: library) }
         }
         guard !added.isEmpty else {
             error = result.known > 0 ? "That is already in your library." : "There is nothing there Pageturner can add."

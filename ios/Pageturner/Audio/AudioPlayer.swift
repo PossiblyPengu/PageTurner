@@ -168,6 +168,8 @@ final class AudioPlayer: ObservableObject {
                 notice = "Sign in to Google Drive (Settings → Google Drive) to play this book without downloading it."
                 return
             }
+            // closed while the token was being fetched: nothing left to keep fresh
+            guard !closed else { return }
             streamRefresh = Task { [weak self] in
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 45 * 60 * 1_000_000_000)

@@ -114,7 +114,18 @@ final class DriveStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @uncheck
 
     // MARK: The wire
 
+    /// A range, asked again (twice, after a pause) when the network drops or Drive says to slow down — one blip
+    /// must not end a book.
     private func fetch(_ id: String, from: Int64, to: Int64) async -> Data? {
+        for attempt in 0 ... 2 {
+            if let data = await fetchOnce(id, from: from, to: to) { return data }
+            if attempt < 2 { try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 700_000_000) }
+            if Task.isCancelled { return nil }
+        }
+        return nil
+    }
+
+    private func fetchOnce(_ id: String, from: Int64, to: Int64) async -> Data? {
         guard let url = GoogleDrive.downloadURL(id: id) else { return nil }
         var renewed = false
         while true {

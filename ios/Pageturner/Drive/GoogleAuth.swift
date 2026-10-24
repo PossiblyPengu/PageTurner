@@ -127,7 +127,9 @@ final class GoogleAuth {
         if let held, GoogleDrive.isFresh(expires: held.expires, now: Date()) { return held.token }
         if let refreshing { return try await refreshing.value }
         guard let refresh = DriveVault.read() else {
-            signedIn = false
+            // a locked phone cannot read the Keychain item (a background download retry, a backup): that is not a
+            // sign-out, and the next read after unlock works
+            if DriveVault.isMissing { signedIn = false }
             throw DriveError.notSignedIn
         }
         let id = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -256,14 +258,24 @@ enum DriveVault {
         search[kSecReturnData as String] = true
         search[kSecMatchLimit as String] = kSecMatchLimitOne
         guard SecItemCopyMatching(search as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
+        // a token kept by an earlier build is readable only while unlocked: widened to after the first unlock, so a
+        // background download or backup can still sign itself in
+        SecItemUpdate(query as CFDictionary, [kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly] as CFDictionary)
         return String(data: data, encoding: .utf8)
+    }
+
+    /// True only when there is no token in the Keychain at all (not when it is merely unreadable just now).
+    static var isMissing: Bool {
+        var search = query
+        search[kSecReturnAttributes as String] = true
+        return SecItemCopyMatching(search as CFDictionary, nil) == errSecItemNotFound
     }
 
     static func write(_ token: String) {
         remove()
         var add = query
         add[kSecValueData as String] = Data(token.utf8)
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
     }
 
