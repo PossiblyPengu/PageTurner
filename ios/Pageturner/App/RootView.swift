@@ -217,7 +217,25 @@ struct RootView: View {
             onShelfMove: { status in
                 bookMaster.moveToShelf(status, bookID: book.id, library: library)
             },
-            onLookup: { await MetadataLookup.enrichDriveBooks([book.id], library: library) })
+            onLookup: { await MetadataLookup.enrichDriveBooks([book.id], library: library) },
+            onTextVersion: book.ext == "pdf" ? { openTextVersion(of: book) } : nil)
+    }
+
+    /// A PDF's text version, made the first time, then opened in the reader like any book.
+    private func openTextVersion(of pdf: Book) {
+        Task {
+            do {
+                let text = try await library.makeTextVersion(of: pdf)
+                router.detail = nil
+                // the sheet goes first, so the reader isn't opened under it
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                router.open(text, library: library)
+            } catch is CancellationError {
+                return
+            } catch {
+                library.lastError = error.localizedDescription
+            }
+        }
     }
 
     private func editSheet(_ book: Book) -> some View {

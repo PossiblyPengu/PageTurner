@@ -27,6 +27,8 @@ struct BookDetailSheet: View {
     var onShelfMove: ((BMShelfStatus) -> Void)? = nil
     /// Looks the book up online (a Drive book has only a name until it is downloaded); true when something was found.
     var onLookup: (() async -> Void)? = nil
+    /// A PDF's text version: made (once) and opened. Nil hides it.
+    var onTextVersion: (() -> Void)? = nil
     @State private var lookingUp = false
     @EnvironmentObject private var library: LibraryStore
     @Environment(AppRouter.self) private var router
@@ -115,6 +117,30 @@ struct BookDetailSheet: View {
                 .controlSize(.large)
                 if let line = downloadSizeLine {
                     Text(line).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// "Make a Text Version" for a PDF — its words laid out to flow like a book's — or open the one made before;
+    /// while it is being made, how far it has got.
+    @ViewBuilder
+    private func textVersionRow(_ action: @escaping () -> Void) -> some View {
+        if let fraction = library.textVersionProgress[book.id] {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Making the text version…")
+                ProgressView(value: fraction)
+            }
+        } else {
+            let made = library.books.contains { $0.textVersionOf == book.id }
+            Button(action: action) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(made ? "Open Text Version" : "Make a Text Version")
+                    if !made {
+                        Text("The words laid out to flow like a book’s, with your fonts, themes and read-aloud. Pictures and the page layout are left out.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -362,6 +388,9 @@ struct BookDetailSheet: View {
                     }
                     Button(book.collections.isEmpty ? "Add to a Shelf…" : "Shelves: \(book.collections.joined(separator: ", "))", action: onShelves)
                     Button("Edit Details", action: onEdit)
+                    if let onTextVersion, book.ext == "pdf", cloud == nil {
+                        textVersionRow(onTextVersion)
+                    }
                     if book.drive != nil, cloud == nil {
                         Button("Remove Download", action: onRemoveDownload)
                     }

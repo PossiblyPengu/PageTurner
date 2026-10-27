@@ -133,6 +133,8 @@ struct Book: Identifiable, Codable, Hashable {
     /// Set when the book was added from Google Drive: the Drive files it is made of. Its files come down when asked
     /// for (`DriveDownloads`), and the book stays in the library, with its place, whether they are on the device or not.
     var drive: GoogleDrive.Source?
+    /// The PDF this book is the text version of (`makeTextVersion`).
+    var textVersionOf: UUID?
 
     var ext: String { fileName.split(separator: ".").last.map(String.init)?.lowercased() ?? "" }
     /// The local name keeps the file's extension, except Drive parts whose Drive name
@@ -482,7 +484,7 @@ final class LibraryStore: ObservableObject {
     /// different book (AudioGrouping). Tracks play in natural path order so
     /// "ch2" comes before "ch10". Ebooks import one per file.
     enum ImportError: LocalizedError {
-        case notAnArchive, looksLikeBackup, nothingToImport, emptyText, duplicate(String)
+        case notAnArchive, looksLikeBackup, nothingToImport, emptyText, duplicate(String), scannedPDF
 
         var errorDescription: String? {
             switch self {
@@ -491,13 +493,13 @@ final class LibraryStore: ObservableObject {
             case .nothingToImport: return "There were no books, comics or audio files inside."
             case .emptyText: return "There was no text in that file."
             case let .duplicate(title): return "“\(title)” is already in your library."
+            case .scannedPDF: return "This PDF has no text to lay out again — its pages are pictures of print (a scan)."
             }
         }
     }
 
-    /// What a zip may carry. HTML and text are left out on purpose: a zip of a
-    /// website or a folder of notes shouldn't become hundreds of "books".
-    /// What is taken out of a zip: books (an `.fbz` is a zipped FB2), not the readme beside them.
+    /// What a zip may carry: books (an `.fbz` is a zipped FB2). HTML and text are left out on purpose — a zip of
+    /// a website or a folder of notes shouldn't become hundreds of "books".
     private static let archiveExtensions = Set(["epub", "pdf", "cbz", "fb2"]).union(Book.audioExtensions)
 
     /// "Open in" and share-sheet deliveries arrive one URL at a time, back to
@@ -686,6 +688,54 @@ final class LibraryStore: ObservableObject {
         }.value
         guard let converted else { throw ImportError.emptyText }
         try await save(converted)
+    }
+
+    /// How far each PDF's text version has got while it is being made, 0…1.
+    @Published private(set) var textVersionProgress: [UUID: Double] = [:]
+
+    /// The text version of a PDF — its words laid out again to flow like a book's (`PDFText`), with the PDF's
+    /// details, cover and shelves — made once and kept as a book of its own; asked again, the one there is returned.
+    func makeTextVersion(of pdf: Book) async throws -> Book {
+        if let made = books.first(where: { $0.textVersionOf == pdf.id }) { return made }
+        guard textVersionProgress[pdf.id] == nil else { throw CancellationError() }
+        textVersionProgress[pdf.id] = 0
+        defer { textVersionProgress[pdf.id] = nil }
+        let source = fileURL(for: pdf)
+        let title = pdf.title, author = pdf.author, id = pdf.id
+        let converted = await Task.detached(priority: .userInitiated) { () -> TextBook.Converted? in
+            let lines = PDFTextExtractor.lines(in: source) { fraction in
+                Task { @MainActor [weak self] in
+                    if self?.textVersionProgress[id] != nil { self?.textVersionProgress[id] = fraction }
+                }
+            }
+            guard let lines, let html = PDFText.html(lines: lines, title: title, author: author) else { return nil }
+            return TextBook.convert(Data(html.utf8), format: .html, fallbackTitle: title)
+        }.value
+        guard let converted else { throw ImportError.scannedPDF }
+
+        let newID = UUID()
+        let fileName = "\(newID.uuidString).epub"
+        try converted.epub.write(to: booksDir.appendingPathComponent(fileName), options: .atomic)
+        try await register(id: newID, fileName: fileName, fallbackTitle: title)
+        mutate(newID) { b in
+            b.textVersionOf = pdf.id
+            b.title = pdf.title
+            b.author = pdf.author
+            b.bookDescription = pdf.bookDescription
+            b.year = pdf.year
+            b.isbn = pdf.isbn
+            b.openLibraryId = pdf.openLibraryId
+            b.series = pdf.series
+            b.seriesIndex = pdf.seriesIndex
+            b.collections = pdf.collections
+        }
+        if fm.fileExists(atPath: coverURL(for: pdf).path), let made = books.first(where: { $0.id == newID }) {
+            try? fm.removeItem(at: coverURL(for: made))
+            try? fm.copyItem(at: coverURL(for: pdf), to: coverURL(for: made))
+            coverChanged()
+        }
+        guard let made = books.first(where: { $0.id == newID }) else { throw ImportError.scannedPDF }
+        return made
     }
 
     /// A converted book written into the Books folder and put on the shelf.
