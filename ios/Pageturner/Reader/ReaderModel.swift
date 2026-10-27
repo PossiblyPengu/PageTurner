@@ -1028,6 +1028,8 @@ final class ReaderModel: ObservableObject {
     func endSession() {
         guard let start = sessionStart else { return }
         sessionStart = nil
+        // a book removed while it was open: no sitting to log, no place to tell BookMaster
+        guard library.books.contains(where: { $0.id == book.id }) else { return }
         let end = book.progression ?? start.progression
         let span = min(reading.span, 1)
         let reported = reading.reportable(end)

@@ -173,6 +173,9 @@ final class ReaderContainerViewController: UIViewController {
     /// Bumped each time a curl ends or starts — an `armCurl` task that wakes to
     /// a different session knows the gesture already ended and drops its work.
     private var curlSession = 0
+    /// There was no page that way (the first page pulled back, the last pulled on): the rest of this drag is left
+    /// alone rather than trying again with every move of the finger.
+    private var curlRefused = false
 
     private func snapshotPage(scale: CGFloat? = nil) -> UIImage {
         // the navigator's own view — never the overlay covering it
@@ -282,10 +285,11 @@ final class ReaderContainerViewController: UIViewController {
         case .began:
             curlGrab = nil
             curlPendingTouch = nil
+            curlRefused = false
         case .changed:
             let here = pan.location(in: view)
             guard curlGrab != nil else {
-                guard !arming else { return }
+                guard !arming, !curlRefused else { return }
                 // decide the turn the first time the finger travels decisively
                 let t = pan.translation(in: view)
                 let start = CGPoint(x: here.x - t.x, y: here.y - t.y)
@@ -314,6 +318,7 @@ final class ReaderContainerViewController: UIViewController {
             // until the page beneath is in place the leaf lies flat: lifted now, it would peel off a copy of itself
             if !arming { curlOverlay?.update(origin: grab.origin, touch: moved) }
         case .ended, .cancelled, .failed:
+            curlRefused = false
             guard let overlay = curlOverlay, let grab = curlGrab else { removeCurl(); return }
             let v = pan.velocity(in: view)
             let touch = curlPendingTouch ?? grab.origin
@@ -328,7 +333,8 @@ final class ReaderContainerViewController: UIViewController {
             let peelLeft = grab.forward != rightToLeft
             let fling = peelLeft ? v.x < -450 : v.x > 450
             let commit = p > 0.45 || fling
-            overlay.isUserInteractionEnabled = false
+            // the overlay keeps taking touches until the leaf has landed: a tap that reached the book now would
+            // start a turn of its own over this one
             releasing = true
             let arm = armTask
             Task { [weak self] in
@@ -340,14 +346,17 @@ final class ReaderContainerViewController: UIViewController {
                                 velocity: v, commit: commit) { [weak self] in
                     Task { [weak self] in
                         guard let self else { return }
+                        // the turn is settled whatever happened meanwhile — the reader's held saves depend on it —
+                        // but a cover that is no longer this gesture's is not taken down
+                        let ours = self.curlOverlay === overlay
                         if commit {
                             self.onCurlCommit?()
                         } else {
                             // the navigator goes back to the page the leaf lay on; the cover stays until it shows it
                             await self.onCurlCancel?()
-                            _ = await self.waitForPage(like: self.coverPrint)
+                            if ours { _ = await self.waitForPage(like: self.coverPrint) }
                         }
-                        self.removeCurl()
+                        if ours, self.curlOverlay === overlay { self.removeCurl() }
                     }
                 }
             }
@@ -372,6 +381,7 @@ final class ReaderContainerViewController: UIViewController {
     private func failedCurl(_ session: Int) {
         guard session == curlSession else { return }
         removeCurl()
+        curlRefused = true
         Task { await onCurlCancel?() }
     }
 
@@ -386,8 +396,13 @@ final class ReaderContainerViewController: UIViewController {
         let session = curlSession
         let before = coverPrint
         armTask = Task { [weak self] in
-            _ = await self?.waitForNewPage(differentFrom: before)
+            let turned = await self?.waitForNewPage(differentFrom: before) ?? false
             guard let self, self.curlOverlay === overlay, self.curlSession == session else { return }
+            // the page never changed beneath (the last page tapped on, the first tapped back): no turn to show
+            guard turned || frozenAt != nil else {
+                self.removeCurl()
+                return
+            }
             if let frozenAt {
                 overlay.pose(frozenAt: frozenAt, towardLeft: towardLeft)
                 return

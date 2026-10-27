@@ -75,13 +75,13 @@ extension MetadataLookup {
     /// bar still names everyone who answered.
     static func dedupe(_ candidates: [MetadataCandidate]) -> [MetadataCandidate] {
         var index: [String: Int] = [:]
+        var byISBN: [String: Int] = [:]
         var out: [MetadataCandidate] = []
         for c in candidates {
-            let key = (c.title + "|" + c.authors)
-                .lowercased()
-                .filter { $0.isLetter || $0.isNumber }
-            guard !key.isEmpty else { continue }
-            if let i = index[key] {
+            guard let key = dedupeKey(c) else { continue }
+            let isbn = c.isbn.map { $0.filter { $0.isNumber || $0 == "X" || $0 == "x" } }.flatMap { $0.isEmpty ? nil : $0 }
+            if let i = index[key] ?? isbn.flatMap({ byISBN[$0] }) {
+                if let isbn, byISBN[isbn] == nil { byISBN[isbn] = i }
                 if out[i].summary.isEmpty { out[i].summary = c.summary }
                 if out[i].isbn == nil { out[i].isbn = c.isbn }
                 if out[i].openLibraryId == nil { out[i].openLibraryId = c.openLibraryId }
@@ -96,9 +96,34 @@ extension MetadataLookup {
                 continue
             }
             index[key] = out.count
+            if let isbn { byISBN[isbn] = out.count }
             out.append(c)
         }
         return out
+    }
+
+    /// One book, however each catalogue wrote it: the title folded (case, accents, a series note in brackets gone)
+    /// and the lead author's first initial and surname — "Herbert, Frank", "Frank Herbert", "F. Herbert" and
+    /// "Frank Herbert, Brian Herbert" all lead with F. Herbert (and Brian Herbert's books stay apart). Nil for a
+    /// match with no title worth the name.
+    static func dedupeKey(_ c: MetadataCandidate) -> String? {
+        let title = BookMatch.fold(c.title)
+        guard !title.isEmpty else { return nil }
+        var lead = c.authors
+        if let r = lead.range(of: #";|&| and "#, options: [.regularExpression, .caseInsensitive]) {
+            lead = String(lead[..<r.lowerBound])
+        }
+        // "Surname, Given" names the surname first; "Given Surname, Other Person" lists two people
+        let parts = lead.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        var names: [String]
+        if parts.count >= 2, !parts[0].contains(" ") {
+            names = BookMatch.fold(parts[1] + " " + parts[0]).split(separator: " ").map(String.init)
+        } else {
+            names = BookMatch.fold(parts.first ?? "").split(separator: " ").map(String.init)
+        }
+        let surname = names.popLast() ?? ""
+        let initial = names.first.map { String($0.prefix(1)) } ?? ""
+        return title + "|" + initial + surname
     }
 }
 
@@ -165,6 +190,7 @@ enum MetadataLookup {
         progress: (@MainActor ([MetadataCandidate]) -> Void)? = nil,
         stopWhen: (([MetadataCandidate]) -> Bool)? = nil
     ) async -> [MetadataCandidate] {
+        let started = Date()
         // a list made without Hardcover is not what a reader with a token should be handed back
         let key = (title + "|" + author + "|" + (isbn ?? "") + (HardcoverClient.hasToken ? "|hc" : "") + (audio ? "|aud" : "")).lowercased()
         if let hit = await MainActor.run(body: { recalled(key) }) {
@@ -239,7 +265,7 @@ enum MetadataLookup {
         }
         // a search cut short, or one where nothing came back (the network, not the book), is not worth remembering
         // (kept without the shelf pins, which are worked out when the list is handed out)
-        if !stopped, !Task.isCancelled, !deduped.isEmpty {
+        if !stopped, !Task.isCancelled, !deduped.isEmpty, await !HardcoverClient.failed(since: started) {
             await MainActor.run { remember(key, deduped) }
         }
         return await MainActor.run { pinToShelf(deduped) }
@@ -437,11 +463,16 @@ enum MetadataLookup {
         let askTitle = title ?? book.title, askAuthor = author ?? book.author
         let (left, right) = askAuthor.isEmpty ? splitName(askTitle) : (askTitle, "")
         let ownISBN = book.isbn
-        let agrees: (MetadataCandidate) -> Bool = {
-            (ownISBN != nil && $0.isbn == ownISBN) || (BMShelf.titlesAgree(askTitle, $0.title) && BMShelf.authorsAgree(askAuthor, $0.authors))
-                || (!right.isEmpty
-                    && ((BMShelf.titlesAgree(left, $0.title) && BMShelf.authorsAgree(right, $0.authors))
-                        || (BMShelf.titlesAgree(right, $0.title) && BMShelf.authorsAgree(left, $0.authors))))
+        // the details are filled in without being looked at, so a match has to be the book: its ISBN, or the title
+        // with an author that agrees. A name with an author in it ("Dune - Frank Herbert") is held to that author,
+        // either way round; a book with no author at all takes only a match that names one.
+        let agrees: (MetadataCandidate) -> Bool = { c in
+            if ownISBN != nil, c.isbn == ownISBN { return true }
+            if !right.isEmpty {
+                return (BMShelf.titlesAgree(left, c.title) && !c.authors.isEmpty && BMShelf.authorsAgree(right, c.authors))
+                    || (BMShelf.titlesAgree(right, c.title) && !c.authors.isEmpty && BMShelf.authorsAgree(left, c.authors))
+            }
+            return BMShelf.titlesAgree(askTitle, c.title) && !c.authors.isEmpty && BMShelf.authorsAgree(askAuthor, c.authors)
         }
         // the first source to name the book is enough: the others need not be waited for
         let results = await search(title: askTitle, author: askAuthor, isbn: book.isbn,
@@ -467,8 +498,8 @@ enum MetadataLookup {
             library.updateBookMaster(id) { $0.bookmasterId = pin }
             changed = true
         }
-        if !FileManager.default.fileExists(atPath: library.coverURL(for: book).path), !match.coverURLs.isEmpty {
-            await applyCover(from: match.coverURLs, to: book, library: library)
+        if !FileManager.default.fileExists(atPath: library.coverURL(for: book).path), !match.coverURLs.isEmpty,
+           await applyCover(from: match.coverURLs, to: book, library: library) {
             changed = true
         }
         return changed

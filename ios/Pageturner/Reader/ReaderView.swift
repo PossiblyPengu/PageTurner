@@ -14,6 +14,9 @@ struct ReaderView: View {
     @AppStorage("readerShowsTimeLeft") private var showsTimeLeft = false
     @State private var dragging = false
     @State private var scrubTask: Task<Void, Never>?
+    /// Whether the reader is on screen: a book left open in the Reading tab stays mounted while another tab is
+    /// shown, and must not start sittings or keep the screen awake from there.
+    @State private var visible = false
     @State private var exportFile: ShareItem?
     @State private var copied = false
     @State private var contentsTab: ContentsTab = .chapters
@@ -109,11 +112,13 @@ struct ReaderView: View {
             // a theme that follows the clock: look again every few minutes
             .onReceive(Timer.publish(every: 300, on: .main, in: .common).autoconnect()) { _ in model.refreshNight() }
             .onAppear {
+                visible = true
                 BookMaster.shared.place = "reader"
                 keepAwake(true)
                 ReadAloudHost.shared.show(model)
             }
             .onDisappear {
+                visible = false
                 keepAwake(false)
                 model.flushSave()
                 model.endSession()
@@ -129,7 +134,9 @@ struct ReaderView: View {
                 switch phase {
                 case .inactive: model.flushSave()
                 case .background: model.flushSave(); model.endSession(); keepAwake(false)
-                case .active: model.beginSession(); model.refreshAwake(); keepAwake(true)
+                case .active:
+                    guard visible else { break }
+                    model.beginSession(); model.refreshAwake(); keepAwake(true)
                 default: break
                 }
             }
@@ -356,10 +363,10 @@ struct ReaderView: View {
                             if editing { model.holdChrome() } else { model.revealChrome() }
                             guard !editing, let target = scrubbing else { return }
                             model.go(toProgression: target)
-                            // if the page never reports back, let go anyway
-                            Task {
+                            // if the page never reports back, let go anyway — unless a newer drag has begun
+                            scrubTask = Task {
                                 try? await Task.sleep(nanoseconds: 1_500_000_000)
-                                if !dragging { scrubbing = nil }
+                                if !Task.isCancelled, !dragging { scrubbing = nil }
                             }
                         }
                     )

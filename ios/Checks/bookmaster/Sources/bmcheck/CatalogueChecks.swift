@@ -251,6 +251,22 @@ func runCatalogueChecks() {
           merged.count == 1 && merged[0].year == "1965" && merged[0].isbn == "9780441172719")
     check("a title-less husk is dropped",
           MetadataLookup.dedupe([cand("!!!", "", source: "Open Library")]).isEmpty)
+    merged = MetadataLookup.dedupe([
+        cand("Dune", "Herbert, Frank", source: "Open Library"),
+        cand("Dune (Dune Chronicles, #1)", "Frank Herbert, Brian Herbert", source: "Google Books"),
+        cand("Dune", "F. Herbert", source: "Hardcover"),
+    ])
+    check("the same book named three ways is one card", merged.count == 1, "\(merged.count)")
+    merged = MetadataLookup.dedupe([
+        cand("Dune", "Frank Herbert", source: "Open Library", isbn: "978-0-441-17271-9"),
+        cand("Dune: Deluxe Edition", "Frank Herbert", source: "Apple Books", isbn: "9780441172719"),
+    ])
+    check("the same ISBN is the same card", merged.count == 1, "\(merged.count)")
+    merged = MetadataLookup.dedupe([
+        cand("Dune", "Frank Herbert", source: "Open Library"),
+        cand("Dune", "Brian Herbert", source: "Google Books"),
+    ])
+    check("another author's book of the same name keeps its card", merged.count == 2)
 
     section("Cover links")
     check("a 978 ISBN-13 becomes its ISBN-10 for Amazon's lookup",

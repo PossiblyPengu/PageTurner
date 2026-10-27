@@ -51,6 +51,11 @@ enum HardcoverClient {
         return URLSession(configuration: config)
     }()
 
+    /// Hardcover allows about sixty calls a minute for a token — and the built-in token is shared by everyone. A
+    /// search's few calls go at once; a folder of books being looked up settles to one a little over a second.
+    private static let pacer = Pacer()
+    private static let failures = FailureClock()
+
     /// Hits for a free-text query (a title and author, or an ISBN). Empty without a token, or on any failure.
     static func search(_ query: String) async -> [HardcoverHit] {
         guard !query.isEmpty,
@@ -58,6 +63,8 @@ enum HardcoverClient {
               let url = URL(string: HardcoverCore.endpoint),
               let body = HardcoverCore.body(query: query)
         else { return [] }
+        await pacer.wait()
+        guard !Task.isCancelled else { return [] }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.httpBody = body
@@ -65,9 +72,17 @@ enum HardcoverClient {
         req.setValue(auth, forHTTPHeaderField: "Authorization")
         guard let (data, response) = try? await session.data(for: req),
               (response as? HTTPURLResponse)?.statusCode == 200
-        else { return [] }
+        else {
+            // a search called off is not Hardcover failing
+            if !Task.isCancelled { await failures.note() }
+            return []
+        }
         return HardcoverCore.parse(data)
     }
+
+    /// Whether a call to Hardcover failed (refused, throttled, unreachable) since `start` — a search that lost it
+    /// is not kept as though Hardcover had nothing.
+    static func failed(since start: Date) async -> Bool { await failures.failed(since: start) }
 
     /// Settings' "Test": nil when the token works, else a sentence saying what is wrong.
     static func test() async -> String? {
@@ -86,4 +101,29 @@ enum HardcoverClient {
         guard code == 200 else { return "Hardcover answered \(code)." }
         return HardcoverCore.parse(data).isEmpty ? "The token was not accepted." : nil
     }
+}
+
+/// A bucket of five calls, refilled one every 1.1 s: bursts for one search, a steady pace for many.
+private actor Pacer {
+    private var tokens = 5.0
+    private var updated = Date()
+
+    func wait() async {
+        while !Task.isCancelled {
+            let now = Date()
+            tokens = min(5, tokens + now.timeIntervalSince(updated) / 1.1)
+            updated = now
+            if tokens >= 1 {
+                tokens -= 1
+                return
+            }
+            try? await Task.sleep(nanoseconds: UInt64((1 - tokens) * 1.1 * 1_000_000_000))
+        }
+    }
+}
+
+private actor FailureClock {
+    private var last: Date?
+    func note() { last = Date() }
+    func failed(since start: Date) -> Bool { last.map { $0 >= start } ?? false }
 }
