@@ -370,6 +370,7 @@ final class LibraryStore: ObservableObject {
     private let booksDir: URL
     private let coversDir: URL
     private let catalogueURL: URL
+    private let writer = CatalogueWriter()
 
     init() {
         let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -1398,16 +1399,44 @@ final class LibraryStore: ObservableObject {
 
     // MARK: - Persistence
 
+    /// The catalogue is written behind the main thread: the reader saves its place every few seconds, and encoding
+    /// every book (highlights and all) there was a stutter on a big library. Saves close together are one write.
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .secondsSince1970
-        do {
-            let data = try encoder.encode(books)
-            try data.write(to: catalogueURL, options: .atomic)
-        } catch {
-            Log.error("library", "catalogue save failed: \(error.localizedDescription)")
-            return
-        }
+        writer.write(books, to: catalogueURL)
         SpotlightIndexer.shared.libraryChanged(self)
     }
+
+    /// Wait for a catalogue write in flight — the app is going to the background, where it may be suspended.
+    func flushSaves() { writer.flush() }
+}
+
+/// Writes the catalogue on a queue of its own, newest copy only: a write asked for while one is waiting replaces it.
+final class CatalogueWriter: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "io.github.possiblypengu.pageturner.catalogue", qos: .utility)
+    private let lock = NSLock()
+    private var pending: [Book]?
+
+    func write(_ books: [Book], to url: URL) {
+        lock.lock()
+        let waiting = pending != nil
+        pending = books
+        lock.unlock()
+        guard !waiting else { return }
+        queue.async { [self] in
+            lock.lock()
+            let latest = pending
+            pending = nil
+            lock.unlock()
+            guard let latest else { return }
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .secondsSince1970
+            do {
+                try encoder.encode(latest).write(to: url, options: .atomic)
+            } catch {
+                Log.error("library", "catalogue save failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func flush() { queue.sync {} }
 }

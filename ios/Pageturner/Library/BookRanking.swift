@@ -49,7 +49,7 @@ enum BookRank {
 
     /// An ISBN typed as the whole query: nothing to rank by words.
     static func isIsbnQuery(_ query: String) -> Bool {
-        let digits = query.replacingOccurrences(of: #"[\s-]"#, with: "", options: .regularExpression)
+        let digits = BookMatch.replacing(#"[\s-]"#, in: query, with: "")
         return BookMatch.matches(#"^(\d{9}[\dXx]|\d{13})$"#, in: digits)
     }
 

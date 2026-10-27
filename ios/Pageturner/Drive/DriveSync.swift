@@ -132,7 +132,10 @@ final class DriveSync {
             let seen = Set(defaults.stringArray(forKey: seenKey) ?? [])
             let fresh = Set(GoogleDrive.newFiles(found.map(\.file), seen: seen, now: Date()).map(\.id))
             defaults.set(Date().timeIntervalSince1970, forKey: lastKey)
-            if let marker { defaults.set(marker, forKey: tokenKey) }
+            // a file still being uploaded is left for the next look — so the change feed must not be marked past it,
+            // or the next automatic look would be told nothing changed and never list the folder again
+            let settling = GoogleDrive.newFiles(found.map(\.file), seen: seen, now: .distantFuture).count > fresh.count
+            if settling { defaults.removeObject(forKey: tokenKey) } else if let marker { defaults.set(marker, forKey: tokenKey) }
             let wanted = found.filter { fresh.contains($0.file.id) }.map { DriveBooks.Found($0.file, folder: $0.folder) }
             guard !wanted.isEmpty else {
                 report("Checked \(Date().formatted(date: .abbreviated, time: .shortened)): nothing new.")

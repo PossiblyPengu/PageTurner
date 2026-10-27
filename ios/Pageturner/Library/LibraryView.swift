@@ -229,9 +229,10 @@ struct LibraryView: View {
     private func routing<V: View>(_ content: V) -> some View {
         content
             // books removed elsewhere (the confirmation lives at the root) drop out of the selection
-            .onChange(of: library.books) { _, books in
-                selected = selected.intersection(Set(books.map(\.id)))
-                if books.isEmpty { selecting = false }
+            // compared by ids, not whole books: every saved page would otherwise compare every book's highlights
+            .onChange(of: library.books.map(\.id)) { _, ids in
+                selected = selected.intersection(Set(ids))
+                if ids.isEmpty { selecting = false }
             }
             .onChange(of: router.librarySearch, initial: true) { _, search in
                 guard let search else { return }

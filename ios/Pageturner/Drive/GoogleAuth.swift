@@ -8,6 +8,8 @@ import UIKit
 /// Something that went wrong with Drive, in words for the reader.
 struct DriveError: LocalizedError {
     var message: String
+    /// The HTTP status Drive answered with, when it was an answer (a 404 is "not there", unlike a dropped connection).
+    var status: Int? = nil
     var errorDescription: String? { message }
 
     static let notSignedIn = DriveError(message: "Sign in to Google Drive first (Settings → Google Drive).")
@@ -106,6 +108,8 @@ final class GoogleAuth {
     func signOut() async {
         let token = DriveVault.read()
         DriveVault.remove()
+        // a refresh already on its way must not hand back a token after this
+        generation += 1
         held = nil
         refreshing = nil
         signedIn = false
@@ -140,10 +144,19 @@ final class GoogleAuth {
     }
 
     /// The token was refused: ask for a new one next time.
-    func discardAccessToken() { held = nil }
+    /// A token Drive refused. Only that one is dropped: several calls refused together must not throw away the fresh
+    /// token the first of them has already fetched.
+    func discardAccessToken(_ refused: String? = nil) {
+        if refused == nil || held?.token == refused { held = nil }
+    }
+
+    /// Bumped by a sign-out: a refresh that set out before it finds a different number and keeps nothing.
+    private var generation = 0
 
     private func renew(refresh: String, clientID: String) async throws -> String {
+        let started = generation
         let (data, status) = try await post(GoogleDrive.refresh(token: refresh, clientID: clientID))
+        guard started == generation else { throw DriveError.notSignedIn }
         guard (200 ..< 300).contains(status), let reply = try? JSONDecoder().decode(GoogleDrive.TokenReply.self, from: data) else {
             let code = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error"] as? String
             if code == "invalid_grant" {

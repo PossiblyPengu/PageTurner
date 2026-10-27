@@ -81,6 +81,7 @@ struct PageturnerApp: App {
                         BackgroundKeepAlive.shared.update(background: false)
                         library.refreshMissing()
                     case .background:
+                        library.flushSaves()
                         Log.markBackground()
                         Task { await BookMaster.shared.beat(leaving: true) }
                         Notifier.shared.scheduleRefresh()

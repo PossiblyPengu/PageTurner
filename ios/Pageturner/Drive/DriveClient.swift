@@ -27,7 +27,8 @@ final class DriveClient {
         var renewed = false
         while true {
             var request = base
-            request.setValue("Bearer \(try await auth.accessToken())", forHTTPHeaderField: "Authorization")
+            let token = try await auth.accessToken()
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let data: Data
             let response: URLResponse
             do {
@@ -44,7 +45,7 @@ final class DriveClient {
             if (200 ..< 300).contains(http.statusCode) { return (data, http) }
             if http.statusCode == 401, !renewed {
                 renewed = true
-                auth.discardAccessToken()
+                auth.discardAccessToken(token)
                 continue
             }
             if again, GoogleDrive.shouldRetry(status: http.statusCode), attempt < 3 {
@@ -52,7 +53,7 @@ final class DriveClient {
                 try await Task.sleep(nanoseconds: UInt64(GoogleDrive.retryDelay(attempt: attempt) * 1_000_000_000))
                 continue
             }
-            throw DriveError(message: GoogleDrive.explain(status: http.statusCode, body: data))
+            throw DriveError(message: GoogleDrive.explain(status: http.statusCode, body: data), status: http.statusCode)
         }
     }
 
@@ -193,9 +194,15 @@ final class DriveClient {
     /// The folder this app's backups go in: the one it made before (kept by id, checked to still be there), else a
     /// new "Pageturner Backups". With the `drive.file` scope the app can write only to folders it made itself.
     func backupFolder() async throws -> GoogleDrive.File {
-        if let id = UserDefaults.standard.string(forKey: Self.backupFolderKey),
-           let folder = try? await file(id: id), folder.isFolder, folder.trashed != true {
-            return folder
+        if let id = UserDefaults.standard.string(forKey: Self.backupFolderKey) {
+            do {
+                let folder = try await file(id: id)
+                if folder.isFolder, folder.trashed != true { return folder }
+            } catch let error as DriveError where error.status == 404 || error.status == 410 {
+                // deleted: a new folder is made below
+            }
+            // anything else (no connection, Drive busy) is thrown: a second folder would leave the older backups
+            // where pruning never looks
         }
         let folder = try await createFolder(named: GoogleDrive.backupFolderName, in: nil)
         UserDefaults.standard.set(folder.id, forKey: Self.backupFolderKey)
