@@ -21,6 +21,9 @@ final class IntentRouter {
         case importBooks
         /// A book downloaded from its own page is in: open it, unless another is in the reader.
         case openDownloaded(UUID)
+        /// From a PDF to its text version (made first if need be), or back: at the page (0-based) or the chapter
+        /// and how far into it that the reader was on.
+        case switchVersion(from: UUID, page: Int?, chapter: Int?, progression: Double?)
     }
 
     var request: Request?

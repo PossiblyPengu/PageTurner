@@ -29,6 +29,8 @@ struct BookDetailSheet: View {
     var onLookup: (() async -> Void)? = nil
     /// A PDF's text version: made (once) and opened. Nil hides it.
     var onTextVersion: (() -> Void)? = nil
+    /// A text version's PDF, opened at the page being read. Nil hides it.
+    var onOriginalPDF: (() -> Void)? = nil
     @State private var lookingUp = false
     @EnvironmentObject private var library: LibraryStore
     @Environment(AppRouter.self) private var router
@@ -390,6 +392,9 @@ struct BookDetailSheet: View {
                     Button("Edit Details", action: onEdit)
                     if let onTextVersion, book.ext == "pdf", cloud == nil {
                         textVersionRow(onTextVersion)
+                    }
+                    if let onOriginalPDF {
+                        Button("Open the Original PDF", action: onOriginalPDF)
                     }
                     if book.drive != nil, cloud == nil {
                         Button("Remove Download", action: onRemoveDownload)

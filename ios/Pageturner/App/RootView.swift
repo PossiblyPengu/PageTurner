@@ -120,6 +120,9 @@ struct RootView: View {
             router.showImporter = true
         case .openDownloaded:
             break   // handled above
+        case let .switchVersion(id, page, chapter, progression):
+            guard let book = library.books.first(where: { $0.id == id }) else { return }
+            switchVersion(of: book, page: page, chapter: chapter, progression: progression)
         }
     }
 
@@ -218,18 +221,47 @@ struct RootView: View {
                 bookMaster.moveToShelf(status, bookID: book.id, library: library)
             },
             onLookup: { await MetadataLookup.enrichDriveBooks([book.id], library: library) },
-            onTextVersion: book.ext == "pdf" ? { openTextVersion(of: book) } : nil)
+            onTextVersion: book.ext == "pdf"
+                ? { switchVersion(of: book, page: ReaderModel.savedPDFPage(of: book), chapter: nil, progression: nil) }
+                : nil,
+            onOriginalPDF: originalPDFAction(for: book))
     }
 
-    /// A PDF's text version, made the first time, then opened in the reader like any book.
-    private func openTextVersion(of pdf: Book) {
+    /// A text version's way back to its PDF, while the PDF is still in the library.
+    private func originalPDFAction(for book: Book) -> (() -> Void)? {
+        guard let pdfID = book.textVersionOf, library.books.contains(where: { $0.id == pdfID }) else { return nil }
+        return {
+            let place = ReaderModel.savedChapter(of: book)
+            switchVersion(of: book, page: nil, chapter: place?.index, progression: place?.progression)
+        }
+    }
+
+    /// From a PDF to its text version — made the first time — or from the text version back to the PDF, opened at
+    /// the same place: the page the reader was on, or the page the text they were reading came from.
+    private func switchVersion(of book: Book, page: Int?, chapter: Int?, progression: Double?) {
         Task {
             do {
-                let text = try await library.makeTextVersion(of: pdf)
-                router.detail = nil
-                // the sheet goes first, so the reader isn't opened under it
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                router.open(text, library: library)
+                let target: Book
+                if let pdfID = book.textVersionOf {
+                    guard let pdf = library.books.first(where: { $0.id == pdfID }) else { return }
+                    target = pdf
+                    if let chapter, let spots = book.pageSpots,
+                       let p = PDFText.page(forChapter: chapter, progression: progression ?? 0, in: spots) {
+                        OpenAt.request(.position(p + 1), for: pdf.id)
+                    }
+                } else {
+                    let text = try await library.makeTextVersion(of: book)
+                    target = text
+                    if let page, let spots = text.pageSpots, let spot = PDFText.spot(forPage: page, in: spots) {
+                        OpenAt.request(.chapter(spot.chapter, progression: spot.progression), for: text.id)
+                    }
+                }
+                if router.detail != nil {
+                    router.detail = nil
+                    // the sheet goes first, so the reader isn't opened under it
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                }
+                router.open(target, library: library)
             } catch is CancellationError {
                 return
             } catch {

@@ -19,8 +19,21 @@ enum PDFText {
         var size: Double
     }
 
+    /// Where one page of the PDF begins in its text version: the chapter (in reading order) and how far into it.
+    struct PageSpot: Codable, Hashable {
+        var page: Int
+        var chapter: Int
+        var progression: Double
+    }
+
+    /// A page's mark in the text, put where the page's first line begins (`markPages`): private-use characters no
+    /// book carries, taken out again by `TextBook` with where they sat (`TextBook.takePageMarks`).
+    static let markOpen: Character = "\u{E101}"
+    static let markClose: Character = "\u{E102}"
+
     /// The whole book as HTML with a `<title>` (and author), or nil when the PDF has no text (scanned pages).
-    static func html(lines raw: [Line], title: String, author: String) -> String? {
+    /// `markPages` puts each page's mark in the text, so the text version knows where every page begins.
+    static func html(lines raw: [Line], title: String, author: String, markPages: Bool = false) -> String? {
         let all = raw.map(cleaned).filter { !$0.text.isEmpty }
         let body = bodySize(all)
         let lines = dropRunningLines(all, body: body)
@@ -33,9 +46,19 @@ enum PDFText {
         var out = ""
         var paragraph = ""
         var heading: (level: Int, text: String)?
+        var markedPage = -1
+        /// Where pages begin in the paragraph being gathered — put in as marks only when it is written out, so the
+        /// joining (a hyphen, a drop cap) sees the words alone.
+        var marks: [(at: Int, page: Int)] = []
 
         func flushParagraph() {
-            let text = paragraph.trimmingCharacters(in: .whitespaces)
+            var marked = paragraph
+            for mark in marks.reversed() {
+                let at = marked.index(marked.startIndex, offsetBy: min(max(mark.at, 0), marked.count))
+                marked.insert(contentsOf: "\(markOpen)\(mark.page)\(markClose)", at: at)
+            }
+            marks = []
+            let text = marked.trimmingCharacters(in: .whitespaces)
             if !text.isEmpty { out += "<p>\(TextBook.esc(text))</p>\n" }
             paragraph = ""
         }
@@ -67,12 +90,30 @@ enum PDFText {
                 flushParagraph()
             }
             paragraph = joined(paragraph, line.text)
+            if markPages, line.page != markedPage {
+                // the mark goes where this line's words begin (inside a word made whole across the page break)
+                marks.append((at: paragraph.count - line.text.count, page: line.page))
+                markedPage = line.page
+            }
         }
         flushParagraph()
         flushHeading()
         guard !out.isEmpty else { return nil }
         let meta = author.isEmpty ? "" : "<meta name=\"author\" content=\"\(TextBook.esc(author))\"/>"
         return "<html><head><title>\(TextBook.esc(title))</title>\(meta)</head><body>\n\(out)</body></html>"
+    }
+
+    // MARK: - Moving between the PDF and its text version
+
+    /// Where the text version shows PDF page `page` (0-based): the last page at or before it that has a spot.
+    static func spot(forPage page: Int, in spots: [PageSpot]) -> PageSpot? {
+        spots.filter { $0.page <= page }.max { $0.page < $1.page } ?? spots.min { $0.page < $1.page }
+    }
+
+    /// The PDF page (0-based) a place in the text version is on: the last page that began at or before it.
+    static func page(forChapter chapter: Int, progression: Double, in spots: [PageSpot]) -> Int? {
+        let before = spots.filter { $0.chapter < chapter || ($0.chapter == chapter && $0.progression <= progression + 0.0001) }
+        return (before.max { ($0.chapter, $0.progression) < ($1.chapter, $1.progression) } ?? spots.min { $0.page < $1.page })?.page
     }
 
     // MARK: - The parts

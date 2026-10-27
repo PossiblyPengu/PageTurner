@@ -106,6 +106,9 @@ struct LibraryView: View {
     private var visible: [Book] {
         var list = library.sortedBooks(order: order, query: query)
         guard !searching else { return list }
+        // a PDF's text version is reached from the PDF (its cover is badged for it), not a second card on the shelf
+        let ids = Set(library.books.map(\.id))
+        list = list.filter { book in book.textVersionOf.map { !ids.contains($0) } ?? true }
         switch activeShelfKey {
         case Self.allKey: break
         case Self.upNextKey: list = list.filter { $0.bmUpNext == true }

@@ -113,7 +113,7 @@ final class ReaderModel: ObservableObject {
             reading = ReadingSpan(startingAt: book.progression)
             var initial = book.locatorJSON.flatMap { try? Locator(jsonString: $0) }
             // opened from a highlight in the hub: land on it, not where the book was left
-            if let requested = OpenAt.take(for: book.id), let place = try? Locator(jsonString: requested) {
+            if let requested = OpenAt.take(for: book.id), let place = await Self.resolve(requested, in: publication) {
                 initial = place
             }
             // no saved place but a progression (a jump to where BookMaster has
@@ -490,6 +490,58 @@ final class ReaderModel: ObservableObject {
             _ = await jump()
             pendingOrigin = nil
         }
+    }
+
+    /// A place asked for from outside (the highlights hub, the switch between a PDF and its text version), found in
+    /// the open book.
+    private static func resolve(_ place: OpenAt.Place, in publication: Publication) async -> Locator? {
+        switch place {
+        case let .locator(json):
+            return try? Locator(jsonString: json)
+        case let .position(n):
+            guard let positions = try? await publication.positions().get(), !positions.isEmpty else { return nil }
+            return positions[min(max(n - 1, 0), positions.count - 1)]
+        case let .chapter(index, progression):
+            guard publication.readingOrder.indices.contains(index),
+                  let start = await publication.locate(publication.readingOrder[index])
+            else { return nil }
+            return start.copy(locations: { $0.progression = min(max(progression, 0), 1) })
+        }
+    }
+
+    /// Where this book is now, as the other version of it would open it: a PDF's page (0-based), or a text
+    /// version's chapter and how far into it.
+    var versionPlace: (page: Int?, chapter: (index: Int, progression: Double)?) {
+        guard let locator = navigator?.currentLocation ?? book.locatorJSON.flatMap({ try? Locator(jsonString: $0) }) else {
+            return (nil, nil)
+        }
+        if book.ext == "pdf" {
+            return (locator.locations.position.map { $0 - 1 }, nil)
+        }
+        let href = locator.href.string
+        guard let index = publication?.readingOrder.firstIndex(where: { $0.url().isEquivalentTo(locator.href) })
+                ?? Self.chapterNumber(in: href).map({ $0 - 1 })
+        else { return (nil, nil) }
+        return (nil, (index, locator.locations.progression ?? 0))
+    }
+
+    /// A PDF's saved page (0-based), for opening its text version there from outside the reader.
+    static func savedPDFPage(of book: Book) -> Int? {
+        book.locatorJSON.flatMap { try? Locator(jsonString: $0) }?.locations.position.map { $0 - 1 }
+    }
+
+    /// A text version's saved chapter (0-based, in reading order) and how far into it.
+    static func savedChapter(of book: Book) -> (index: Int, progression: Double)? {
+        guard let locator = book.locatorJSON.flatMap({ try? Locator(jsonString: $0) }),
+              let number = chapterNumber(in: locator.href.string)
+        else { return nil }
+        return (number - 1, locator.locations.progression ?? 0)
+    }
+
+    /// "OEBPS/ch012.xhtml" → 12: the text importer's chapter files.
+    private static func chapterNumber(in href: String) -> Int? {
+        guard let range = href.range(of: #"ch([0-9]+)\.xhtml"#, options: .regularExpression) else { return nil }
+        return Int(href[range].dropFirst(2).dropLast(6))
     }
 
     // MARK: - What was read

@@ -94,6 +94,9 @@ final class ReadAloud: NSObject, ObservableObject {
     /// The last sentence a scrolling book was jumped to, so a page with no mark to measure is not jumped again with
     /// every word of it.
     private var scrolledTo: Locator?
+    /// The reader has scrolled a scrolling book away from the line being said: the page is left where they put it,
+    /// and the reader shows "Back to Narration" (`resumeFollowing`). Scrolling back to the line lets go of it too.
+    @Published private(set) var followHeld = false
     /// Where the follow is taking the page next; the newest send wins — a
     /// swallowed jump waits here for the retry, not back in the subject where
     /// removeDuplicates would drop it.
@@ -300,7 +303,7 @@ final class ReadAloud: NSObject, ObservableObject {
     ///
     /// Readium's `evaluateJavaScript` hands back what a script returns there and then — it does not wait for a
     /// promise — so the script measures and scrolls in one go, and the waiting for a mark to be painted is done here.
-    private func followScrolling(_ sentence: Locator) {
+    private func followScrolling(_ sentence: Locator, recenter: Bool = false) {
         guard !isTurning, let epub = navigator as? EPUBNavigatorViewController else { return }
         isTurning = true
         Task { @MainActor in
@@ -309,13 +312,21 @@ final class ReadAloud: NSObject, ObservableObject {
                 for attempt in 0 ..< 3 {
                     // a mark is painted a frame or two after the voice moves on
                     if attempt > 0 { try? await Task.sleep(nanoseconds: 120_000_000) }
-                    if await keepSpokenInView(on: epub, center: false) != "none" { return }
+                    switch await keepSpokenInView(on: epub, center: recenter) {
+                    case "none": continue
+                    case "held": followHeld = true; return
+                    case "wait": return
+                    default: followHeld = false; return
+                    }
                 }
             }
+            // a reader who has scrolled away is not taken to the next chapter either
+            guard !followHeld || recenter else { return }
             guard sentence != scrolledTo, let place = sentence.followable,
                   await epub.go(to: place, options: NavigatorGoOptions(animated: false))
             else { return }
             scrolledTo = sentence
+            followHeld = false
             for _ in 0 ..< 10 {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 if await keepSpokenInView(on: epub, center: true) != "none" { return }
@@ -325,9 +336,17 @@ final class ReadAloud: NSObject, ObservableObject {
         }
     }
 
+    /// "Back to Narration": the page goes to the line being said, and follows it again.
+    func resumeFollowing() {
+        followHeld = false
+        guard let sentence = spoken.sentence else { return }
+        scrolledTo = nil
+        followScrolling(sentence, recenter: true)
+    }
+
     /// The spoken line's mark, measured and — if it is near an edge, or `center` asks — scrolled to 40% down the
-    /// screen. Answers "none" (no mark on this page), "held" (the reader touched the page just now), "moved" or
-    /// "shown". The mark queried is the painted line, not the decoration's own wrapper: a group container holds a
+    /// screen. Answers "none" (no mark on this page), "held" (the reader has scrolled the page off the spoken line),
+    /// "wait" (they are on it, finger still busy), "moved" or "shown". The mark queried is the painted line, not the decoration's own wrapper: a group container holds a
     /// plain div per item that sits at the end of the document; only the absolutely-positioned children carry
     /// `data-writing-mode`.
     private func keepSpokenInView(on navigator: EPUBNavigatorViewController, center: Bool) async -> String {
@@ -346,8 +365,16 @@ final class ReadAloud: NSObject, ObservableObject {
                 || document.querySelector('[data-group="tts"] [data-writing-mode]');
           if (!el) { return 'none'; }
           var center = \(center ? "true" : "false");
-          if (!center && Date.now() - w.__ptFollow.touched < 4000) { return 'held'; }
           var h = window.innerHeight, r = el.getBoundingClientRect(), mid = r.top + r.height / 2;
+          if (center) {
+            w.__ptFollow.resumed = Date.now();
+          } else if (w.__ptFollow.touched > (w.__ptFollow.resumed || 0)) {
+            // the reader has moved the page: off the spoken line, it stays where they put it; back on it (and the
+            // finger lifted a moment), following takes over again
+            if (mid < h * 0.1 || mid > h * 0.9) { return 'held'; }
+            if (Date.now() - w.__ptFollow.touched < 1500) { return 'wait'; }
+            w.__ptFollow.resumed = Date.now();
+          }
           if (center || mid < h * 0.15 || mid > h * 0.7) {
             window.scrollBy({ top: mid - h * 0.4, behavior: center ? 'auto' : 'smooth' });
             return 'moved';
@@ -510,7 +537,8 @@ final class ReadAloud: NSObject, ObservableObject {
         if scrolls {
             if let sentence = spoken.sentence {
                 scrolledTo = nil
-                followScrolling(sentence)
+                followHeld = false
+                followScrolling(sentence, recenter: true)
             }
         } else if let place = (spoken.word ?? spoken.sentence)?.followable {
             pendingFollow = place
@@ -668,6 +696,7 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             spoken = Spoken()
             pendingFollow = nil
             scrolledTo = nil
+            followHeld = false
         case let .playing(utterance, range: word):
             // a play task parked between sentences outlived a pause/stop's cancel and
             // reported playing once more — the engine refused to speak it (the composite

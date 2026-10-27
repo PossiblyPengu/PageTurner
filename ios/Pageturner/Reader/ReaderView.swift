@@ -20,6 +20,8 @@ struct ReaderView: View {
     @State private var exportFile: ShareItem?
     @State private var copied = false
     @State private var contentsTab: ContentsTab = .chapters
+    /// The switch to a PDF's text version (or back) is under way — making a text version takes a moment.
+    @State private var switchingVersion = false
 
     /// The way out of the book: the Reading tab is the book's home, so leaving
     /// it is a tab switch, not a dismissal.
@@ -59,6 +61,10 @@ struct ReaderView: View {
                         header.transition(.move(edge: .top).combined(with: .opacity))
                     }
                     Spacer(minLength: 0)
+                    // shown whether or not the chrome is: it appears because the reader scrolled away
+                    if let readAloud = model.readAloud {
+                        NarrationReturnChip(readAloud: readAloud)
+                    }
                     if model.showChrome {
                         if let label = model.backLabel {
                             backChip(label)
@@ -325,6 +331,9 @@ struct ReaderView: View {
                 .accessibilityElement(children: .combine)
 
                 HStack(spacing: 0) {
+                    if model.book.ext == "pdf" || model.book.textVersionOf != nil {
+                        versionButton
+                    }
                     if model.isSearchable {
                         toolButton("magnifyingglass", label: "Search in book") { model.holdChrome(); showSearch = true }
                     }
@@ -491,6 +500,30 @@ struct ReaderView: View {
         .foregroundStyle(.primary)
         .ptGlassCapsule(interactive: true)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// A PDF's text version (made the first time), or a text version's PDF — opened at the same place.
+    @ViewBuilder
+    private var versionButton: some View {
+        let toText = model.book.ext == "pdf"
+        if switchingVersion {
+            ProgressView().frame(width: 42, height: 44)
+        } else {
+            toolButton(toText ? "doc.plaintext" : "doc.richtext",
+                       label: toText ? "Switch to the text version" : "Switch to the original PDF") {
+                let place = model.versionPlace
+                model.flushSave()
+                switchingVersion = true
+                IntentRouter.shared.request = .switchVersion(
+                    from: model.book.id, page: place.page,
+                    chapter: place.chapter?.index, progression: place.chapter?.progression)
+                // the reader is replaced when the other book opens; a PDF with no text says so, and the button is back
+                Task {
+                    try? await Task.sleep(nanoseconds: 20_000_000_000)
+                    switchingVersion = false
+                }
+            }
+        }
     }
 
     private func toolButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
@@ -790,6 +823,30 @@ private struct OutlineRows: View {
             .accessibilityAddTraits(here ? .isSelected : [])
             OutlineRows(links: link.children, depth: depth + 1, path: id, current: current, onSelect: onSelect)
         }
+    }
+}
+
+/// "Back to Narration": read-aloud in a scrolling book stops following when the page is scrolled away from the line
+/// being said; one tap brings the page back and following on.
+private struct NarrationReturnChip: View {
+    @ObservedObject var readAloud: ReadAloud
+
+    var body: some View {
+        ZStack {
+            if readAloud.isActive, readAloud.followHeld {
+                Button { readAloud.resumeFollowing() } label: {
+                    Label("Back to Narration", systemImage: "text.line.first.and.arrowtriangle.forward")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 40)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .ptGlassCapsule()
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .ptAnimation(.smooth(duration: 0.25), value: readAloud.isActive && readAloud.followHeld)
     }
 }
 

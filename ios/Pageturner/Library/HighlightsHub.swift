@@ -4,9 +4,18 @@ import SwiftUI
 /// picked from the hub. Read once, by the reader as it opens.
 @MainActor
 enum OpenAt {
-    private static var pending: [UUID: String] = [:]
-    static func request(_ locatorJSON: String, for book: UUID) { pending[book] = locatorJSON }
-    static func take(for book: UUID) -> String? { pending.removeValue(forKey: book) }
+    /// A saved place; a PDF page (1-based, as Readium counts positions); or a chapter in reading order and how far
+    /// into it — the last two worked out by the reader from the book once it is open.
+    enum Place: Equatable {
+        case locator(String)
+        case position(Int)
+        case chapter(Int, progression: Double)
+    }
+
+    private static var pending: [UUID: Place] = [:]
+    static func request(_ locatorJSON: String, for book: UUID) { pending[book] = .locator(locatorJSON) }
+    static func request(_ place: Place, for book: UUID) { pending[book] = place }
+    static func take(for book: UUID) -> Place? { pending.removeValue(forKey: book) }
 }
 
 /// Every highlight in every book, searchable by colour and text — and a random one to come back to.

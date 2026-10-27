@@ -36,6 +36,8 @@ enum TextBook {
         var language: String
         var epub: Data
         var chapterCount: Int
+        /// Where each page of a PDF begins, for a text version made with page marks (`PDFText.html(markPages:)`).
+        var pageSpots: [PDFText.PageSpot] = []
     }
 
     /// One chapter. `body` is an XHTML fragment that already carries its heading.
@@ -98,12 +100,39 @@ enum TextBook {
         for i in sections.indices where sections[i].title.isEmpty {
             sections[i].title = sections.count == 1 ? title : "Part \(i + 1)"
         }
+        let spots = takePageMarks(&sections)
         let epub = buildEPUB(
             title: title, author: meta.author, language: language, sections: sections, now: now,
             cover: cover, summary: summary)
         return Converted(
             title: title, author: meta.author, language: language, epub: epub,
-            chapterCount: sections.count)
+            chapterCount: sections.count, pageSpots: spots)
+    }
+
+    /// A PDF's page marks taken out of the chapters, and where each sat: how far through its chapter's words.
+    static func takePageMarks(_ sections: inout [Section]) -> [PDFText.PageSpot] {
+        let open = String(PDFText.markOpen), close = String(PDFText.markClose)
+        guard sections.contains(where: { $0.body.contains(open) }) else { return [] }
+        guard let mark = try? NSRegularExpression(pattern: open + "([0-9]+)" + close) else { return [] }
+        var spots: [PDFText.PageSpot] = []
+        for i in sections.indices where sections[i].body.contains(open) {
+            let body = sections[i].body
+            // offsets are counted in the chapter's words, not its markup
+            let words = body.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression) as NSString
+            let found = mark.matches(in: words as String, range: NSRange(location: 0, length: words.length))
+            let total = words.length - found.reduce(0) { $0 + $1.range.length }
+            var removed = 0
+            for match in found {
+                let page = Int(words.substring(with: match.range(at: 1))) ?? 0
+                let at = match.range.location - removed
+                removed += match.range.length
+                spots.append(PDFText.PageSpot(page: page, chapter: i,
+                                              progression: total > 0 ? Double(at) / Double(total) : 0))
+            }
+            sections[i].body = mark.stringByReplacingMatches(
+                in: body, range: NSRange(location: 0, length: (body as NSString).length), withTemplate: "")
+        }
+        return spots
     }
 
     // MARK: - Decoding

@@ -133,8 +133,10 @@ struct Book: Identifiable, Codable, Hashable {
     /// Set when the book was added from Google Drive: the Drive files it is made of. Its files come down when asked
     /// for (`DriveDownloads`), and the book stays in the library, with its place, whether they are on the device or not.
     var drive: GoogleDrive.Source?
-    /// The PDF this book is the text version of (`makeTextVersion`).
+    /// The PDF this book is the text version of (`makeTextVersion`), and where each of its pages begins in this
+    /// book — what the reader's switch between the two goes by.
     var textVersionOf: UUID?
+    var pageSpots: [PDFText.PageSpot]?
 
     var ext: String { fileName.split(separator: ".").last.map(String.init)?.lowercased() ?? "" }
     /// The local name keeps the file's extension, except Drive parts whose Drive name
@@ -690,13 +692,23 @@ final class LibraryStore: ObservableObject {
         try await save(converted)
     }
 
+    /// The text version made of a PDF, if there is one.
+    func textVersion(of pdf: Book) -> Book? {
+        books.first { $0.textVersionOf == pdf.id }
+    }
+
+    /// The PDFs that have a text version — their covers say so, and the text versions stay off the shelf.
+    var pdfsWithTextVersions: Set<UUID> {
+        Set(books.compactMap(\.textVersionOf))
+    }
+
     /// How far each PDF's text version has got while it is being made, 0…1.
     @Published private(set) var textVersionProgress: [UUID: Double] = [:]
 
     /// The text version of a PDF — its words laid out again to flow like a book's (`PDFText`), with the PDF's
     /// details, cover and shelves — made once and kept as a book of its own; asked again, the one there is returned.
     func makeTextVersion(of pdf: Book) async throws -> Book {
-        if let made = books.first(where: { $0.textVersionOf == pdf.id }) { return made }
+        if let made = textVersion(of: pdf) { return made }
         guard textVersionProgress[pdf.id] == nil else { throw CancellationError() }
         textVersionProgress[pdf.id] = 0
         defer { textVersionProgress[pdf.id] = nil }
@@ -708,7 +720,7 @@ final class LibraryStore: ObservableObject {
                     if self?.textVersionProgress[id] != nil { self?.textVersionProgress[id] = fraction }
                 }
             }
-            guard let lines, let html = PDFText.html(lines: lines, title: title, author: author) else { return nil }
+            guard let lines, let html = PDFText.html(lines: lines, title: title, author: author, markPages: true) else { return nil }
             return TextBook.convert(Data(html.utf8), format: .html, fallbackTitle: title)
         }.value
         guard let converted else { throw ImportError.scannedPDF }
@@ -719,6 +731,7 @@ final class LibraryStore: ObservableObject {
         try await register(id: newID, fileName: fileName, fallbackTitle: title)
         mutate(newID) { b in
             b.textVersionOf = pdf.id
+            b.pageSpots = converted.pageSpots.isEmpty ? nil : converted.pageSpots
             b.title = pdf.title
             b.author = pdf.author
             b.bookDescription = pdf.bookDescription

@@ -14,6 +14,8 @@ struct BookCoverView: View {
     var missing = false
     /// A book from Google Drive that has not come down (or is on its way): nil for any other.
     var cloud: DriveDownloads.Badge?
+    /// A PDF that has a text version.
+    var hasTextVersion = false
 
     var body: some View {
         // The 2:3 box is a clear base and the art an overlay on it: an overlay never changes its
@@ -82,6 +84,13 @@ struct BookCoverView: View {
                     .padding(6)
                     .ptGlass(in: Circle())
                     .accessibilityLabel("File missing")
+            }
+            if hasTextVersion {
+                Image(systemName: "doc.plaintext")
+                    .font(.caption2.weight(.bold))
+                    .padding(6)
+                    .ptGlass(in: Circle())
+                    .accessibilityLabel("Has a text version")
             }
             if book.isAudio {
                 Image(systemName: "headphones")
@@ -180,7 +189,8 @@ struct BookGrid: View {
     }
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 24) {
+        let textVersions = library.pdfsWithTextVersions
+        return LazyVGrid(columns: columns, spacing: 24) {
             ForEach(books) { book in
                 Button {
                     if let selection {
@@ -195,7 +205,8 @@ struct BookGrid: View {
                             book: book, cover: library.coverThumbnail(for: book, maxPixels: 640),
                             selected: selection.map { $0.wrappedValue.contains(book.id) },
                             missing: library.missing.contains(book.id),
-                            cloud: downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id)))
+                            cloud: downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id)),
+                            hasTextVersion: textVersions.contains(book.id))
                         Text(book.title)
                             .font(.footnote.weight(.semibold))
                             .lineLimit(2)

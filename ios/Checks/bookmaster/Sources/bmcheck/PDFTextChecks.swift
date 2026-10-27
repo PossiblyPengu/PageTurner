@@ -53,6 +53,27 @@ func runPDFTextChecks() {
     } else {
         check("PDF: the text version converts", false)
     }
+    // the page marks: where every page begins in the text version, and the way back
+    if let marked = PDFText.html(lines: lines, title: "The Test Book", author: "A. Writer", markPages: true),
+       let book = TextBook.convert(Data(marked.utf8), format: .html, fallbackTitle: "x") {
+        let raw = String(decoding: book.epub, as: UTF8.self)
+        let spots = book.pageSpots
+        check("PDF: page marks leave no trace in the book", !raw.contains("\u{E101}") && !raw.contains("\u{E102}"))
+        check("PDF: the words a mark sat in are whole", raw.contains("where it does not end but carries on"), raw)
+        check("PDF: every page with text has a spot", Set(spots.map(\.page)) == [0, 1, 2, 3, 4], "\(spots)")
+        check("PDF: pages one and two are in chapter one, page three in chapter two",
+              spots.first { $0.page == 1 }?.chapter == 0 && spots.first { $0.page == 2 }?.chapter == 1, "\(spots)")
+        check("PDF: a page's spot is part way into its chapter",
+              (spots.first { $0.page == 1 }?.progression ?? 0) > 0.3 && (spots.first { $0.page == 0 }?.progression ?? 1) < 0.05,
+              "\(spots)")
+        check("PDF: page three opens the text version at its spot",
+              PDFText.spot(forPage: 2, in: spots)?.chapter == 1)
+        check("PDF: a place in chapter two goes back to page three or later",
+              (PDFText.page(forChapter: 1, progression: 0.5, in: spots) ?? -1) >= 2)
+        check("PDF: the start of the text version is page one", PDFText.page(forChapter: 0, progression: 0, in: spots) == 0)
+    } else {
+        check("PDF: a marked text version converts", false)
+    }
     check("PDF: no text is no book (a scan)", PDFText.html(lines: [], title: "x", author: "") == nil)
     check("PDF: hyphen join keeps a real dash", PDFText.joined("well-", "Known") == "well- Known" && PDFText.joined("self-", "aware") == "selfaware")
 }
