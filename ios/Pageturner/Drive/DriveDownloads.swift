@@ -50,8 +50,12 @@ final class DriveDownloads {
     /// What arrived before the library was there to answer to it (a background launch).
     @ObservationIgnored private var waiting: [() -> Void] = []
     @ObservationIgnored private var backgroundDone: (() -> Void)?
+    /// Books whose download was asked for on their own page: they open when they arrive (`openKey`).
+    @ObservationIgnored private var opening: Set<UUID> = []
 
     static let cellularKey = "drive-cellular"
+    /// Whether a book downloaded from its own page opens when the last part is in (on unless turned off).
+    static let openKey = "drive-open-when-downloaded"
     static let identifier = "io.github.possiblypengu.pageturner.drive-downloads"
     private static let maxAttempts = 3
 
@@ -124,10 +128,12 @@ final class DriveDownloads {
 
     // MARK: Starting and stopping
 
-    /// Bring down every part of `book` that is not on the device yet.
-    func start(_ book: Book, library: LibraryStore) {
+    /// Bring down every part of `book` that is not on the device yet. `open`: the reader asked for this one book,
+    /// and it opens when it is in (an ebook, with the app in front and no other book in the reader).
+    func start(_ book: Book, library: LibraryStore, open: Bool = false) {
         attach(library)
         guard let source = book.drive else { return }
+        if open, !book.isAudio { opening.insert(book.id) }
         if isRunning(book.id) { return }
         cancelled.remove(book.id)
         let names = library.fileURLs(for: book).map(\.lastPathComponent)
@@ -165,6 +171,7 @@ final class DriveDownloads {
     /// Stop bringing a book down. What has come stays (and is not asked for again).
     func cancel(_ id: UUID) {
         cancelled.insert(id)
+        opening.remove(id)
         states[id] = nil
         done[id] = nil
         flying[id] = nil
@@ -269,6 +276,10 @@ final class DriveDownloads {
         done[id] = nil
         flying[id] = nil
         Log.event("drive", "download finished: \(title ?? id.uuidString)")
+        let wanted = opening.remove(id) != nil && (UserDefaults.standard.object(forKey: Self.openKey) as? Bool ?? true)
+        if wanted, UIApplication.shared.applicationState == .active {
+            IntentRouter.shared.request = .openDownloaded(id)
+        }
         if UIApplication.shared.applicationState != .active, let title {
             let content = UNMutableNotificationContent()
             content.title = "Downloaded"

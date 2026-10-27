@@ -84,6 +84,13 @@ struct RootView: View {
     }
 
     private func handle(_ request: IntentRouter.Request) {
+        if case let .openDownloaded(id) = request {
+            // a book being read is never swapped out for one that has just come down
+            guard !router.readerOpen, let book = library.books.first(where: { $0.id == id }) else { return }
+            router.dismissPresentations()
+            router.open(book, library: library)
+            return
+        }
         router.dismissPresentations()
         switch request {
         case let .open(id):
@@ -108,6 +115,11 @@ struct RootView: View {
             // the Together tab opens it: it owns the chat and the in-app browser
             router.tab = .together
             router.suiteTarget = target
+        case .importBooks:
+            router.tab = .library
+            router.showImporter = true
+        case .openDownloaded:
+            break   // handled above
         }
     }
 
@@ -191,7 +203,7 @@ struct RootView: View {
             },
             cloud: cloud,
             downloadState: downloads.states[book.id],
-            onDownload: { downloads.start(book, library: library) },
+            onDownload: { downloads.start(book, library: library, open: true) },
             onCancelDownload: { downloads.cancel(book.id) },
             onStream: book.isAudio ? { router.stream(book, library: library) } : nil,
             onRemoveDownload: {

@@ -7,7 +7,7 @@ Everything runs on the device — books, covers, positions and the library live 
 
 A native SwiftUI app (iOS 17+) built on the [Readium](https://readium.org) toolkit. It lives in `ios/`.
 
-- **Reading:** EPUB, PDF and CBZ comics, plus plain text, Markdown and HTML (converted to EPUB on import).
+- **Reading:** EPUB, PDF and CBZ comics, plus FB2/FBZ, RTF, plain text, Markdown and HTML (converted to EPUB on import — an FB2 keeps its chapters, notes, blurb and cover).
   Five page themes in the web reader's palettes (Paper, Sepia, Gray, Night, Black — the chrome follows the page), fonts, sizes, spacing and margins;
   in-book search; a draggable position scrubber; footnotes and endnotes open in a sheet instead of throwing you to the end of the chapter,
   and any jump — contents, search hit, link, scrubber — leaves a **Back** chip; a **Page turn** choice — page curl, slide, book flip or fade (a swipe follows your finger; Reduce Motion gets a fade); bookmarks; highlights in five colours with notes (tap one to edit it),
@@ -35,10 +35,11 @@ A native SwiftUI app (iOS 17+) built on the [Readium](https://readium.org) toolk
   Pushes made offline are queued and replayed in order.
 - **BookMaster tab (tracking):** time read and listened, streaks and a two-week chart from the phone itself — no account needed; when BookMaster is linked its streaks, goals, achievements, your shelf, the other reader and suggestions are on the same screen
 - **Siri, Shortcuts and Spotlight:** "Continue reading in Pageturner", "Open *Dune* in Pageturner"; every book is a Spotlight result (switch it off in Settings)
+- **Home Screen quick actions:** press and hold the app icon — continue the book you're in, open one of the others you have going, or add books
 - **Backup:** export the whole library to one zip and restore it here — also restores a backup made by the old web app
 
 Not in the app, on purpose: a Home Screen widget (it needs an app extension and an App Group, which free-Apple-ID sideloading doesn't reliably provision),
-CarPlay (needs an Apple entitlement), real push notifications (same), MOBI/AZW3/FB2/CBR, and the web app's Kokoro "HQ" voice (too large to keep resident).
+CarPlay (needs an Apple entitlement), real push notifications (same), MOBI/AZW3/CBR, and the web app's Kokoro "HQ" voice (too large to keep resident).
 
 ### Install (sideload)
 

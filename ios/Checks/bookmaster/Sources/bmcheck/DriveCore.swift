@@ -130,7 +130,7 @@ enum GoogleDrive {
     /// What a book file is called when it can be imported: the same set the Files picker offers.
     static func isImportableName(_ name: String) -> Bool {
         let ext = (name as NSString).pathExtension.lowercased()
-        return ["epub", "pdf", "cbz", "zip"].contains(ext)
+        return ["epub", "pdf", "cbz", "zip", "fbz", "rtf"].contains(ext)
             || Book.audioExtensions.contains(ext)
             || TextBook.format(forExtension: ext) != nil
     }

@@ -497,7 +497,8 @@ final class LibraryStore: ObservableObject {
 
     /// What a zip may carry. HTML and text are left out on purpose: a zip of a
     /// website or a folder of notes shouldn't become hundreds of "books".
-    private static let archiveExtensions = Set(["epub", "pdf", "cbz"]).union(Book.audioExtensions)
+    /// What is taken out of a zip: books (an `.fbz` is a zipped FB2), not the readme beside them.
+    private static let archiveExtensions = Set(["epub", "pdf", "cbz", "fb2"]).union(Book.audioExtensions)
 
     /// "Open in" and share-sheet deliveries arrive one URL at a time, back to
     /// back — hold the batch for a beat so a multi-part book lands as one.
@@ -585,12 +586,16 @@ final class LibraryStore: ObservableObject {
             let ext = url.pathExtension.lowercased()
             if Book.audioExtensions.contains(ext) {
                 audio.append(url)
-            } else if ext == "zip", !inArchive {
+            } else if ext == "zip" || ext == "fbz", !inArchive {
                 do { try await importArchive(url, failures: &failures) } catch {
                     failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
                 }
             } else if let format = TextBook.format(forExtension: ext) {
                 do { try await importTextBook(url, format: format) } catch {
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
+            } else if ext == "rtf" {
+                do { try await importRTF(url) } catch {
                     failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
                 }
             } else {
@@ -666,7 +671,25 @@ final class LibraryStore: ObservableObject {
             TextBook.convert(data, format: format, fallbackTitle: fallback)
         }.value
         guard let converted else { throw ImportError.emptyText }
+        try await save(converted)
+    }
 
+    /// RTF: read by iOS into HTML, then made an EPUB like any HTML book.
+    private func importRTF(_ source: URL) async throws {
+        let scoped = source.startAccessingSecurityScopedResource()
+        defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+
+        let fallback = source.deletingPathExtension().lastPathComponent
+        let converted = try await Task.detached(priority: .userInitiated) {
+            let html = try RTFBook.html(from: Data(contentsOf: source))
+            return TextBook.convert(Data(html.utf8), format: .html, fallbackTitle: fallback)
+        }.value
+        guard let converted else { throw ImportError.emptyText }
+        try await save(converted)
+    }
+
+    /// A converted book written into the Books folder and put on the shelf.
+    private func save(_ converted: TextBook.Converted) async throws {
         let id = UUID()
         let fileName = "\(id.uuidString).epub"
         try converted.epub.write(to: booksDir.appendingPathComponent(fileName), options: .atomic)

@@ -70,7 +70,7 @@ targets:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Pageturner connects to a book catalogue on your network when you add one.
         # the camera reads a cover's barcode to find the book on BookMaster
-        NSCameraUsageDescription: Pageturner uses the camera to scan a book's barcode when adding it to BookMaster.
+        NSCameraUsageDescription: Pageturner uses the camera to scan a book's barcode, to find the book or its details.
         # BookMaster's pair flow comes home as pageturner://link?code=…
         CFBundleURLTypes:
           - CFBundleURLName: io.github.possiblypengu.pageturner
@@ -125,8 +125,19 @@ targets:
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - public.html
-        # CBZ and Markdown have no system type on every iOS — declare them so
-        # "Open in Pageturner" is offered for those files
+          - CFBundleTypeName: Rich Text
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.rtf
+          - CFBundleTypeName: FictionBook
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - io.github.possiblypengu.pageturner.fb2
+              - io.github.possiblypengu.pageturner.fbz
+        # CBZ, Markdown and FictionBook have no system type on every iOS — declare
+        # them so "Open in Pageturner" is offered for those files
         UTImportedTypeDeclarations:
           - UTTypeIdentifier: io.github.possiblypengu.pageturner.cbz
             UTTypeDescription: Comic Book Archive
@@ -147,6 +158,24 @@ targets:
                 - md
                 - markdown
                 - mdown
+          - UTTypeIdentifier: io.github.possiblypengu.pageturner.fb2
+            UTTypeDescription: FictionBook
+            UTTypeConformsTo:
+              - public.xml
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - fb2
+              public.mime-type:
+                - application/x-fictionbook+xml
+          - UTTypeIdentifier: io.github.possiblypengu.pageturner.fbz
+            UTTypeDescription: Zipped FictionBook
+            UTTypeConformsTo:
+              - public.zip-archive
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - fbz
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.possiblypengu.pageturner

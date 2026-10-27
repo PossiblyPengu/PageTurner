@@ -150,6 +150,7 @@ func runData() async {
     runHardcoverChecks()
     runSweepReaderChecks()
     runTextBook()
+    runFB2Checks()
 }
 
 @MainActor

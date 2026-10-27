@@ -17,6 +17,10 @@ final class IntentRouter {
         case restart(UUID)
         /// A notification's tap (`pageturner://open?…`): the chat, or one of the suite's web apps.
         case openSuite(BMDeepLink.Target)
+        /// The Home Screen's "Add Books": the Files picker.
+        case importBooks
+        /// A book downloaded from its own page is in: open it, unless another is in the reader.
+        case openDownloaded(UUID)
     }
 
     var request: Request?

@@ -13,7 +13,22 @@ import NaturalLanguage
 /// licence trimmed. Markdown is parsed into real headings, lists and quotes.
 /// HTML is rebuilt as well-formed XHTML from a whitelist of tags.
 enum TextBook {
-    enum Format { case plain, markdown, html }
+    enum Format { case plain, markdown, html, fb2 }
+
+    /// A cover picture to put in the EPUB (an FB2's own).
+    struct Cover {
+        var data: Data
+        var mediaType: String
+
+        var fileExtension: String {
+            switch mediaType.lowercased() {
+            case "image/png": return "png"
+            case "image/gif": return "gif"
+            case "image/webp": return "webp"
+            default: return "jpg"
+            }
+        }
+    }
 
     struct Converted {
         var title: String
@@ -40,6 +55,7 @@ enum TextBook {
         case "txt", "text": return .plain
         case "md", "markdown", "mdown": return .markdown
         case "html", "htm", "xhtml": return .html
+        case "fb2": return .fb2
         default: return nil
         }
     }
@@ -49,15 +65,29 @@ enum TextBook {
     static func convert(
         _ data: Data, format: Format, fallbackTitle: String, now: Date = Date()
     ) -> Converted? {
-        let text = decode(data)
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-
         var meta = Meta()
         var sections: [Section]
-        switch format {
-        case .plain: (sections, meta) = plainSections(text)
-        case .markdown: (sections, meta) = markdownSections(text)
-        case .html: (sections, meta) = htmlSections(text)
+        var language: String
+        var cover: Cover?
+        var summary = ""
+        if format == .fb2 {
+            // XML that names its own encoding: parsed from the bytes, not decoded first
+            guard let book = FB2Book.parse(data) else { return nil }
+            (sections, meta) = htmlSections(book.html)
+            if !book.title.isEmpty { meta.title = book.title }
+            meta.author = book.authors.joined(separator: ", ")
+            language = book.language.isEmpty ? detectLanguage(BookText.plain(fromHTML: book.html)) : book.language
+            cover = book.cover
+            summary = book.annotation
+        } else {
+            let text = decode(data)
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            switch format {
+            case .plain: (sections, meta) = plainSections(text)
+            case .markdown: (sections, meta) = markdownSections(text)
+            case .html, .fb2: (sections, meta) = htmlSections(text)
+            }
+            language = detectLanguage(text)
         }
         guard !sections.isEmpty else { return nil }
 
@@ -68,9 +98,9 @@ enum TextBook {
         for i in sections.indices where sections[i].title.isEmpty {
             sections[i].title = sections.count == 1 ? title : "Part \(i + 1)"
         }
-        let language = detectLanguage(text)
         let epub = buildEPUB(
-            title: title, author: meta.author, language: language, sections: sections, now: now)
+            title: title, author: meta.author, language: language, sections: sections, now: now,
+            cover: cover, summary: summary)
         return Converted(
             title: title, author: meta.author, language: language, epub: epub,
             chapterCount: sections.count)
@@ -811,7 +841,8 @@ enum TextBook {
     }
 
     static func buildEPUB(
-        title: String, author: String, language: String, sections: [Section], now: Date
+        title: String, author: String, language: String, sections: [Section], now: Date,
+        cover: Cover? = nil, summary: String = ""
     ) -> Data {
         var zip = ZipWriter()
         // the mimetype entry comes first and is stored — the one rule of the container
@@ -834,6 +865,14 @@ enum TextBook {
         """
         var spine = ""
         var tocItems = ""
+        var coverMeta = ""
+        if let cover {
+            let file = "cover.\(cover.fileExtension)"
+            manifest += "\n    <item id=\"cover\" href=\"\(file)\" media-type=\"\(esc(cover.mediaType))\" properties=\"cover-image\"/>"
+            // the EPUB 2 way too, which some readers still look for
+            coverMeta = "\n    <meta name=\"cover\" content=\"cover\"/>"
+            zip.add("OEBPS/\(file)", cover.data)
+        }
         for (i, section) in sections.enumerated() {
             let file = chapterFile(i)
             manifest += "\n    <item id=\"c\(i + 1)\" href=\"\(file)\" media-type=\"application/xhtml+xml\"/>"
@@ -842,14 +881,15 @@ enum TextBook {
             zip.add("OEBPS/\(file)", text: xhtml(title: section.title, language: language, body: section.body))
         }
         let creator = author.isEmpty ? "" : "\n    <dc:creator>\(esc(author))</dc:creator>"
+        let blurb = summary.isEmpty ? "" : "\n    <dc:description>\(esc(summary))</dc:description>"
         zip.add("OEBPS/content.opf", text: """
         <?xml version="1.0" encoding="UTF-8"?>
         <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid" xml:lang="\(esc(language))">
           <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
             <dc:identifier id="uid">urn:uuid:\(UUID().uuidString.lowercased())</dc:identifier>
-            <dc:title>\(esc(title))</dc:title>\(creator)
+            <dc:title>\(esc(title))</dc:title>\(creator)\(blurb)
             <dc:language>\(esc(language))</dc:language>
-            <meta property="dcterms:modified">\(modified)</meta>
+            <meta property="dcterms:modified">\(modified)</meta>\(coverMeta)
           </metadata>
           <manifest>
         \(manifest)

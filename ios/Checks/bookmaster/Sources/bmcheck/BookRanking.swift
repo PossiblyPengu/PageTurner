@@ -241,7 +241,10 @@ enum BookRank {
         }
         let name = tokens(lead)
         let who = name.isEmpty ? "" : "\(name[0].prefix(1))|\(name[name.count - 1])"
-        return "\(tokens(book.title).joined(separator: " "))|\(who)"
+        // a title with no Latin letters (or only stopwords) still tells books apart by its own text
+        let words = tokens(book.title)
+        let title = words.isEmpty ? book.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) : words.joined(separator: " ")
+        return "\(title)|\(who)"
     }
 
     /// Order results by how well they answer the query, and fold duplicates.

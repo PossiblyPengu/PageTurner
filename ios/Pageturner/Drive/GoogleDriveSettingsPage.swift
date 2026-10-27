@@ -9,6 +9,7 @@ struct GoogleDriveSettingsPage: View {
     @State private var showFolderPicker = false
     @State private var confirmSignOut = false
     @AppStorage(DriveDownloads.cellularKey) private var cellular = true
+    @AppStorage(DriveDownloads.openKey) private var openWhenDownloaded = true
     private let auth = GoogleAuth.shared
     private let sync = DriveSync.shared
 
@@ -79,10 +80,11 @@ struct GoogleDriveSettingsPage: View {
     private var downloads: some View {
         Section {
             Toggle("Download over mobile data", isOn: $cellular)
+            Toggle("Open a book when it has downloaded", isOn: $openWhenDownloaded)
         } header: {
             Text("Downloads")
         } footer: {
-            Text("Books from Drive are added to your library without being downloaded: open one and tap Download. Downloads go on with the app closed, and pick up again after a lost connection. Large audiobooks are best on Wi-Fi.")
+            Text("Books from Drive are added to your library without being downloaded: open one and tap Download. Downloads go on with the app closed, and pick up again after a lost connection. Large audiobooks are best on Wi-Fi. A book downloaded from its page opens when it is in, unless you are reading another.")
         }
     }
 

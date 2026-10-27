@@ -35,9 +35,9 @@ struct LibraryView: View {
     @State private var backupSnoozed = false
 
     /// Comics and Markdown have no system type everywhere — match them by extension.
-    private static let extraTypes = ["cbz", "md", "markdown"].compactMap { UTType(filenameExtension: $0) }
+    private static let extraTypes = ["cbz", "md", "markdown", "fb2", "fbz"].compactMap { UTType(filenameExtension: $0) }
     /// `.folder`: an audiobook's tracks often come as a folder of parts.
-    static let pickerTypes: [UTType] = [.epub, .pdf, .audio, .plainText, .html, .zip, .folder] + extraTypes
+    static let pickerTypes: [UTType] = [.epub, .pdf, .audio, .plainText, .html, .rtf, .zip, .folder] + extraTypes
 
     /// Built-in shelf filters carry a "~" a shelf name can't start with.
     private static let allKey = "~all"

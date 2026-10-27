@@ -13,6 +13,18 @@ final class PageturnerAppDelegate: NSObject, UIApplicationDelegate {
         guard identifier == DriveDownloads.identifier else { completionHandler(); return }
         DriveDownloads.shared.holdBackgroundCompletion(completionHandler)
     }
+
+    /// The scene gets a delegate of its own for the Home Screen quick actions chosen while the app runs; one that
+    /// launched the app arrives here.
+    func application(
+        _ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        if let item = options.shortcutItem { QuickActions.handle(item) }
+        let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        configuration.delegateClass = PageturnerSceneDelegate.self
+        return configuration
+    }
 }
 
 @main
@@ -73,6 +85,7 @@ struct PageturnerApp: App {
                         Task { await BookMaster.shared.beat(leaving: true) }
                         Notifier.shared.scheduleRefresh()
                         BackgroundKeepAlive.shared.update(background: true)
+                        QuickActions.update(library)
                         AutoBackup.shared.scheduleBackground()
                     default: break
                     }
@@ -116,6 +129,7 @@ struct PageturnerApp: App {
                     await BookMaster.shared.pushCovers(from: library)
                     await Notifier.shared.refresh(notify: false)
                     SpotlightIndexer.shared.libraryChanged(library)
+                    QuickActions.update(library)
                     // last: a backup of a big library takes a while, and nothing above waits on it
                     await AutoBackup.shared.runIfDue(library: library)
                 }
