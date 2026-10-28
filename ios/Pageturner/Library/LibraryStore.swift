@@ -304,6 +304,8 @@ extension Book {
         audioClips = (try? c.decodeIfPresent([AudioClip].self, forKey: .audioClips)) ?? []
         words = (try? c.decodeIfPresent([SavedWord].self, forKey: .words)) ?? []
         drive = try? c.decodeIfPresent(GoogleDrive.Source.self, forKey: .drive)
+        textVersionOf = try c.decodeIfPresent(UUID.self, forKey: .textVersionOf)
+        pageSpots = try? c.decodeIfPresent([PDFText.PageSpot].self, forKey: .pageSpots)
     }
 
     /// How a BookMaster push names this book.

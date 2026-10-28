@@ -54,17 +54,18 @@ enum HardcoverClient {
     /// Hardcover allows about sixty calls a minute for a token — and the built-in token is shared by everyone. A
     /// search's few calls go at once; a folder of books being looked up settles to one a little over a second.
     private static let pacer = Pacer()
-    private static let failures = FailureClock()
 
-    /// Hits for a free-text query (a title and author, or an ISBN). Empty without a token, or on any failure.
-    static func search(_ query: String) async -> [HardcoverHit] {
+    /// Hits for a free-text query (a title and author, or an ISBN). Empty without a token, or on any failure —
+    /// which `failed` says: true when asking went wrong (refused, throttled, unreachable), false when Hardcover
+    /// simply had nothing. A search that lost Hardcover is not kept as though Hardcover had nothing.
+    static func search(_ query: String) async -> (hits: [HardcoverHit], failed: Bool) {
         guard !query.isEmpty,
               let auth = authorization,
               let url = URL(string: HardcoverCore.endpoint),
               let body = HardcoverCore.body(query: query)
-        else { return [] }
+        else { return ([], false) }
         await pacer.wait()
-        guard !Task.isCancelled else { return [] }
+        guard !Task.isCancelled else { return ([], false) }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.httpBody = body
@@ -74,15 +75,10 @@ enum HardcoverClient {
               (response as? HTTPURLResponse)?.statusCode == 200
         else {
             // a search called off is not Hardcover failing
-            if !Task.isCancelled { await failures.note() }
-            return []
+            return ([], !Task.isCancelled)
         }
-        return HardcoverCore.parse(data)
+        return (HardcoverCore.parse(data), false)
     }
-
-    /// Whether a call to Hardcover failed (refused, throttled, unreachable) since `start` — a search that lost it
-    /// is not kept as though Hardcover had nothing.
-    static func failed(since start: Date) async -> Bool { await failures.failed(since: start) }
 
     /// Settings' "Test": nil when the token works, else a sentence saying what is wrong.
     static func test() async -> String? {
@@ -122,8 +118,3 @@ private actor Pacer {
     }
 }
 
-private actor FailureClock {
-    private var last: Date?
-    func note() { last = Date() }
-    func failed(since start: Date) -> Bool { last.map { $0 >= start } ?? false }
-}

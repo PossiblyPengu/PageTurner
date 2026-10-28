@@ -343,10 +343,20 @@ final class DriveDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchec
             guard let parts = text?.split(separator: "|", maxSplits: 4, omittingEmptySubsequences: false), parts.count == 5,
                   let book = UUID(uuidString: String(parts[0])), let index = Int(parts[1]), let size = Int64(parts[3])
             else { return nil }
-            self.init(book: book, index: index, name: String(parts[2]), size: size, file: String(parts[4]))
+            self.init(book: book, index: index, name: Self.unescaped(String(parts[2])), size: size, file: String(parts[4]))
         }
 
-        var description: String { "\(book.uuidString)|\(index)|\(name)|\(size)|\(file)" }
+        /// `|` separates the ticket's parts, so a file name that holds one is
+        /// escaped — "%" first, or its own escapes would be read back.
+        private static func escaped(_ name: String) -> String {
+            name.replacingOccurrences(of: "%", with: "%25").replacingOccurrences(of: "|", with: "%7C")
+        }
+
+        private static func unescaped(_ name: String) -> String {
+            name.replacingOccurrences(of: "%7C", with: "|").replacingOccurrences(of: "%25", with: "%")
+        }
+
+        var description: String { "\(book.uuidString)|\(index)|\(Self.escaped(name))|\(size)|\(file)" }
     }
 
     private let lock = NSLock()

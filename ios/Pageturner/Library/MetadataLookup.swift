@@ -190,7 +190,6 @@ enum MetadataLookup {
         progress: (@MainActor ([MetadataCandidate]) -> Void)? = nil,
         stopWhen: (([MetadataCandidate]) -> Bool)? = nil
     ) async -> [MetadataCandidate] {
-        let started = Date()
         // a list made without Hardcover is not what a reader with a token should be handed back
         let key = (title + "|" + author + "|" + (isbn ?? "") + (HardcoverClient.hasToken ? "|hc" : "") + (audio ? "|aud" : "")).lowercased()
         if let hit = await MainActor.run(body: { recalled(key) }) {
@@ -216,29 +215,39 @@ enum MetadataLookup {
         let hardcoverSlots = hardcover ? asks.count + extraSlots / 2 : 0
         var slots: [[MetadataCandidate]] = Array(repeating: [], count: hardcoverBase + hardcoverSlots)
         var stopped = false
-        await withTaskGroup(of: (Int, [MetadataCandidate]).self) { group in
+        var hardcoverFailed = false
+        await withTaskGroup(of: (Int, [MetadataCandidate], Bool).self) { group in
             for (n, ask) in asks.enumerated() {
-                group.addTask { (n * 2, await catalogue(ask.title, author: ask.author, interactive: interactive)) }
-                group.addTask { (n * 2 + 1, await googleBooks(title: ask.title, author: ask.author)) }
+                group.addTask { (n * 2, await catalogue(ask.title, author: ask.author, interactive: interactive), false) }
+                group.addTask { (n * 2 + 1, await googleBooks(title: ask.title, author: ask.author), false) }
             }
             if let extra {
-                group.addTask { (asks.count * 2, await catalogue(extra, interactive: interactive)) }
-                group.addTask { (asks.count * 2 + 1, await googleBooks(query: "isbn:\(extra)")) }
+                group.addTask { (asks.count * 2, await catalogue(extra, interactive: interactive), false) }
+                group.addTask { (asks.count * 2 + 1, await googleBooks(query: "isbn:\(extra)"), false) }
             }
             for (n, ask) in asks.enumerated() where audio {
-                group.addTask { (asks.count * 2 + extraSlots + n, await audible(title: ask.title, author: ask.author)) }
+                group.addTask { (asks.count * 2 + extraSlots + n, await audible(title: ask.title, author: ask.author), false) }
             }
             if audio, let extra {
-                group.addTask { (asks.count * 2 + extraSlots + asks.count, await audible(query: extra)) }
+                group.addTask { (asks.count * 2 + extraSlots + asks.count, await audible(query: extra), false) }
             }
             if hardcover {
                 for (n, ask) in asks.enumerated() {
-                    group.addTask { (hardcoverBase + n, await hardcoverBooks([ask.title, ask.author].filter { !$0.isEmpty }.joined(separator: " "))) }
+                    group.addTask {
+                        let (list, failed) = await hardcoverBooks([ask.title, ask.author].filter { !$0.isEmpty }.joined(separator: " "))
+                        return (hardcoverBase + n, list, failed)
+                    }
                 }
-                if let extra { group.addTask { (hardcoverBase + asks.count, await hardcoverBooks(extra)) } }
+                if let extra {
+                    group.addTask {
+                        let (list, failed) = await hardcoverBooks(extra)
+                        return (hardcoverBase + asks.count, list, failed)
+                    }
+                }
             }
-            for await (index, list) in group {
+            for await (index, list, failed) in group {
                 slots[index] = list
+                hardcoverFailed = hardcoverFailed || failed
                 let deduped = dedupe(slots.flatMap { $0 })
                 let merged = await MainActor.run { pinToShelf(deduped) }
                 await progress?(merged)
@@ -265,7 +274,7 @@ enum MetadataLookup {
         }
         // a search cut short, or one where nothing came back (the network, not the book), is not worth remembering
         // (kept without the shelf pins, which are worked out when the list is handed out)
-        if !stopped, !Task.isCancelled, !deduped.isEmpty, await !HardcoverClient.failed(since: started) {
+        if !stopped, !Task.isCancelled, !deduped.isEmpty, !hardcoverFailed {
             await MainActor.run { remember(key, deduped) }
         }
         return await MainActor.run { pinToShelf(deduped) }
@@ -370,14 +379,16 @@ enum MetadataLookup {
 
     // MARK: - Hardcover
 
-    private static func hardcoverBooks(_ query: String) async -> [MetadataCandidate] {
-        await HardcoverClient.search(query).map { hit in
+    /// The hits, and whether asking went wrong — a failed Hardcover call must not be remembered as an empty one.
+    private static func hardcoverBooks(_ query: String) async -> ([MetadataCandidate], Bool) {
+        let (hits, failed) = await HardcoverClient.search(query)
+        return (hits.map { hit in
             MetadataCandidate(
                 title: hit.title, authors: hit.authors, year: hit.year, summary: hit.summary,
                 isbn: hit.isbn.flatMap { ISBN.normalize($0) },
                 coverURLs: (hit.coverURL.map { [$0] } ?? []) + CoverLinks.isbn(hit.isbn) + CoverLinks.amazon(hit.isbn),
                 source: "Hardcover")
-        }
+        }, failed)
     }
 
     // MARK: - Audible
@@ -462,7 +473,7 @@ enum MetadataLookup {
         guard let book = library.books.first(where: { $0.id == id }) else { return false }
         let askTitle = title ?? book.title, askAuthor = author ?? book.author
         let (left, right) = askAuthor.isEmpty ? splitName(askTitle) : (askTitle, "")
-        let ownISBN = book.isbn
+        let ownISBN = book.isbn.flatMap(ISBN.normalize)
         // the details are filled in without being looked at, so a match has to be the book: its ISBN, or the title
         // with an author that agrees. A name with an author in it ("Dune - Frank Herbert") is held to that author,
         // either way round; a book with no author at all takes only a match that names one.
