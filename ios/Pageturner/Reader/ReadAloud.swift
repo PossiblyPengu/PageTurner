@@ -786,31 +786,42 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
 
 extension Locator {
     /// Readium's content iterator bakes the parent element's CSS selector into every locator it
-    /// makes (utterances, search hits), and the page anchors inside that element. A book whose ids
-    /// a selector can't name — a leading digit, which Calibre gives every body — makes
-    /// querySelector throw, so nothing is marked or scrolled to. The text anchor's before/after
-    /// context finds the spot without it. Locators the page itself produces (selections, the
-    /// first-visible-element locator) carry a proper JS-generated selector and keep it.
+    /// makes (utterances, search hits), and the page anchors inside that element: the text search
+    /// for the sentence or word stays within it. A book whose ids a selector can't name — a leading
+    /// digit, which Calibre gives every body — makes querySelector throw, so nothing is marked or
+    /// scrolled to; the selector used to be dropped for that, which sent every anchor to a fuzzy
+    /// search of the whole chapter — and a sentence the page spells a little differently (a
+    /// line break, a bullet, an entity) was "found" twenty screens away, where the page then went
+    /// for a moment on every such sentence. Now the selector is kept, repaired so the page can
+    /// parse it (`CSSSelectorRepair`). Locators the page itself produces (selections, the
+    /// first-visible-element locator) carry a proper JS-generated selector and are left alone.
     /// A word or sentence with nothing of its own text around it — a speaker's name on a line by itself, "No." — is
-    /// found by its text alone, and the first one of those in the chapter is where a text search lands.
+    /// found by its text alone, and without a selector the first one of those in the chapter is where a text search lands.
     var isLonely: Bool {
         (text.before ?? "").isEmpty && (text.after ?? "").isEmpty
     }
 
-    /// What the page is taken to, or nil to leave it where it is: a lonely locator would take the page back to the
-    /// first place that text appears in the chapter (and the next sentence takes it on from there). A lone line is
-    /// all but always on the page already.
-    var followable: Locator? {
-        isLonely ? nil : anchorable
+    /// Whether the page can be told which element to look in.
+    var hasSelector: Bool {
+        locations.otherLocations["cssSelector"]?.string != nil
     }
 
-    /// What a mark is painted at. A lonely locator keeps its selector (precise where the selector works, and
-    /// nothing at all — rather than the wrong place — where it cannot); the rest are anchored by their text.
+    /// What the page is taken to, or nil to leave it where it is: a lonely locator with no element to look in
+    /// would take the page back to the first place that text appears in the chapter (and the next sentence takes
+    /// it on from there). A lone line is all but always on the page already.
+    var followable: Locator? {
+        isLonely && !hasSelector ? nil : anchorable
+    }
+
+    /// What a mark is painted at: the text, looked for inside the element it came from.
     var paintable: Locator {
-        isLonely ? self : anchorable
+        anchorable
     }
 
     var anchorable: Locator {
-        copy(locations: { $0.otherLocations.removeValue(forKey: "cssSelector") })
+        copy(locations: { locations in
+            guard let selector = locations.otherLocations["cssSelector"]?.string else { return }
+            locations.otherLocations["cssSelector"] = .string(CSSSelectorRepair.repaired(selector))
+        })
     }
 }

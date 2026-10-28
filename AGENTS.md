@@ -83,6 +83,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 - Word ranges from a TTS engine index the text it was given; if that differs from `locator.text.highlight`,
   the spoken-word locator is garbage and the page follows it to the wrong place (fuzzy text anchoring finds
   *something*).
+- The page anchors a locator's text *inside* the element its `cssSelector` names (`rangeFromLocator` in Readium's
+  `utils.js`, hypothesis' `matchQuote`: up to half the quote may be wrong, and the best of the candidates wins). With no
+  selector the search is the whole chapter, so a sentence the DOM spells slightly differently was "found" screens away and
+  the narration follow went there for a second on every such sentence. Never drop `cssSelector` from a locator: Readium's
+  iterator writes ids with a leading digit unescaped (`#1abc`, which `querySelector` rejects), and
+  `Locator.anchorable` repairs that (`Reader/CSSSelectorRepair.swift`, Linux-checked) instead.
 - Fuzz pure helpers with random Unicode and odd numbers before trusting them (a speech-range finder crashed on a
   sample rate of 0): 200k random strings through `SpokenWords.tokens/schedule` take seconds on Linux.
 - Decoration templates (HTML + CSS for Readium highlights) can be tried without a device: Readium's compiled
