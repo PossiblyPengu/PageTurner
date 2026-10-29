@@ -33,7 +33,15 @@ final class ReaderModel: ObservableObject {
         didSet {
             playingSink = readAloud?.$isPlaying
                 .sink { [weak self] playing in self?.readAloudPlaying = playing }
-            if readAloud == nil { readAloudPlaying = false }
+            if readAloud == nil {
+                readAloudPlaying = false
+                // the voice has ended: bring the page to where it stopped. A page still
+                // behind — one that could not be driven while the screen was locked —
+                // agrees before the next place it reports can take the save
+                if let ahead = narrationAhead, let navigator {
+                    Task { _ = await navigator.go(to: ahead.anchorable, options: NavigatorGoOptions(animated: false)) }
+                }
+            }
         }
     }
     /// Whether the voice is going right now — republished here so a view needn't subscribe inside.
@@ -535,6 +543,7 @@ final class ReaderModel: ObservableObject {
     /// needs to stand until it returns.)
     private func navigate(_ jump: @escaping () async -> Bool) {
         pendingOrigin = currentLocator
+        narrationAhead = nil   // a jump the reader asked for gives the page the lead back
         Task {
             _ = await jump()
             pendingOrigin = nil
@@ -641,6 +650,7 @@ final class ReaderModel: ObservableObject {
               let navigator
         else { return }
         returning = true
+        narrationAhead = nil   // a move back the reader asked for gives the page the lead
         Task {
             _ = await navigator.go(to: locator, options: NavigatorGoOptions(animated: true))
             returning = false
@@ -1022,7 +1032,10 @@ final class ReaderModel: ObservableObject {
             self.readAloud = nil
             ReadAloudHost.shared.narrationEnded(self)
         }
-        readAloud.onNarrated = { [weak self] locator in self?.narrated(to: locator) }
+        readAloud.onNarrated = { [weak self, weak readAloud] locator in
+            guard let self, let readAloud, self.readAloud === readAloud else { return }
+            self.narrated(to: locator)
+        }
         // "sleep at the end of the chapter" knows its chapter through the reader's contents
         readAloud.chapterID = { [weak self] locator in self?.chapterEntry(for: locator)?.id }
         readAloud.onVoiceFallback = { [weak self] in
@@ -1072,9 +1085,12 @@ final class ReaderModel: ObservableObject {
         endSession()
     }
 
-    /// Read-aloud carried on with the reader away: where the voice is, is where the reader is — saved, and told to
-    /// BookMaster as a page turn would be. The page catches up when the reader is back.
+    /// Read-aloud's place: where the voice is, is where the reader is — saved, and told to
+    /// BookMaster as a page turn would be, and kept ahead of the page until the page reaches it.
     func narrated(to locator: Locator) {
+        // a report that outlived its own session (a delegate call queued before the stop)
+        // must not take the place back — the catch-up page has it
+        guard readAloud != nil else { return }
         currentLocator = locator
         narrationAhead = locator
         lastActivityAt = Date()
@@ -1279,21 +1295,29 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
         guard readAloud?.onScreen != false else { return }
         previousLocator = currentLocator
         currentLocator = locator
-        narrationAhead = nil   // the page is where the voice was, or the reader moved it
         lastActivityAt = Date()
-        // reading on from where a jump landed lets the way back go
-        if history.back != nil { history.readOn(to: locator.locations.totalProgression ?? book.progression ?? 0) }
-        if let json = try? locator.jsonString() { book.locatorJSON = json }
-        if let prog = locator.locations.totalProgression, prog.isFinite {
-            book.progression = prog
+        // While the voice holds the place, a page still catching up — or a webview reloaded
+        // to where it was when the screen locked — must not pull the saved place back with it.
+        // One at or past the narrated spot may take it.
+        let caughtUp = NarrationLead.caughtUp(
+            reported: locator.locations.totalProgression,
+            narrated: narrationAhead?.locations.totalProgression)
+        if caughtUp {
+            narrationAhead = nil   // the page is where the voice was, or the reader moved past it
+            if let json = try? locator.jsonString() { book.locatorJSON = json }
+            if let prog = locator.locations.totalProgression, prog.isFinite {
+                book.progression = prog
+            }
+            // reading on from where a jump landed lets the way back go
+            if history.back != nil { history.readOn(to: locator.locations.totalProgression ?? book.progression ?? 0) }
+            reading.moved(to: locator.locations.totalProgression)
+            let entry = chapterEntry(for: locator)
+            chapterTitle = entry?.link.title
+            currentChapterID = entry?.id
         }
         isCurrentLocationBookmarked = bookmark(matching: locator) != nil
-        let entry = chapterEntry(for: locator)
-        chapterTitle = entry?.link.title
-        currentChapterID = entry?.id
         scheduleSave()
         beginSession()
-        reading.moved(to: locator.locations.totalProgression)
         pushProgress()
     }
 

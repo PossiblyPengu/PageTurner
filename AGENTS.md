@@ -122,10 +122,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   while narration is under way (`leave`), so the navigator, the publication and the voice stay alive, and the now-playing strip — the same
   bottom-accessory slot as `MiniPlayer`, with the book, chapter, previous/play/next sentence, and Stop + sleep timer on a long press — is
   shown for `host.held`. Tapping it (`AppRouter.openNarration`) opens the book again and the same reader is taken back (`take(for:)`). While
-  the reader is away `ReadAloud.onScreen` is false: nothing is followed, painted or measured per word; each new sentence is reported
-  (`onNarrated` → `ReaderModel.narrated(to:)`) so the saved place, the BookMaster progress and the sitting move with the voice, the navigator's
-  own (stale) location is ignored and never saved (`narrationAhead`), and when the reader is back (`show`) the page catches up to the
-  sentence being said. One voice: showing a reader for another book stops what is held; deleting a book stops its narration. Which strip
+  the reader is away `ReadAloud.onScreen` is false: nothing is followed, painted or measured per word. Whether it is away or not, each new
+  sentence is reported (`onNarrated` → `ReaderModel.narrated(to:)`) so the saved place, the BookMaster progress and the sitting move with the
+  voice: the page only follows it, so while `narrationAhead` holds, a place the navigator reports *behind* the narrated one — a page still
+  catching up, or a webview reloaded to where it was when the phone locked — is ignored and never saved (`NarrationLead`, Linux-checked); a
+  jump the reader asked for (`navigate`, Back) gives the page the lead back, and when the voice ends the page is taken to where it stopped.
+  When the reader is back (`show`) the page catches up to the sentence being said. One voice: showing a reader for another book stops what is held; deleting a book stops its narration. Which strip
   shows when an audiobook is loaded too is `NowPlayingBar.choose` (pure, Linux-checked): whichever last took the stage, i.e.
   `AudioFocus.holder` (now `@Observable`; it mirrors `RemoteControls.activeOwner`). The simulator run (`-PTDebugReaderSheet readaloudaway`)
   starts the voice, leaves the reader and fails if no `PTNarrated` line follows; `68-readaloud-strip` is the photograph.

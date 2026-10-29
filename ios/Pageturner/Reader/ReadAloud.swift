@@ -57,10 +57,10 @@ final class ReadAloud: NSObject, ObservableObject {
     private let neural: NeuralTTSEngine
     private let composite: CompositeTTSEngine
     private let startup = AudioStartup()
-    /// Something else owns the stage (a voice sample, the audiobook, the voice sheet):
-    /// narration stays paused until the reader asks for it. A play task parked between
-    /// sentences outlives Readium's cancel and reports .playing once more — this flag
-    /// squashes that ghost instead of letting the voice come back over the new owner.
+    /// Narration is paused on purpose — by the stage (a voice sample, the audiobook, the
+    /// voice sheet) or by the reader — until they ask for it again. A play task parked
+    /// between sentences outlives Readium's cancel and reports .playing once more — this
+    /// flag squashes that ghost instead of letting the voice come back on its own.
     private var heldForFocus = false
     /// The library record's values — the publication's own metadata can name
     /// a different edition than the title the user edited.
@@ -307,7 +307,9 @@ final class ReadAloud: NSObject, ObservableObject {
             while let locator = pendingFollow, attempts < 15 {
                 pendingFollow = nil
                 attempts += 1
-                if await navigator.go(to: locator, options: NavigatorGoOptions(animated: true)) {
+                // the wait is bounded: a webview suspended behind a locked screen can leave
+                // a go unanswered for good, which would hold the follow shut on isTurning
+                if await bounded(8, { await navigator.go(to: locator, options: NavigatorGoOptions(animated: true)) }) == true {
                     attempts = 0
                 } else {
                     pendingFollow = pendingFollow ?? locator
@@ -335,7 +337,7 @@ final class ReadAloud: NSObject, ObservableObject {
                 for attempt in 0 ..< 3 {
                     // a mark is painted a frame or two after the voice moves on
                     if attempt > 0 { try? await Task.sleep(nanoseconds: 120_000_000) }
-                    switch await keepSpokenInView(on: epub, center: recenter) {
+                    switch await bounded(5, { await self.keepSpokenInView(on: epub, center: recenter) }) ?? "none" {
                     case "none": continue
                     case "held": followHeld = true; return
                     case "wait": return
@@ -346,16 +348,16 @@ final class ReadAloud: NSObject, ObservableObject {
             // a reader who has scrolled away is not taken to the next chapter either
             guard !followHeld || recenter else { return }
             guard sentence != scrolledTo, let place = sentence.followable,
-                  await epub.go(to: place, options: NavigatorGoOptions(animated: false))
+                  await bounded(8, { await epub.go(to: place, options: NavigatorGoOptions(animated: false)) }) == true
             else { return }
             scrolledTo = sentence
             followHeld = false
             for _ in 0 ..< 10 {
                 try? await Task.sleep(nanoseconds: 100_000_000)
-                if await keepSpokenInView(on: epub, center: true) != "none" { return }
+                if await bounded(5, { await self.keepSpokenInView(on: epub, center: true) }) != "none" { return }
             }
             // no mark to measure (every highlight is off): `go` left the sentence at the very top
-            _ = await epub.evaluateJavaScript("window.scrollBy({ top: -window.innerHeight * 0.4 })")
+            _ = await bounded(3, { await epub.evaluateJavaScript("window.scrollBy({ top: -window.innerHeight * 0.4 })") })
         }
     }
 
@@ -425,7 +427,9 @@ final class ReadAloud: NSObject, ObservableObject {
     }
 
     private func playPauseIfPaused() {
-        if case .playing = synthesizer.state { return }
+        // a .playing while the pause is held is a ghost of a cancelled task — it
+        // counts as paused, so a remote play still does something
+        if case .playing = synthesizer.state, !heldForFocus { return }
         playPause()
     }
 
@@ -466,11 +470,26 @@ final class ReadAloud: NSObject, ObservableObject {
     }
 
     func playPause() {
+        if case .stopped = synthesizer.state {
+            heldForFocus = false
+            start()
+            return
+        }
+        if case .playing = synthesizer.state, !heldForFocus {
+            // a pause on purpose is held the same way as one for the stage: a play task
+            // parked between sentences can still report .playing after the cancel — a
+            // ghost that would leave the controls showing playing with nothing speaking
+            pauseForOtherAudio()
+            return
+        }
         heldForFocus = false
-        if case .stopped = synthesizer.state { start(); return }
         // about to speak again (it was paused): take focus from anything else
-        if case .playing = synthesizer.state {} else { AudioFocus.shared.claim("readaloud") }
-        synthesizer.pauseOrResume()
+        AudioFocus.shared.claim("readaloud")
+        // a .playing that reached here is a ghost of a cancelled task — the pause that
+        // armed the hold already ran — and resume() refuses anything but .paused, so the
+        // ghost is collapsed to the pause it should have been first
+        if case .playing = synthesizer.state { synthesizer.pause() }
+        synthesizer.resume()
     }
 
     /// Skipping while paused speaks — take the stage back first.
@@ -733,8 +752,13 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
         _ synthesizer: PublicationSpeechSynthesizer,
         stateDidChange state: PublicationSpeechSynthesizer.State
     ) {
+        // Readium hands each state change out on a task of its own: one queued before a
+        // pause's cancel can surface after a newer state — a ghost report for a sentence
+        // the iterator already moved past, or a pause that has since resumed. Anything
+        // that no longer matches the synthesizer's own state is dropped.
         switch state {
         case .stopped:
+            guard case .stopped = synthesizer.state else { return }
             pauseFlash?.cancel()
             isPlaying = false
             lastTickAt = nil
@@ -750,6 +774,7 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             // a play task parked between sentences outlived a pause/stop's cancel and
             // reported playing once more — the engine refused to speak it (the composite
             // guards a cancelled speak), so hold the pause instead of reviving the controls
+            if case let .playing(current, range: _) = synthesizer.state, current != utterance { return }
             if heldForFocus {
                 synthesizer.pause()
                 return
@@ -779,16 +804,19 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             } else {
                 waitForAWord(in: utterance.locator)
             }
-            if !onScreen {
-                // the state comes with every word: the reader's place moves with the sentence
-                if utterance.locator != lastNarrated {
-                    lastNarrated = utterance.locator
-                    onNarrated?(utterance.locator)
+            // the state comes with every word: the reader's place moves with the sentence —
+            // on screen or not. The page only follows the voice, so the narrated spot is what
+            // the saved place answers to (the page can lag, or die behind a locked screen)
+            if utterance.locator != lastNarrated {
+                lastNarrated = utterance.locator
+                onNarrated?(utterance.locator)
+            }
+            if onScreen {
+                if scrolls {
+                    scrollNudge.send(utterance.locator)
+                } else if let word, let place = word.followable {
+                    followTarget.send(place)
                 }
-            } else if scrolls {
-                scrollNudge.send(utterance.locator)
-            } else if let word {
-                if let place = word.followable { followTarget.send(place) }
             }
             // the state is published before every sentence, spoken or not — only a word being
             // spoken proves the voice works
@@ -799,6 +827,8 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
                 #endif
             }
         case let .paused(utterance):
+            // queued before a newer state — a resume, or a re-pause on another sentence
+            guard case let .paused(current) = synthesizer.state, current == utterance else { return }
             pauseFlash?.cancel()
             pauseFlash = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 150_000_000)
@@ -886,4 +916,25 @@ extension Locator {
             locations.otherLocations["cssSelector"] = .string(CSSSelectorRepair.repaired(selector))
         })
     }
+}
+
+/// A slot for an answer that may never come: the task doing the ask writes it, the
+/// bounded waiter reads it — both on the main actor, so the slot needs no lock.
+private final class PendingBox<T>: @unchecked Sendable {
+    var answered = false
+    var value: T?
+}
+
+/// `body` bounded to `seconds`, nil when it does not answer in time. A webview suspended
+/// behind a locked screen can leave a call hanging for good — without the bound, a follow's
+/// `isTurning` would hold the page shut for the rest of the session.
+@MainActor
+private func bounded<T>(_ seconds: Double, _ body: @escaping @MainActor () async -> T) async -> T? {
+    let box = PendingBox<T>()
+    Task { @MainActor in box.value = await body(); box.answered = true }
+    for _ in 0 ..< max(Int(seconds * 10), 1) {
+        if box.answered { return box.value }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+    }
+    return nil
 }
