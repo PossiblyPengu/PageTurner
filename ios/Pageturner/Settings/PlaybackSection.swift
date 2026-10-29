@@ -11,8 +11,9 @@ struct PlaybackSection: View {
     @AppStorage("audio-trim-silence") private var trimSilence = false
 
     /// Every choice needs a `gobackward.N`/`goforward.N` symbol: those exist for
-    /// 10, 15, 30, 45, 60, 75 and 90.
-    private static let skips = [10.0, 15, 30, 45, 60]
+    /// 10, 15, 30, 45, 60, 75 and 90. Shared: the player's skip buttons offer the
+    /// same list on a long press.
+    static let skips = [10.0, 15, 30, 45, 60]
     /// The same list the player's speed chip offers.
     private static let rates = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 

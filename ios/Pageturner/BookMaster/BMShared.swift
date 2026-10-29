@@ -61,6 +61,13 @@ struct BMLinkPrompt: View {
                 Text("Link BookMaster to bring your shelf, streaks, goals, quotes and the other reader into Pageturner.")
                     .foregroundStyle(.secondary)
             }
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Progress follows you between devices", systemImage: "arrow.triangle.2.circlepath")
+                Label("Goals, streaks and your year in books", systemImage: "chart.bar.fill")
+                Label("A shared shelf and chat with your reading partner", systemImage: "person.2.fill")
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
             Button { router.showLink = true } label: {
                 Label("Link BookMaster", systemImage: "link")
                     .frame(maxWidth: .infinity)

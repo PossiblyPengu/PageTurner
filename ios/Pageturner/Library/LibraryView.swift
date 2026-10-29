@@ -99,6 +99,20 @@ struct LibraryView: View {
         }
     }
 
+    /// How many books a shelf chip stands for — the shelf's own rule, before
+    /// the search/status/type filters the grid then applies.
+    private func shelfCount(_ key: String) -> Int {
+        switch key {
+        case Self.allKey: return library.books.count
+        case Self.upNextKey: return library.books.filter { $0.bmUpNext == true }.count
+        default:
+            if let smart = Self.smartShelves.first(where: { $0.key == key }) {
+                return library.books.filter(smart.includes).count
+            }
+            return library.books.filter { $0.collections.contains(key) }.count
+        }
+    }
+
     /// A live query searches the whole library, like the folded-in tab did —
     /// the shelf and status filters belong to browsing.
     private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -314,6 +328,13 @@ struct LibraryView: View {
             .padding(.bottom, 24)
         }
         .ptSoftScrollEdges()
+        .refreshable {
+            library.refreshMissing()
+            await FolderWatcher.shared.scan(library: library)
+            if BookMaster.shared.isLinked {
+                _ = await BookMaster.shared.pullShelf(into: library)
+            }
+        }
     }
 
     /// The books, already in series order, cut into one run per series (the rest under "Other books").
@@ -335,7 +356,7 @@ struct LibraryView: View {
                     ForEach(shelfKeys, id: \.self) { key in
                         let active = key == activeShelfKey
                         Button { shelfKey = key } label: {
-                            Text(shelfLabel(key))
+                            Text("\(shelfLabel(key)) · \(shelfCount(key))")
                                 .font(.subheadline.weight(.medium))
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
@@ -343,6 +364,7 @@ struct LibraryView: View {
                                 .foregroundStyle(active ? Color.ptOnAccent : Color.primary)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("\(shelfLabel(key)), \(shelfCount(key)) books")
                         .accessibilityAddTraits(active ? .isSelected : [])
                     }
                 }

@@ -159,6 +159,8 @@ struct NowPlayingView: View {
         .scaleEffect(player.isPlaying ? 1 : 0.88)
         .ptAnimation(.spring(duration: 0.5, bounce: 0.25), value: player.isPlaying)
         .padding(.horizontal, 40)
+        .contentShape(Rectangle())
+        .onTapGesture { player.togglePlay() }
         .accessibilityHidden(true)
     }
 
@@ -210,7 +212,11 @@ struct NowPlayingView: View {
             HStack {
                 Text(format(shownPosition)).monospacedDigit()
                 Spacer()
-                Text("-" + format(max(player.duration - shownPosition, 0))).monospacedDigit()
+                // "in book" only once a chapter line below could be confused with it
+                Text(player.chapters.count > 1
+                     ? "-\(format(max(player.duration - shownPosition, 0))) in book"
+                     : "-" + format(max(player.duration - shownPosition, 0)))
+                    .monospacedDigit()
             }
             if let chapter = shownChapter, player.chapters.count > 1 {
                 // its own line: at large text sizes it used to share a row with
@@ -237,6 +243,16 @@ struct NowPlayingView: View {
                 transportButton("gobackward.\(Int(skipBack))", label: "Back \(Int(skipBack)) seconds", size: chapterSkips ? 56 : 64) {
                     player.skip(by: -skipBack)
                 }
+                .contextMenu {
+                    Section("Skip back by") {
+                        ForEach(PlaybackSection.skips, id: \.self) { s in
+                            Button { skipBack = s } label: {
+                                if s == skipBack { Label("\(Int(s)) seconds", systemImage: "checkmark") }
+                                else { Text("\(Int(s)) seconds") }
+                            }
+                        }
+                    }
+                }
                 Button { player.togglePlay() } label: {
                     Group {
                         if player.isLoading {
@@ -256,6 +272,16 @@ struct NowPlayingView: View {
                 .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
                 transportButton("goforward.\(Int(skipFwd))", label: "Forward \(Int(skipFwd)) seconds", size: chapterSkips ? 56 : 64) {
                     player.skip(by: skipFwd)
+                }
+                .contextMenu {
+                    Section("Skip forward by") {
+                        ForEach(PlaybackSection.skips, id: \.self) { s in
+                            Button { skipFwd = s } label: {
+                                if s == skipFwd { Label("\(Int(s)) seconds", systemImage: "checkmark") }
+                                else { Text("\(Int(s)) seconds") }
+                            }
+                        }
+                    }
                 }
                 if chapterSkips {
                     transportButton("forward.end.fill", label: "Next chapter", size: 50) {

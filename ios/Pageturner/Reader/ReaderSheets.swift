@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A footnote or endnote, shown where the reader is instead of jumping to the
 /// end of the chapter and losing the place.
@@ -22,6 +23,11 @@ struct FootnoteSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Go to Note", action: onGo)
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Button { UIPasteboard.general.string = note.text } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

@@ -536,6 +536,17 @@ final class ReaderModel: ObservableObject {
         chapterMarks.last { $0.at <= progression }?.title ?? chapterMarks.first?.title
     }
 
+    /// "Ch 3 of 12, 63% in": the place in the outline and how far through this section —
+    /// for the header's second line. Nil when there is no outline or no page yet.
+    var chapterProgress: (index: Int, count: Int, fraction: Double)? {
+        guard let locator = currentLocator,
+              let entry = chapterEntry(for: locator),
+              let top = entry.id.split(separator: ".").first.flatMap({ Int($0) }),
+              let fraction = locator.locations.progression, fraction.isFinite
+        else { return nil }
+        return (top + 1, toc.count, fraction)
+    }
+
     private func learnPageCount(publication: Publication) {
         guard book.pages == nil else { return }
         Task {

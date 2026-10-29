@@ -459,13 +459,18 @@ struct ReaderView: View {
         }
     }
 
-    /// Under the title: the chapter — unless that is only the title again — or else the author.
+    /// Under the title: the chapter and how far into it — unless that is only
+    /// the title again — or else the author.
     private var secondLine: String? {
         let author = model.book.author.isEmpty ? nil : model.book.author
-        guard let chapter = model.chapterTitle, !chapter.isEmpty,
-              chapter.caseInsensitiveCompare(model.book.title) != .orderedSame
-        else { return author }
-        return chapter
+        if let chapter = model.chapterTitle, !chapter.isEmpty,
+           chapter.caseInsensitiveCompare(model.book.title) != .orderedSame {
+            guard let progress = model.chapterProgress else { return chapter }
+            return "\(chapter) · \(Int((progress.fraction * 100).rounded()))%"
+        }
+        // an untitled section still says where in the book the page sits
+        guard let progress = model.chapterProgress else { return author }
+        return "Section \(progress.index)/\(progress.count) · \(Int((progress.fraction * 100).rounded()))%"
     }
 
     /// The percent through — a tap swaps it for the time left at this reader's pace (when there is a pace to go on).

@@ -24,6 +24,18 @@ struct MiniPlayer: View {
             row(compact: proxy.size.width < Self.compactBelow)
         }
         .frame(height: 44)
+        .overlay(alignment: .top) {
+            // a hairline of how far through the book — the same fraction the player scrubs
+            GeometryReader { geo in
+                let fraction = player.duration > 0 ? min(max(player.position / player.duration, 0), 1) : 0
+                Capsule()
+                    .fill(Color.ptAccent)
+                    .frame(width: geo.size.width * fraction, height: 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 2)
+            .accessibilityHidden(true)
+        }
     }
 
     private func row(compact: Bool) -> some View {
