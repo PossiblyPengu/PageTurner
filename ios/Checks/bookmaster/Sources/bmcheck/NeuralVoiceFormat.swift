@@ -66,10 +66,11 @@ enum NeuralVoiceFormat {
         }
 
         // a multi-speaker voice names its speakers in `speaker_id_map`; order is by id
-        let speakerNames = (root["speaker_id_map"] as? [String: Any] ?? [:])
-            .compactMap { name, value -> (name: String, id: Int)? in
+        let byID: [(name: String, id: Int)] = (root["speaker_id_map"] as? [String: Any] ?? [:])
+            .compactMap { name, value in
                 (value as? NSNumber)?.intValue.map { (name, $0) }
             }
+        let speakerNames = byID
             .sorted { $0.id != $1.id ? $0.id < $1.id : $0.name < $1.name }
             .map(\.name)
 

@@ -298,6 +298,12 @@ enum OPDS {
         var height: Int?
         var width: Int?
 
+        // a hand-written init(from:) is all the conformance needs, so the compiler
+        // never synthesizes a CodingKeys of its own for it
+        private enum CodingKeys: String, CodingKey {
+            case rel, href, title, type, height, width
+        }
+
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             rel = try? c.decode(JSONValue.self, forKey: .rel)

@@ -63,8 +63,10 @@ final class NeuralSynth: @unchecked Sendable {
         queue.async {
             self.unloadWork?.cancel()
             if self.loaded?.key != info.key {
-                self.loaded = (info.key, try? self.load(directory: directory, info: info))
-                if self.loaded?.tts == nil { self.loaded = nil }
+                self.loaded = nil
+                if let tts = try? self.load(directory: directory, info: info) {
+                    self.loaded = (info.key, tts)
+                }
             }
             // a warmed model that never sees a sentence gives its memory back on the usual timer
             if self.loaded != nil { self.scheduleUnload() }
@@ -111,7 +113,7 @@ final class NeuralSynth: @unchecked Sendable {
         // length_scale, so ask for the pace the voice was made for. Faster or slower is the
         // player's job: stretching the audio is more exact than VITS's rounded durations.
         let speaker = max(0, min(sid, info.speakers - 1))
-        let generated = tts.generate(text: text, sid: Int32(speaker), speed: Float(1 / max(info.lengthScale, 0.1)))
+        let generated = tts.generate(text: text, sid: speaker, speed: Float(1 / max(info.lengthScale, 0.1)))
         let samples = generated.samples
         scheduleUnload()
         guard !samples.isEmpty, generated.sampleRate > 0 else { throw Failure.silent }

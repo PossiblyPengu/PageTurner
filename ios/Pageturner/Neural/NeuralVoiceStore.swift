@@ -359,8 +359,8 @@ final class NeuralVoiceStore {
     }
 
     /// Voice keys come from the catalogue, but a file name should not trust that: anything
-    /// odd becomes a dash.
-    static func safeName(_ key: String) -> String {
+    /// odd becomes a dash. `nonisolated`: the background downloader names its files with it too.
+    nonisolated static func safeName(_ key: String) -> String {
         key.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "-", options: .regularExpression)
     }
 

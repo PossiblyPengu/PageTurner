@@ -232,8 +232,8 @@ final class NeuralTTSEngine: TTSEngine {
         var ours = false
         for (i, next) in nexts.enumerated() {
             // a passage in another language goes to a voice for that language, not to this one
-            let fits = next.language?.code.bcp47.map {
-                SpeechVoices.baseLanguage($0) == SpeechVoices.baseLanguage(entry.voice.language)
+            let fits = next.language.map {
+                SpeechVoices.baseLanguage($0.code.bcp47) == SpeechVoices.baseLanguage(entry.voice.language)
             } ?? true
             if i == 0 { ours = fits }
             guard fits, generation == started else { continue }
