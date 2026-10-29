@@ -293,7 +293,7 @@ struct RootView: View {
             } message: {
                 Text(library.lastError ?? "")
             }
-            .alert("BookMaster", isPresented: noticeShown) {
+            .alert((bookMaster.notice ?? "BookMaster").ptAlertTitle(or: "BookMaster"), isPresented: noticeShown) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(bookMaster.notice ?? "")
@@ -378,7 +378,7 @@ struct RootView: View {
             Tab("Library", systemImage: "books.vertical", value: AppTab.library) {
                 LibraryView()
             }
-            Tab("Books", systemImage: "bookmark.fill", value: AppTab.books) {
+            Tab("Shelf", systemImage: "bookmark.fill", value: AppTab.books) {
                 BookMasterBooksView()
             }
             Tab("Together", systemImage: "person.2.fill", value: AppTab.together) {
@@ -403,7 +403,7 @@ struct RootView: View {
                 .tabItem { Label("Library", systemImage: "books.vertical") }
                 .tag(AppTab.library)
             withMiniPlayer(BookMasterBooksView())
-                .tabItem { Label("Books", systemImage: "bookmark.fill") }
+                .tabItem { Label("Shelf", systemImage: "bookmark.fill") }
                 .tag(AppTab.books)
             withMiniPlayer(BookMasterTogetherView())
                 .tabItem { Label("Together", systemImage: "person.2.fill") }

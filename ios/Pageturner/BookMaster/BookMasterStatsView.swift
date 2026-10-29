@@ -35,6 +35,7 @@ struct BookMasterStatsView: View {
                         linkedBody
                     } else {
                         BMLinkPrompt()
+                        BMDeviceStatsCard()
                     }
                 }
                 .padding(.horizontal, 16)

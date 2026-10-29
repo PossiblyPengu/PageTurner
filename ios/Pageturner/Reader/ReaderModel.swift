@@ -53,6 +53,9 @@ final class ReaderModel: ObservableObject {
     @Published private(set) var chapterTitle: String?
     /// Where each contents entry starts, 0…1 — the scrubber's ticks. Empty until located.
     @Published private(set) var chapterTicks: [Double] = []
+    /// The top-level contents entries and where each begins (0…1) — what the scrubber's caption
+    /// names while it is dragged. Empty when the outline was too big to locate every entry.
+    @Published private(set) var chapterMarks: [(at: Double, title: String)] = []
     /// The contents entry the reader is in, to mark it and scroll to it in the Contents sheet.
     @Published private(set) var currentChapterID: String?
     @Published private(set) var searchInFlight = false
@@ -503,22 +506,34 @@ final class ReaderModel: ObservableObject {
     /// would crowd the bar); an entry that doesn't locate is skipped, never guessed.
     private func learnChapterTicks(publication: Publication) {
         let links = toc
-        guard !links.isEmpty else { chapterTicks = []; return }
+        guard !links.isEmpty else { chapterTicks = []; chapterMarks = []; return }
         // a book with no real outline ticks every file in it — hundreds would smear the bar (and
         // each one is a locate); sample evenly so the spread stays at a mark's worth of meaning
         let strideBy = max(links.count / 48, 1)
         Task { [weak self] in
             var ticks: [Double] = []
+            var marks: [(at: Double, title: String)] = []
             for (i, link) in links.enumerated() where i % strideBy == 0 {
                 guard let at = await publication.locate(link),
                       let progress = at.locations.totalProgression,
                       progress.isFinite else { continue }
                 let clamped = min(max(progress, 0), 1)
                 if !ticks.contains(clamped) { ticks.append(clamped) }
+                marks.append((clamped, (link.title ?? "").isEmpty ? "Section \(i + 1)" : link.title!))
             }
             guard let self, !Task.isCancelled else { return }
             self.chapterTicks = ticks.filter { $0 > 0.001 && $0 < 0.999 }
+            // the scrubber's caption names the section a spot falls in — only when every entry
+            // was located, since a sampled outline would name a neighbour and a wrong chapter
+            // is worse than none
+            self.chapterMarks = strideBy == 1 ? marks.sorted { $0.at < $1.at } : []
         }
+    }
+
+    /// The section a spot on the scrubber falls in — the mark at or just before it, or the first
+    /// mark when the spot is earlier than that.
+    func chapterMark(at progression: Double) -> String? {
+        chapterMarks.last { $0.at <= progression }?.title ?? chapterMarks.first?.title
     }
 
     private func learnPageCount(publication: Publication) {

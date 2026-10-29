@@ -89,6 +89,44 @@ struct NextInSeriesRow: View {
     }
 }
 
+/// An audiobook on the go while something else is the continue book — the
+/// audio sibling of `NextInSeriesRow`: small cover, progress, one Play.
+struct ListeningRow: View {
+    let book: Book
+    let cover: UIImage?
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            BookCoverView(book: book, cover: cover, showsBadges: false, corner: 6)
+                .frame(width: 44)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Keep listening")
+                    .font(.caption.weight(.semibold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color.ptAccent)
+                Text(book.title).font(.subheadline.weight(.medium)).lineLimit(2)
+                ProgressView(value: min(max(book.progression ?? 0, 0), 1))
+                    .tint(.ptAccent)
+                    .accessibilityLabel("Progress")
+                    .accessibilityValue("\(Int((min(max(book.progression ?? 0, 0), 1) * 100).rounded())) percent")
+            }
+            Spacer(minLength: 0)
+            Button(action: action) {
+                Label("Play", systemImage: "play.fill").font(.subheadline.weight(.semibold))
+            }
+            .ptButtonStyle(prominent: true)
+            .controlSize(.small)
+            .accessibilityLabel("Play \(book.title)")
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: action)
+        .accessibilityElement(children: .contain)
+    }
+}
+
 /// What the other reader has been up to, on the Reading tab: their book and a count of suggestions waiting.
 struct PartnerStrip: View {
     @Environment(AppRouter.self) private var router

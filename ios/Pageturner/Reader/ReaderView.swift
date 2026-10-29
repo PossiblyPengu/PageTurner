@@ -413,12 +413,27 @@ struct ReaderView: View {
                         .accessibilityHidden(true)
                     }
                     .accessibilityLabel("Position in book")
-                    .accessibilityValue("\(Int((shownProgress * 100).rounded())) percent")
+                    .accessibilityValue(accessibilityProgressLabel)
                 }
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 44)
                 .ptGlassCapsule()
+                .overlay(alignment: .top) {
+                    // where the dragged thumb would land — floats over the page like a tooltip
+                    if scrubbing != nil, let mark = model.chapterMark(at: shownProgress) {
+                        Text(mark)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .ptGlassCapsule()
+                            .offset(y: -30)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
 
                 if model.canReadAloud {
                     PTIconButton(
@@ -480,6 +495,13 @@ struct ReaderView: View {
 
     private var shownProgress: Double {
         min(max(scrubbing ?? model.book.progression ?? 0, 0), 1)
+    }
+
+    /// What the scrubber announces: the percent — plus, while a drag runs, the section it would land in.
+    private var accessibilityProgressLabel: String {
+        let pct = "\(Int((shownProgress * 100).rounded())) percent"
+        guard scrubbing != nil, let mark = model.chapterMark(at: shownProgress) else { return pct }
+        return "\(pct), \(mark)"
     }
 
     /// "Back to 45%" — after a jump, one tap returns to where the reader was.

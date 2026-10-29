@@ -84,7 +84,7 @@ struct NowPlayingView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .alert("Pageturner", isPresented: Binding(
+        .alert((player.notice ?? "Pageturner").ptAlertTitle(or: "Pageturner"), isPresented: Binding(
             get: { player.notice != nil },
             set: { if !$0 { player.notice = nil } }
         )) {

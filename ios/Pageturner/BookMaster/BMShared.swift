@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 /// The pieces the three BookMaster tabs share: the card their sections are
@@ -104,6 +105,74 @@ struct BMDeviceCard: View {
             }
         }
         .bmCard()
+    }
+}
+
+/// The fuller on-device picture an unlinked Stats tab still earns: the week's
+/// trend, the eight-week chart, and the books that took the most time — all
+/// from the phone's own `ReadingLog`, like `BMDeviceCard` next door.
+struct BMDeviceStatsCard: View {
+    @ObservedObject private var readingLog = ReadingLog.shared
+
+    var body: some View {
+        let trends = ReadingTrends.summary(readingLog.sessions)
+        let stats = readingLog.stats
+        if !readingLog.sessions.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Trends").font(.headline)
+                HStack(spacing: 0) {
+                    BMMetric(value: BMFormat.duration(minutes: Int(trends.thisWeekMinutes)),
+                             label: weekDelta(trends), icon: "chart.bar.fill", color: .ptAccent)
+                    Divider().frame(height: 48)
+                    BMMetric(value: "\(trends.activeDays)",
+                             label: "days read, last 30", icon: "calendar", color: .blue)
+                    Divider().frame(height: 48)
+                    BMMetric(value: BMFormat.duration(minutes: Int(trends.averageActiveDayMinutes)),
+                             label: "a reading day", icon: "clock.fill", color: .orange)
+                }
+                Chart(trends.weeks) { week in
+                    BarMark(
+                        x: .value("Week", week.start, unit: .weekOfYear),
+                        y: .value("Minutes", week.minutes))
+                        .foregroundStyle(Color.ptAccent)
+                        .cornerRadius(3)
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .weekOfYear, count: 2)) { _ in
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).day(), centered: true)
+                    }
+                }
+                .frame(height: 110)
+                .accessibilityLabel("Minutes read per week, last \(trends.weeks.count) weeks")
+            }
+            .bmCard()
+
+            if !stats.perBook.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Most time").font(.headline)
+                    ForEach(stats.perBook.prefix(5)) { total in
+                        HStack(spacing: 10) {
+                            Image(systemName: total.audio ? "headphones" : "book.closed")
+                                .foregroundStyle(Color.ptAccent)
+                                .frame(width: 22)
+                                .accessibilityHidden(true)
+                            Text(total.title).lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text(ReadingStats.duration(minutes: total.minutes))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+                .bmCard()
+            }
+        }
+    }
+
+    /// "this week" or "this week, up 25%" — the caption under the week's total.
+    private func weekDelta(_ trends: ReadingTrends.Summary) -> String {
+        guard let change = trends.changeFromLastWeek, abs(change) >= 0.05 else { return "this week" }
+        return "this week, \(change > 0 ? "up" : "down") \(Int((abs(change) * 100).rounded()))%"
     }
 }
 

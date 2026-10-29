@@ -19,6 +19,16 @@ struct ReadingNowView: View {
             .prefix(9).map { $0 }
     }
 
+    /// An audiobook on the go that isn't already the continue book — so a
+    /// paused listen isn't lost among the also-reading covers.
+    private var listening: Book? {
+        library.books
+            .filter { $0.isAudio && $0.id != current?.id
+                && ($0.progression ?? 0) > 0.001 && ($0.progression ?? 0) < 0.995 }
+            .sorted { ($0.lastOpenedAt ?? .distantPast) > ($1.lastOpenedAt ?? .distantPast) }
+            .first
+    }
+
     /// The next volume of a series whose latest book was finished, if it has not been started.
     private var nextVolume: Book? {
         library.books
@@ -76,6 +86,11 @@ struct ReadingNowView: View {
                             }
                         }
                         .padding(.top, 60)
+                    }
+                    if let audio = listening {
+                        ListeningRow(book: audio, cover: library.coverThumbnail(for: audio, maxPixels: 200)) {
+                            router.open(audio, library: library)
+                        }
                     }
                     if let next = nextVolume {
                         NextInSeriesRow(book: next, cover: library.coverThumbnail(for: next, maxPixels: 200)) {

@@ -1286,57 +1286,13 @@ final class LibraryStore: ObservableObject {
         refreshMissing()   // a Drive book restored without its files is waiting to be downloaded
     }
 
-    enum SortOrder: String, CaseIterable, Identifiable {
-        case recent, added, title, author, series
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .recent: return "Recently Opened"
-            case .added: return "Recently Added"
-            case .title: return "Title"
-            case .author: return "Author"
-            case .series: return "Series"
-            }
-        }
-    }
+    /// The orders the sort menu offers — the rules live in `BookSort` so the
+    /// Linux checks run the same ones.
+    typealias SortOrder = BookSort.Order
 
     /// Filtered + sorted view of the catalogue for the library screen.
     func sortedBooks(order: SortOrder, query: String) -> [Book] {
-        var list = books
-        let q = query.trimmingCharacters(in: .whitespaces)
-        if !q.isEmpty {
-            // every word must match the title or the author, ignoring case and accents
-            let tokens = q.split(whereSeparator: \.isWhitespace).map(String.init)
-            list = list.filter { b in
-                tokens.allSatisfy { b.title.localizedStandardContains($0) || b.author.localizedStandardContains($0) }
-            }
-        }
-        switch order {
-        case .recent:
-            return list.sorted { ($0.lastOpenedAt ?? $0.addedAt) > ($1.lastOpenedAt ?? $1.addedAt) }
-        case .added:
-            return list.sorted { $0.addedAt > $1.addedAt }
-        case .title:
-            let keyed = list.map { (book: $0, title: $0.sortTitle) }
-            return keyed.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }.map(\.book)
-        case .author:
-            // books with no author last, then by last name, then by title
-            let keyed = list.map { (book: $0, author: $0.sortAuthor, title: $0.sortTitle) }
-            return keyed.sorted { a, b in
-                if a.book.author.isEmpty != b.book.author.isEmpty { return !a.book.author.isEmpty }
-                let c = a.author.localizedStandardCompare(b.author)
-                return c == .orderedSame ? a.title.localizedStandardCompare(b.title) == .orderedAscending : c == .orderedAscending
-            }.map(\.book)
-        case .series:
-            // a series together, in reading order; books outside any series after them, by title
-            let keyed = list.map { (book: $0, series: $0.series ?? "", title: $0.sortTitle) }
-            return keyed.sorted { a, b in
-                if a.series.isEmpty != b.series.isEmpty { return !a.series.isEmpty }
-                if a.series != b.series { return a.series.localizedStandardCompare(b.series) == .orderedAscending }
-                if let x = a.book.seriesIndex, let y = b.book.seriesIndex, x != y { return x < y }
-                return a.title.localizedStandardCompare(b.title) == .orderedAscending
-            }.map(\.book)
-        }
+        BookSort.sorted(BookSort.filtered(books, query: query), order: order)
     }
 
     /// The book after `book` in its series, when the library has it and it is not finished.

@@ -58,6 +58,7 @@ cp "$SRC/Library/HardcoverCore.swift" "$OUT/HardcoverCore.swift"
 cp "$SRC/Library/CatalogueSearch.swift" "$OUT/CatalogueSearch.swift"
 cp "$SRC/Library/OPDSFeed.swift" "$OUT/OPDSFeed.swift"
 cp "$SRC/Library/AutoBackupPlan.swift" "$OUT/AutoBackupPlan.swift"
+cp "$SRC/Library/BookSort.swift" "$OUT/BookSort.swift"
 cp "$SRC/Audio/VoiceDSP.swift" "$OUT/VoiceDSP.swift"
 python3 - "$SRC" "$OUT" <<'PY'
 import sys

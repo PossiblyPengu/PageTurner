@@ -151,6 +151,7 @@ func runData() async {
     runCatalogueChecks()
     runHardcoverChecks()
     runSweepReaderChecks()
+    runBookSortChecks()
     runTextBook()
     runFB2Checks()
     runPDFTextChecks()

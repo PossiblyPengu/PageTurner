@@ -192,6 +192,7 @@ struct BookGrid: View {
         let textVersions = library.pdfsWithTextVersions
         return LazyVGrid(columns: columns, spacing: 24) {
             ForEach(books) { book in
+                let cloud = downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id))
                 Button {
                     if let selection {
                         if selection.wrappedValue.contains(book.id) { selection.wrappedValue.remove(book.id) }
@@ -205,7 +206,7 @@ struct BookGrid: View {
                             book: book, cover: library.coverThumbnail(for: book, maxPixels: 640),
                             selected: selection.map { $0.wrappedValue.contains(book.id) },
                             missing: library.missing.contains(book.id),
-                            cloud: downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id)),
+                            cloud: cloud,
                             hasTextVersion: textVersions.contains(book.id))
                         Text(book.title)
                             .font(.footnote.weight(.semibold))
@@ -216,6 +217,22 @@ struct BookGrid: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                        }
+                        // the ring on the cover says it is coming; this says how far
+                        switch cloud {
+                        case let .downloading(fraction)?:
+                            Text(fraction.map { "Downloading \(Int(($0 * 100).rounded()))%" } ?? "Downloading…")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                        case .failed?:
+                            Text("Download failed")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .lineLimit(1)
+                        default:
+                            EmptyView()
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

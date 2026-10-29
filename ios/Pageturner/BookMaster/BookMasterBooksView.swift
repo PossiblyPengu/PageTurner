@@ -142,7 +142,7 @@ struct BookMasterBooksView: View {
                 }
             }
             #endif
-            .navigationTitle("Books")
+            .navigationTitle("Shelf")
             .scrollDismissesKeyboard(.interactively)
             .searchable(text: $query, prompt: "Search the shelf")
             .toolbar { toolbar }
@@ -158,7 +158,7 @@ struct BookMasterBooksView: View {
             .task(id: library.books.map { "\($0.id)\($0.title)\($0.author)\($0.bookmasterId ?? "")" }.hashValue
                         ^ BookMaster.shared.shelfRows.hashValue) { matchBooks() }
         }
-        // the stack, not the list: a pushed pane is still the Books tab
+        // the stack, not the list: a pushed pane is still the Shelf tab
         .onAppear { BookMaster.shared.place = "bookmaster" }
         .onDisappear { BookMaster.shared.place = "library" }
         .onChange(of: filter) { _, _ in selected.formIntersection(Set(visible.map(\.userBookId))) }
