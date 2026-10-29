@@ -21,6 +21,8 @@ struct VoiceListView: View {
     /// A neural voice to choose, or to hear, as soon as its download is done.
     @State private var chooseWhenReady: String?
     @State private var playWhenReady: String?
+    /// A multi-speaker voice whose speakers are being browsed.
+    @State private var speakerFor: NeuralVoice?
     @ObservedObject private var preview = SpeechPreview.shared
     private let store = NeuralVoiceStore.shared
 
@@ -78,6 +80,11 @@ struct VoiceListView: View {
             }
             .onChange(of: store.installed.count) { _, _ in installedChanged() }
             .onChange(of: store.progress.count) { _, _ in transfersChanged() }
+            .sheet(item: $speakerFor) { voice in
+                NavigationStack {
+                    SpeakerPickerView(voice: voice, selection: $selection, rate: rate)
+                }
+            }
     }
 
     private var sourcePicker: some View {
@@ -254,7 +261,8 @@ struct VoiceListView: View {
     private func neuralRow(_ voice: NeuralVoice) -> some View {
         let installed = store.isInstalled(voice)
         let transfer = store.progress[voice.key]
-        let chosen = selection == voice.id
+        // a speaker variant of this voice counts as it
+        let chosen = selection.flatMap(NeuralVoice.key(fromID:)) == voice.key
         return HStack(spacing: 8) {
             Button { choose(voice) } label: {
                 HStack(spacing: 8) {
@@ -277,6 +285,17 @@ struct VoiceListView: View {
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(chosen ? .isSelected : [])
+            if installed && voice.speakers > 1 {
+                Button { speakerFor = voice } label: {
+                    Image(systemName: "person.2")
+                        .font(.title3)
+                        .foregroundStyle(Color.ptAccent)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("\(voice.speakers) speakers — choose one")
+            }
             if transfer == nil {
                 neuralSampleButton(voice, installed: installed)
             } else {
@@ -348,10 +367,11 @@ struct VoiceListView: View {
         .accessibilityLabel(playing ? "Stop sample" : installed ? "Hear \(voice.displayName)" : "Download and hear \(voice.displayName)")
     }
 
-    /// "Medium · United States · 63 MB".
+    /// "Medium · United States · 63 MB" — and "N speakers" for a multi-speaker voice.
     private func neuralDetail(_ voice: NeuralVoice) -> String {
         let place = SpeechVoices.region(voice.language).flatMap(Self.regionName) ?? voice.country
-        return [voice.quality.label, place, voice.sizeLabel].filter { !$0.isEmpty }.joined(separator: " · ")
+        return [voice.quality.label, place, voice.sizeLabel, voice.speakers > 1 ? "\(voice.speakers) speakers" : nil]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     /// Choose an installed voice; one that isn't yet is downloaded and then chosen.
@@ -371,8 +391,8 @@ struct VoiceListView: View {
     }
 
     private func remove(_ voice: NeuralVoice) {
-        if preview.playing == voice.id { preview.stop() }
-        if selection == voice.id { selection = nil }
+        if preview.playing.flatMap(NeuralVoice.key(fromID:)) == voice.key { preview.stop() }
+        if selection.flatMap(NeuralVoice.key(fromID:)) == voice.key { selection = nil }
         store.remove(voice)
     }
 
@@ -489,7 +509,7 @@ struct ReadAloudControls: View {
 
     private func hear() {
         if let id = voice, let chosen = store.catalog.voice(withID: id), store.isInstalled(chosen) {
-            preview.toggle(chosen, rate: rate)
+            preview.toggle(chosen, rate: rate, sid: NeuralVoice.speaker(fromID: id) ?? 0)
         } else {
             preview.toggle(voice.flatMap { id in installed.first { $0.id == id } }, rate: rate)
         }
@@ -498,7 +518,10 @@ struct ReadAloudControls: View {
     /// A voice that has since been removed from the phone reads as Automatic.
     private var voiceName: String {
         if let id = voice, let chosen = store.catalog.voice(withID: id), store.isInstalled(chosen) {
-            return "\(chosen.displayName) (Neural)"
+            let speaker = NeuralVoice.speaker(fromID: id)
+                .flatMap { store.installed[chosen.key]?.speakerName($0) }
+                .map { " · \($0)" } ?? ""
+            return "\(chosen.displayName)\(speaker) (Neural)"
         }
         return voice.flatMap { id in installed.first { $0.id == id } }?.displayName ?? "Automatic"
     }

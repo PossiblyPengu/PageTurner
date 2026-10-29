@@ -104,6 +104,7 @@ struct NarrationMiniPlayer: View {
             ForEach([15, 30, 45, 60], id: \.self) { minutes in
                 Button("In \(minutes) minutes") { readAloud.setSleepTimer(minutes: minutes) }
             }
+            Button("At the end of the chapter") { readAloud.setSleepTimer(atChapterEnd: true) }
         }
         Button("Stop reading aloud", systemImage: "xmark", role: .destructive) { model.stopReadAloud() }
     }

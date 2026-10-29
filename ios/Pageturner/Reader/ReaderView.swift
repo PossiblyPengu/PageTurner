@@ -105,6 +105,20 @@ struct ReaderView: View {
         UIApplication.shared.isIdleTimerDisabled = on && model.settings.keepAwake
     }
 
+    /// Dim the page while it is read aloud and the hands are off — the voice doesn't need the
+    /// light. Chrome showing means a touch within a few seconds; a sheet must stay readable.
+    private var wantsDim: Bool {
+        visible && model.settings.dimWhileNarrating && model.readAloudPlaying
+            && !model.showChrome
+            && !showContents && !showSettings && !showSearch && !showVoices
+            && exportFile == nil && model.footnote == nil && model.editingHighlight == nil
+            && model.notice == nil
+    }
+
+    private func applyDim(_ dim: Bool) {
+        UIScreen.main.wantsSoftwareDimming = dim
+    }
+
     /// Opening, saving, and the sitting that BookMaster is told about.
     private func lifecycle<V: View>(_ content: V) -> some View {
         content
@@ -115,6 +129,7 @@ struct ReaderView: View {
             }
             .onChange(of: model.settings) { _, _ in model.applySettings() }
             .onChange(of: model.settings.keepAwake) { _, _ in keepAwake(true) }
+            .onChange(of: wantsDim) { _, dim in applyDim(dim) }
             // a theme that follows the clock: look again every few minutes
             .onReceive(Timer.publish(every: 300, on: .main, in: .common).autoconnect()) { _ in model.refreshNight() }
             .onAppear {
@@ -126,6 +141,7 @@ struct ReaderView: View {
             .onDisappear {
                 visible = false
                 keepAwake(false)
+                applyDim(false)
                 model.flushSave()
                 model.endSession()
                 // narration under way goes on, with the now-playing strip to control it; anything else stops
@@ -138,11 +154,14 @@ struct ReaderView: View {
             // position lands on disk there too — only the session end waits for .background.
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
-                case .inactive: model.flushSave()
-                case .background: model.flushSave(); model.endSession(); keepAwake(false)
+                // the catalogue write is queued behind the main thread: draining it here keeps
+                // the place from being lost whether this or the app's own .background flush runs
+                // first, and whether a .background ever arrives at all
+                case .inactive: model.sleepCover(true); model.flushSave(); library.flushSaves()
+                case .background: model.flushSave(); library.flushSaves(); model.endSession(); keepAwake(false)
                 case .active:
                     guard visible else { break }
-                    model.beginSession(); model.refreshAwake(); keepAwake(true)
+                    model.beginSession(); model.wakeFromSleep(); keepAwake(true); applyDim(wantsDim)
                 default: break
                 }
             }
@@ -380,6 +399,19 @@ struct ReaderView: View {
                         }
                     )
                     .tint(.ptAccent)
+                    .overlay {
+                        // where each chapter begins — faint on the track, the thumb wins
+                        GeometryReader { geo in
+                            ForEach(Array(model.chapterTicks.enumerated()), id: \.offset) { _, tick in
+                                Capsule()
+                                    .fill(Color.primary.opacity(0.18))
+                                    .frame(width: 2, height: 6)
+                                    .position(x: tick * geo.size.width, y: geo.size.height / 2)
+                            }
+                        }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
                     .accessibilityLabel("Position in book")
                     .accessibilityValue("\(Int((shownProgress * 100).rounded())) percent")
                 }
@@ -923,14 +955,15 @@ private struct ReadAloudBar: View {
                     // ceil — "5:00 left" shows 5m until it drops under 4:00
                     Text("\(Int(left / 60) + 1)m").font(.subheadline.monospacedDigit())
                 } else {
-                    Image(systemName: "moon")
+                    Image(systemName: readAloud.sleepAtChapterEnd ? "moon.fill" : "moon")
                 }
             }
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
         }
         .accessibilityLabel("Sleep timer")
-        .accessibilityValue(readAloud.sleepRemaining.map { "\(Int($0 / 60) + 1) minutes left" } ?? "Off")
+        .accessibilityValue(readAloud.sleepRemaining.map { "\(Int($0 / 60) + 1) minutes left" }
+            ?? (readAloud.sleepAtChapterEnd ? "At the end of the chapter" : "Off"))
         .simultaneousGesture(TapGesture().onEnded { _ in onInteraction() })
     }
 
@@ -943,6 +976,7 @@ private struct ReadAloudBar: View {
         ForEach([5, 10, 15, 20, 30, 45, 60], id: \.self) { minutes in
             Button("Sleep in \(minutes) minutes") { onInteraction(); readAloud.setSleepTimer(minutes: minutes) }
         }
+        Button("Sleep at end of chapter") { onInteraction(); readAloud.setSleepTimer(atChapterEnd: true) }
     }
 
     private func barButton(_ symbol: String, label: String, large: Bool = false, action: @escaping () -> Void) -> some View {

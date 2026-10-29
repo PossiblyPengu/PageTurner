@@ -103,8 +103,13 @@ struct ReaderSettingsView: View {
                 Toggle("Keep the screen on", isOn: $settings.keepAwake)
             }
 
-            Section("Read aloud") {
+            Section {
                 ReadAloudControls(rate: $settings.speechRate, voice: $settings.voiceIdentifier)
+                Toggle("Dim the screen while it reads", isOn: $settings.dimWhileNarrating)
+            } header: {
+                Text("Read aloud")
+            } footer: {
+                Text("The screen dims a few seconds after the controls are put away. A tap brings it back; the voice carries on.")
             }
 
             Section {

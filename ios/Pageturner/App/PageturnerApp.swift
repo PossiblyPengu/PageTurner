@@ -10,8 +10,14 @@ final class PageturnerAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
         completionHandler: @escaping () -> Void
     ) {
-        guard identifier == DriveDownloads.identifier else { completionHandler(); return }
-        DriveDownloads.shared.holdBackgroundCompletion(completionHandler)
+        switch identifier {
+        case DriveDownloads.identifier:
+            DriveDownloads.shared.holdBackgroundCompletion(completionHandler)
+        case NeuralDownloader.identifier:
+            NeuralVoiceStore.shared.holdBackgroundCompletion(completionHandler)
+        default:
+            completionHandler()
+        }
     }
 
     /// The scene gets a delegate of its own for the Home Screen quick actions chosen while the app runs; one that
@@ -37,6 +43,8 @@ struct PageturnerApp: App {
         Log.install()
         // downloads iOS finished (or is still running) for books from Google Drive
         DriveDownloads.shared.reconnect()
+        // and for neural voices — the same background-session pickup
+        NeuralVoiceStore.shared.reconnect()
         // taps on a suggestion notification come back through here
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         // iOS wants a background task's handler registered before launch ends
@@ -114,7 +122,7 @@ struct PageturnerApp: App {
                 .task(id: scenePhase == .active) {
                     guard scenePhase == .active else { return }
                     while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(BMKeepAlive.pollInterval(lowPower: LowPower.on)))
+                        try? await Task.sleep(for: .seconds(BMKeepAlive.foregroundPollInterval(lowPower: LowPower.on)))
                         guard !Task.isCancelled else { return }
                         await Notifier.shared.refresh(notify: false)
                     }
@@ -126,8 +134,11 @@ struct PageturnerApp: App {
                     await BookMaster.shared.flush()
                     await FolderWatcher.shared.scan(library: library)
                     await DriveSync.shared.scanIfDue(library: library)
-                    await BookMaster.shared.pullShelf(into: library)
-                    await BookMaster.shared.pushCovers(from: library)
+                    // the shelf pull and cover push are the expensive pair: every few minutes, not every foreground
+                    if BookMaster.shared.autoPullDue() {
+                        await BookMaster.shared.pullShelf(into: library)
+                        await BookMaster.shared.pushCovers(from: library)
+                    }
                     await Notifier.shared.refresh(notify: false)
                     SpotlightIndexer.shared.libraryChanged(library)
                     QuickActions.update(library)

@@ -9,6 +9,8 @@ final class ReaderContainerViewController: UIViewController {
     var onHighlightSelection: (() -> Void)?
     var onQuoteSelection: (() -> Void)?
     var onSaveWordSelection: (() -> Void)?
+    var onReadAloudSelection: (() -> Void)?
+    var onLookUpSelection: (() -> Void)?
 
     private let contentController: UIViewController
 
@@ -29,6 +31,34 @@ final class ReaderContainerViewController: UIViewController {
         contentController.didMove(toParent: self)
         curlPan.delegate = self
         view.addGestureRecognizer(curlPan)
+    }
+
+    // MARK: Waking up
+
+    /// A photograph of the page laid over it while the app sleeps: a web view killed in
+    /// the background re-renders on wake and blanks for a moment — the cover hides that.
+    /// It comes off when the page next reports a place (`hideSleepCover`), so what it
+    /// uncovers is always the page painted, never a guess at it.
+    private var asleepCover: UIView?
+
+    /// Photograph the page and cover it — no-op with one up already or nothing laid out.
+    func showSleepCover() {
+        guard asleepCover == nil, !view.bounds.isEmpty, view.window != nil else { return }
+        let image = UIGraphicsImageRenderer(bounds: view.bounds).image { _ in
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+        }
+        let cover = UIImageView(image: image)
+        cover.frame = view.bounds
+        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.isUserInteractionEnabled = false
+        view.addSubview(cover)
+        asleepCover = cover
+    }
+
+    /// Take the cover off — the page under it has painted again (or the hold timed out).
+    func hideSleepCover() {
+        asleepCover?.removeFromSuperview()
+        asleepCover = nil
     }
 
     // MARK: Turning the page
@@ -134,6 +164,16 @@ final class ReaderContainerViewController: UIViewController {
     /// "Save Word" item — keeps the selected word, with its line, in the book's word list.
     @objc func saveWordSelection() {
         onSaveWordSelection?()
+    }
+
+    /// "Read Aloud" item — starts narration at the selected passage.
+    @objc func readAloudSelection() {
+        onReadAloudSelection?()
+    }
+
+    /// "Look Up" item — the system dictionary on the selected words.
+    @objc func lookUpSelection() {
+        onLookUpSelection?()
     }
 
     // MARK: Page curl — the leaf that follows the finger

@@ -38,7 +38,16 @@ func runNeuralChecks() {
     }
     check("identifier round trip", lessac.id == "piper:en_US-lessac-low" && NeuralVoice.key(fromID: lessac.id) == "en_US-lessac-low"
           && catalog.voice(withID: lessac.id)?.key == lessac.key)
+    check("a speaker variant rides in the identifier", lessac.id(withSpeaker: 3) == "piper:en_US-lessac-low@3"
+          && NeuralVoice.key(fromID: "piper:en_US-lessac-low@3") == "en_US-lessac-low"
+          && NeuralVoice.speaker(fromID: "piper:en_US-lessac-low@3") == 3
+          && catalog.voice(withID: "piper:en_US-lessac-low@3")?.key == lessac.key)
+    check("speaker zero is the voice itself", lessac.id(withSpeaker: 0) == lessac.id
+          && NeuralVoice.speaker(fromID: lessac.id) == nil)
+    check("a bad speaker part is no speaker", NeuralVoice.speaker(fromID: "piper:en_US-lessac-low@x") == nil
+          && NeuralVoice.key(fromID: "piper:en_US-lessac-low@x") == "en_US-lessac-low")
     check("a system voice's identifier is not a neural one", NeuralVoice.key(fromID: "com.apple.voice.premium.en-US.Zoe") == nil
+          && NeuralVoice.speaker(fromID: "com.apple.voice.premium.en-US.Zoe") == nil
           && catalog.voice(withID: "com.apple.voice.premium.en-US.Zoe") == nil)
     check("the catalogue's checksum for it is the real one (matches the file Piper published)",
           lessac.onnx.md5 == "31883a7506589feadf3c3474fd8ef658" && lessac.config.md5 == "64876daa19dd042b368cd64fa379a75f" && lessac.onnx.size == 63_201_294)
@@ -101,6 +110,26 @@ func runNeuralChecks() {
         catch { return .failure(.unreadableConfig) }
     }
     let base = #"{"audio":{"sample_rate":22050},"espeak":{"voice":"de"},"num_speakers":2,"phoneme_id_map":{"_":[0],"a":[7],"\n":[9]}}"#
+
+    check("a multi-speaker voice's names are kept in id order", {
+        let multi = base.replacingOccurrences(of: "\"num_speakers\"", with: "\"speaker_id_map\":{\"bryce\":1,\"adam\":0,\"carl\":2},\"num_speakers\":3,\"old_num\"")
+        guard case let .success(c) = parsed(multi) else { return false }
+        return c.speakers == 3 && c.speakerNames == ["adam", "bryce", "carl"]
+    }())
+    check("a single-speaker voice names none", {
+        guard case let .success(c) = parsed(base) else { return false }
+        return c.speakerNames.isEmpty
+    }())
+    check("voice.json written before speaker names existed still decodes, with none", {
+        let legacy = #"{"key":"k","sampleRate":22050,"speakers":2,"noiseScale":0.5,"noiseW":0.6,"lengthScale":1,"installedAt":1700000000}"#
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .secondsSince1970
+        guard let info = try? dec.decode(NeuralVoiceFormat.Installed.self, from: Data(legacy.utf8)) else { return false }
+        return info.speakers == 2 && info.speakerNames.isEmpty && info.speakerName(1) == "Speaker 2"
+    }())
+    check("a named speaker is named", NeuralVoiceFormat.Installed(
+        key: "k", sampleRate: 1, speakers: 3, noiseScale: 0, noiseW: 0, lengthScale: 1,
+        speakerNames: ["a", "b"], installedAt: Date()).speakerName(1) == "b")
+
     if case let .success(c) = parsed(base) {
         check("a small config", c.sampleRate == 22_050 && c.espeakVoice == "de" && c.speakers == 2 && c.tokens.map(\.symbol) == ["_", "a"] && c.tokens.map(\.id) == [0, 7])
         check("…defaults for the sound shaping", c.noiseScale == 0.667 && c.noiseW == 0.8 && c.lengthScale == 1)

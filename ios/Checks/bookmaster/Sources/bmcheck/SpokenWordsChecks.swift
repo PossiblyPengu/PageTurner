@@ -97,6 +97,36 @@ func runSpokenWordsChecks() {
     check("one word is lit from the start", SpokenWords.schedule(SpokenWords.tokens(in: "Nobody."), speech: 0.1 ... 0.9).map(\.start) == [max(0.1 - SpokenWords.lead, 0)])
     check("no words, no times", SpokenWords.schedule([], speech: 0 ... 1).isEmpty)
 
+    // a silence heard where the punctuation pauses pins the words after it to the sound —
+    // with none heard the spread is the even one it always was
+    let alphaToks = SpokenWords.tokens(in: "alpha, beta gamma")
+    let noGap = SpokenWords.schedule(alphaToks, speech: 0 ... 3)
+    let withGap = SpokenWords.schedule(alphaToks, speech: 0 ... 3, gaps: [1.0 ... 1.3])
+    check("a silence where the comma is puts the word after it at its end",
+          abs(withGap[1].start - (1.3 - SpokenWords.lead)) < 1e-9, "\(withGap[1].start)")
+    check("…and moves nothing before it", abs(withGap[0].start - noGap[0].start) < 1e-9)
+    check("a breath that lines up with no pause changes nothing", {
+        let far = SpokenWords.schedule(alphaToks, speech: 0 ... 3, gaps: [2.0 ... 2.3])
+        return zip(far, noGap).allSatisfy { abs($0.start - $1.start) < 1e-9 }
+    }())
+    check("a breath before the pause is stepped over, the pause still lands", {
+        let breath = SpokenWords.schedule(alphaToks, speech: 0 ... 3, gaps: [0.3 ... 0.4, 1.0 ... 1.3])
+        return abs(breath[1].start - withGap[1].start) < 1e-9
+    }())
+    check("silence where there is no pause to place stays unclaimed", {
+        let plain = SpokenWords.tokens(in: "alpha beta gamma")
+        let words = SpokenWords.schedule(plain, speech: 0 ... 3, gaps: [1.0 ... 1.3])
+        return zip(words, SpokenWords.schedule(plain, speech: 0 ... 3)).allSatisfy { abs($0.start - $1.start) < 1e-9 }
+    }())
+    check("walking through the audio still visits every word once, in order", {
+        var seen: [Int] = [], t = 0.0
+        while t < 3.5 {
+            if let i = SpokenWords.index(at: t, in: withGap), seen.last != i { seen.append(i) }
+            t += 0.01
+        }
+        return seen == Array(0 ..< withGap.count)
+    }())
+
     check("looking up the word at a time: the first before any has started", SpokenWords.index(at: 0, in: timed) == 0 && SpokenWords.index(at: -1, in: timed) == 0)
     check("…the last that has started", SpokenWords.index(at: timed[3].start, in: timed) == 3 && SpokenWords.index(at: timed[3].start + 0.001, in: timed) == 3
           && SpokenWords.index(at: timed[3].start - 0.001, in: timed) == 2)
@@ -158,6 +188,24 @@ func runSpokenWordsChecks() {
     check("all silence is all of it", SpokenWords.speech(in: [Float](repeating: 0, count: 8000), sampleRate: rate) == 0 ... 0.5)
     check("a clip too short to measure is all of it", SpokenWords.speech(in: [0.1, 0.2], sampleRate: rate) == 0 ... 2 / rate)
     check("nothing is nothing", SpokenWords.speech(in: [], sampleRate: rate) == 0 ... 0)
+
+    // the same measurement says where the voice paused inside the speech
+    let paused = tone(0.5, rate: rate) + [Float](repeating: 0, count: Int(0.15 * rate)) + tone(0.5, rate: rate)
+    let measured = SpokenWords.measure(in: paused, sampleRate: rate)
+    check("a pause in the middle is heard as a gap", {
+        guard measured.gaps.count == 1, let gap = measured.gaps.first else { return false }
+        return abs(gap.lowerBound - 0.5) < 0.03 && abs(gap.upperBound - 0.65) < 0.03
+    }(), "\(measured.gaps)")
+    check("…and the bounds still reach both ends of the speech",
+          abs(measured.bounds.lowerBound) < 0.03 && abs(measured.bounds.upperBound - 1.15) < 0.03, "\(measured.bounds)")
+    check("a dip too short to be a pause is none", {
+        let dip = tone(0.5, rate: rate) + [Float](repeating: 0, count: Int(0.04 * rate)) + tone(0.5, rate: rate)
+        return SpokenWords.measure(in: dip, sampleRate: rate).gaps.isEmpty
+    }())
+    check("silence at the ends is the bounds', not a gap", {
+        let edges = [Float](repeating: 0, count: Int(0.2 * rate)) + tone(0.6, rate: rate) + [Float](repeating: 0, count: Int(0.2 * rate))
+        return SpokenWords.measure(in: edges, sampleRate: rate).gaps.isEmpty
+    }())
     check("a sample rate that makes no sense is no speech, not a crash",
           SpokenWords.speech(in: [0.5, 0.5, 0.5, 0.5], sampleRate: 0) == 0 ... 0 && SpokenWords.speech(in: [0.5, 0.5, 0.5, 0.5], sampleRate: -1) == 0 ... 0
           && SpokenWords.speech(in: [0.5, 0.5, 0.5, 0.5], sampleRate: .nan) == 0 ... 0 && SpokenWords.speech(in: [0.5, 0.5, 0.5, 0.5], sampleRate: .infinity) == 0 ... 0)

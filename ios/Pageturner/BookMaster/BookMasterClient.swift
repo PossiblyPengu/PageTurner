@@ -91,6 +91,18 @@ final class BookMaster {
     private var accountGeneration = 0
     private var warnedBroken = false
     private var lastPush: [String: (at: Date, percent: Double)] = [:]
+    /// When the automatic on-foreground shelf pull last ran.
+    private var lastAutoPull: Date?
+
+    /// True at most every five minutes: the pull and cover push that run each time the app comes
+    /// forward are useful often, not on every reappearance. A manual refresh is never gated.
+    /// The clock is stamped only on a yes — a no must not push the window forward, or an app that
+    /// comes forward more often than that would never be due again.
+    func autoPullDue(now: Date = Date()) -> Bool {
+        guard lastAutoPull.map({ now.timeIntervalSince($0) >= 300 }) ?? true else { return false }
+        lastAutoPull = now
+        return true
+    }
 
     private var queueURL: URL {
         if let queueFileURL { return queueFileURL }
@@ -105,6 +117,16 @@ final class BookMaster {
         queueFileURL = queueURL
         if let data = defaults.data(forKey: userKey) {
             user = try? JSONDecoder().decode(BMUser.self, from: data)
+            if var current = user {
+                // a key written by an older build moves into the Keychain and out of the plist
+                if let legacy = current.deviceKey {
+                    BMKeychain.setKey(legacy, for: current.username)
+                    current.deviceKey = nil
+                    if let cleaned = try? JSONEncoder().encode(current) { defaults.set(cleaned, forKey: userKey) }
+                }
+                current.deviceKey = BMKeychain.key(for: current.username)
+                user = current
+            }
         }
         if let data = defaults.data(forKey: shelfKey) {
             shelfRows = (try? JSONDecoder().decode([BMShelfRow].self, from: data)) ?? []
@@ -155,8 +177,14 @@ final class BookMaster {
 
     private func setUser(_ value: BMUser?) {
         accountGeneration += 1
+        // the per-device key is a credential: the Keychain, not the settings plist. A
+        // different account leaving gives its key up; the same account's goes only with it.
+        if let old = user, old.username != value?.username { BMKeychain.setKey(nil, for: old.username) }
+        if let value, let key = value.deviceKey { BMKeychain.setKey(key, for: value.username) }
         user = value
-        if let value, let data = try? JSONEncoder().encode(value) {
+        var stored = value
+        stored?.deviceKey = nil
+        if let stored, let data = try? JSONEncoder().encode(stored) {
             defaults.set(data, forKey: userKey)
         } else {
             defaults.removeObject(forKey: userKey)
@@ -182,7 +210,7 @@ final class BookMaster {
         isAudio: Bool, rating: Int? = nil, force: Bool = false,
         pinned: @escaping (String) -> Void
     ) async {
-        guard let user, syncEnabled else { return }
+        guard let user, syncEnabled, percent.isFinite else { return }
         let pct = (percent * 1000).rounded() / 10
         if !force {
             if let last = lastPush[bookKey] {
@@ -209,7 +237,7 @@ final class BookMaster {
         minutes: Double, at: Date, manual: Bool = false
     ) async -> Bool {
         // pausing automatic sync must not swallow a session the reader typed in on purpose
-        guard let user, syncEnabled || manual else { return false }
+        guard let user, syncEnabled || manual, percentStart.isFinite, percentEnd.isFinite else { return false }
         let payload = BMSessionPush(
             username: user.username, book: ref,
             percentStart: (percentStart * 1000).rounded() / 10,
@@ -251,7 +279,7 @@ final class BookMaster {
         guard let user, !content.isEmpty else { return .failed }
         let payload = BMQuotePush(
             username: user.username, book: ref, content: content,
-            percent: percent.map { $0 * 100 })
+            percent: percent.flatMap { $0.isFinite ? $0 * 100 : nil })
         guard let body = try? JSONEncoder().encode(payload) else { return .failed }
         return await submit(kind: "quote", title: ref.title, body: body).delivery
     }

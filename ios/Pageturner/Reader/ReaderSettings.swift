@@ -161,6 +161,8 @@ struct ReaderSettings: Codable, Equatable {
     var voiceIdentifier: String?
     /// What is lit while a book is read aloud.
     var highlights = ReadAloudHighlights()
+    /// Dim the screen while a book is read aloud — a tap brings it back.
+    var dimWhileNarrating = true
 
     init() {}
 
@@ -181,6 +183,7 @@ struct ReaderSettings: Codable, Equatable {
         speechRate = try c.decodeIfPresent(Double.self, forKey: .speechRate) ?? speechRate
         voiceIdentifier = try c.decodeIfPresent(String.self, forKey: .voiceIdentifier)
         highlights = try c.decodeIfPresent(ReadAloudHighlights.self, forKey: .highlights) ?? highlights
+        dimWhileNarrating = try c.decodeIfPresent(Bool.self, forKey: .dimWhileNarrating) ?? dimWhileNarrating
         letterSpacing = try c.decodeIfPresent(Double.self, forKey: .letterSpacing) ?? letterSpacing
         wordSpacing = try c.decodeIfPresent(Double.self, forKey: .wordSpacing) ?? wordSpacing
         paragraphSpacing = try c.decodeIfPresent(Double.self, forKey: .paragraphSpacing) ?? paragraphSpacing

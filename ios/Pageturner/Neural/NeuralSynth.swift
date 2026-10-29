@@ -33,8 +33,9 @@ final class NeuralSynth: @unchecked Sendable {
     /// How long a model stays in memory after it was last used.
     private let keepAlive: TimeInterval = 45
 
-    /// Speech for `text` in the voice at `directory` (see `NeuralVoiceFormat.install`) at its natural pace.
-    func generate(text: String, directory: URL, info: NeuralVoiceFormat.Installed) async throws -> Audio {
+    /// Speech for `text` in the voice at `directory` (see `NeuralVoiceFormat.install`) at its
+    /// natural pace — `sid` picks a speaker of a multi-speaker voice.
+    func generate(text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int = 0) async throws -> Audio {
         let cancelled = CancelFlag()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -45,7 +46,7 @@ final class NeuralSynth: @unchecked Sendable {
                         return
                     }
                     do {
-                        continuation.resume(returning: try self.run(text: text, directory: directory, info: info))
+                        continuation.resume(returning: try self.run(text: text, directory: directory, info: info, sid: sid))
                     } catch {
                         continuation.resume(throwing: error)
                     }
@@ -53,6 +54,20 @@ final class NeuralSynth: @unchecked Sendable {
             }
         } onCancel: {
             cancelled.set()
+        }
+    }
+
+    /// Load the voice's model now, so the first sentence asked for doesn't wait for it.
+    /// Best-effort: a model that can't be loaded is found out when a sentence is made, as before.
+    func warm(directory: URL, info: NeuralVoiceFormat.Installed) {
+        queue.async {
+            self.unloadWork?.cancel()
+            if self.loaded?.key != info.key {
+                self.loaded = (info.key, try? self.load(directory: directory, info: info))
+                if self.loaded?.tts == nil { self.loaded = nil }
+            }
+            // a warmed model that never sees a sentence gives its memory back on the usual timer
+            if self.loaded != nil { self.scheduleUnload() }
         }
     }
 
@@ -83,7 +98,7 @@ final class NeuralSynth: @unchecked Sendable {
 
     // MARK: On the queue
 
-    private func run(text: String, directory: URL, info: NeuralVoiceFormat.Installed) throws -> Audio {
+    private func run(text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int) throws -> Audio {
         unloadWork?.cancel()
         if loaded?.key != info.key {
             loaded = nil   // free the old one before the new one is made
@@ -95,7 +110,8 @@ final class NeuralSynth: @unchecked Sendable {
         // sherpa turns a speed into length_scale = 1 / speed and then forgets the voice's own
         // length_scale, so ask for the pace the voice was made for. Faster or slower is the
         // player's job: stretching the audio is more exact than VITS's rounded durations.
-        let generated = tts.generate(text: text, sid: 0, speed: Float(1 / max(info.lengthScale, 0.1)))
+        let speaker = max(0, min(sid, info.speakers - 1))
+        let generated = tts.generate(text: text, sid: Int32(speaker), speed: Float(1 / max(info.lengthScale, 0.1)))
         let samples = generated.samples
         scheduleUnload()
         guard !samples.isEmpty, generated.sampleRate > 0 else { throw Failure.silent }
@@ -115,7 +131,9 @@ final class NeuralSynth: @unchecked Sendable {
             let vits = sherpaOnnxOfflineTtsVitsModelConfig(
                 model: model, lexicon: "", tokens: tokens, dataDir: espeak,
                 noiseScale: info.noiseScale, noiseScaleW: info.noiseW, lengthScale: 1)
-            let modelConfig = sherpaOnnxOfflineTtsModelConfig(vits: vits, numThreads: 2, debug: 0, provider: "cpu")
+            // Low Power Mode halves the synthesis threads — VITS still clears real time
+            let modelConfig = sherpaOnnxOfflineTtsModelConfig(
+                vits: vits, numThreads: LowPower.on ? 1 : 2, debug: 0, provider: "cpu")
             var config = sherpaOnnxOfflineTtsConfig(model: modelConfig, ruleFsts: "", maxNumSentences: 1)
             let tts = SherpaOnnxOfflineTtsWrapper(config: &config)
             guard tts.tts != nil else { throw Failure.loadFailed }

@@ -30,12 +30,15 @@ enum NeuralVoiceFormat {
         var noiseScale: Float
         var noiseW: Float
         var lengthScale: Float
+        /// A multi-speaker voice's names for its speakers, by their id — empty for most.
+        var speakerNames: [String]
         /// `phoneme_id_map`, flattened: the symbol and its (first) id.
         var tokens: [(symbol: String, id: Int)]
 
         static func == (a: Config, b: Config) -> Bool {
             a.sampleRate == b.sampleRate && a.espeakVoice == b.espeakVoice && a.speakers == b.speakers
                 && a.noiseScale == b.noiseScale && a.noiseW == b.noiseW && a.lengthScale == b.lengthScale
+                && a.speakerNames == b.speakerNames
                 && a.tokens.map(\.symbol) == b.tokens.map(\.symbol) && a.tokens.map(\.id) == b.tokens.map(\.id)
         }
     }
@@ -62,6 +65,14 @@ enum NeuralVoiceFormat {
             (inference?[key] as? NSNumber).map { $0.floatValue } ?? fallback
         }
 
+        // a multi-speaker voice names its speakers in `speaker_id_map`; order is by id
+        let speakerNames = (root["speaker_id_map"] as? [String: Any] ?? [:])
+            .compactMap { name, value -> (name: String, id: Int)? in
+                (value as? NSNumber)?.intValue.map { (name, $0) }
+            }
+            .sorted { $0.id != $1.id ? $0.id < $1.id : $0.name < $1.name }
+            .map(\.name)
+
         // the map is unordered in Swift; by id then symbol is as good an order as any
         let tokens: [(symbol: String, id: Int)] = map.compactMap { symbol, value in
             if symbol == "\n" { return nil }
@@ -79,6 +90,7 @@ enum NeuralVoiceFormat {
             noiseScale: number("noise_scale", 0.667),
             noiseW: number("noise_w", 0.8),
             lengthScale: max(number("length_scale", 1), 0.1),
+            speakerNames: speakerNames,
             tokens: tokens)
     }
 
@@ -142,7 +154,39 @@ enum NeuralVoiceFormat {
         var noiseScale: Float
         var noiseW: Float
         var lengthScale: Float
+        /// A multi-speaker voice's names for its speakers, by id — voices installed before
+        /// these were kept decode as an empty list, and a row reads "Speaker N".
+        var speakerNames: [String]
         var installedAt: Date
+
+        init(key: String, sampleRate: Int, speakers: Int, noiseScale: Float, noiseW: Float,
+             lengthScale: Float, speakerNames: [String] = [], installedAt: Date) {
+            self.key = key
+            self.sampleRate = sampleRate
+            self.speakers = speakers
+            self.noiseScale = noiseScale
+            self.noiseW = noiseW
+            self.lengthScale = lengthScale
+            self.speakerNames = speakerNames
+            self.installedAt = installedAt
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            key = try container.decode(String.self, forKey: .key)
+            sampleRate = try container.decode(Int.self, forKey: .sampleRate)
+            speakers = try container.decode(Int.self, forKey: .speakers)
+            noiseScale = try container.decode(Float.self, forKey: .noiseScale)
+            noiseW = try container.decode(Float.self, forKey: .noiseW)
+            lengthScale = try container.decode(Float.self, forKey: .lengthScale)
+            speakerNames = try container.decodeIfPresent([String].self, forKey: .speakerNames) ?? []
+            installedAt = try container.decode(Date.self, forKey: .installedAt)
+        }
+
+        /// What to call its `sid` speaker in a list.
+        func speakerName(_ sid: Int) -> String {
+            speakerNames.indices.contains(sid) ? speakerNames[sid] : "Speaker \(sid + 1)"
+        }
     }
 
     static let modelFile = "model.onnx"
@@ -171,7 +215,8 @@ enum NeuralVoiceFormat {
 
         let info = Installed(
             key: key, sampleRate: config.sampleRate, speakers: config.speakers,
-            noiseScale: config.noiseScale, noiseW: config.noiseW, lengthScale: config.lengthScale, installedAt: now)
+            noiseScale: config.noiseScale, noiseW: config.noiseW, lengthScale: config.lengthScale,
+            speakerNames: config.speakerNames, installedAt: now)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         try encoder.encode(info).write(to: directory.appendingPathComponent(infoFile), options: .atomic)

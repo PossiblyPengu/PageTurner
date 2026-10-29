@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import ReadiumNavigator
 import ReadiumShared
@@ -28,11 +29,22 @@ final class ReaderModel: ObservableObject {
     @Published var toc: [ReadiumShared.Link] = []
     @Published var canReadAloud = false
     @Published var isSearchable = false
-    @Published private(set) var readAloud: ReadAloud?
+    @Published private(set) var readAloud: ReadAloud? {
+        didSet {
+            playingSink = readAloud?.$isPlaying
+                .sink { [weak self] playing in self?.readAloudPlaying = playing }
+            if readAloud == nil { readAloudPlaying = false }
+        }
+    }
+    /// Whether the voice is going right now — republished here so a view needn't subscribe inside.
+    @Published private(set) var readAloudPlaying = false
+    private var playingSink: AnyCancellable?
     @Published var notice: String?
     @Published private(set) var isCurrentLocationBookmarked = false
     /// The chapter the reader is in, for the title chip. Nil for comics and PDFs without an outline.
     @Published private(set) var chapterTitle: String?
+    /// Where each contents entry starts, 0…1 — the scrubber's ticks. Empty until located.
+    @Published private(set) var chapterTicks: [Double] = []
     /// The contents entry the reader is in, to mark it and scroll to it in the Contents sheet.
     @Published private(set) var currentChapterID: String?
     @Published private(set) var searchInFlight = false
@@ -145,6 +157,16 @@ final class ReaderModel: ObservableObject {
                         action: #selector(ReaderContainerViewController.quoteSelection)
                     ))
                 }
+                actions += [
+                    EditingAction(
+                        title: "Read Aloud",
+                        action: #selector(ReaderContainerViewController.readAloudSelection)
+                    ),
+                    EditingAction(
+                        title: "Look Up",
+                        action: #selector(ReaderContainerViewController.lookUpSelection)
+                    ),
+                ]
                 config.editingActions = actions
                 // how read-aloud lights the word and the line it is on
                 config.decorationTemplates[.spokenWord] = .spokenWord()
@@ -162,6 +184,7 @@ final class ReaderModel: ObservableObject {
                 if BookMaster.shared.isLinked {
                     actions.append(EditingAction(title: "Quote", action: #selector(ReaderContainerViewController.quoteSelection)))
                 }
+                actions.append(EditingAction(title: "Look Up", action: #selector(ReaderContainerViewController.lookUpSelection)))
                 let nav = try PDFNavigatorViewController(
                     publication: publication,
                     initialLocation: initial,
@@ -187,6 +210,7 @@ final class ReaderModel: ObservableObject {
                 toc = publication.readingOrder
             }
             if publication.conforms(to: .divina) { adjustsType = false }
+            learnChapterTicks(publication: publication)
             learnPageCount(publication: publication)
             phase = .ready
             autoHideChrome()
@@ -219,6 +243,8 @@ final class ReaderModel: ObservableObject {
         container.onHighlightSelection = { [weak self] in self?.highlightSelection() }
         container.onQuoteSelection = { [weak self] in self?.quoteSelection() }
         container.onSaveWordSelection = { [weak self] in self?.saveWordSelection() }
+        container.onReadAloudSelection = { [weak self] in self?.readAloudSelection() }
+        container.onLookUpSelection = { [weak self] in self?.lookUpSelection() }
         navigatorController = container
 
         // which side of the page was tapped, for the way a page turn leaves (the adapter's own callback has no side)
@@ -464,6 +490,29 @@ final class ReaderModel: ObservableObject {
     /// position. PDFs and comics page honestly (one locator per page); an EPUB
     /// answers only when it ships a page list — a reflowed position list is
     /// pseudo-pages, not pages, and stays unpushed.
+    /// Where the top-level contents entries begin — ticks on the scrubber. Locating is
+    /// per-entry async work, so only the outline's first level ticks (deeper entries
+    /// would crowd the bar); an entry that doesn't locate is skipped, never guessed.
+    private func learnChapterTicks(publication: Publication) {
+        let links = toc
+        guard !links.isEmpty else { chapterTicks = []; return }
+        // a book with no real outline ticks every file in it — hundreds would smear the bar (and
+        // each one is a locate); sample evenly so the spread stays at a mark's worth of meaning
+        let strideBy = max(links.count / 48, 1)
+        Task { [weak self] in
+            var ticks: [Double] = []
+            for (i, link) in links.enumerated() where i % strideBy == 0 {
+                guard let at = await publication.locate(link),
+                      let progress = at.locations.totalProgression,
+                      progress.isFinite else { continue }
+                let clamped = min(max(progress, 0), 1)
+                if !ticks.contains(clamped) { ticks.append(clamped) }
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.chapterTicks = ticks.filter { $0 > 0.001 && $0 < 0.999 }
+        }
+    }
+
     private func learnPageCount(publication: Publication) {
         guard book.pages == nil else { return }
         Task {
@@ -828,6 +877,31 @@ final class ReaderModel: ObservableObject {
         autoQuote(made)
     }
 
+    /// "Read Aloud" in the selection menu — the voice starts at the selected passage.
+    private func readAloudSelection() {
+        guard let selectable = navigator as? SelectableNavigator,
+              let selection = selectable.currentSelection
+        else { return }
+        let start = selection.locator
+        selectable.clearSelection()
+        if let readAloud {
+            readAloud.start(from: start)
+        } else {
+            startReadAloud(from: start)
+        }
+    }
+
+    /// "Look Up" in the selection menu — the system dictionary on the selected words.
+    private func lookUpSelection() {
+        guard let selectable = navigator as? SelectableNavigator,
+              let selection = selectable.currentSelection,
+              let term = selection.locator.text.highlight?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !term.isEmpty,
+              let container = navigatorController
+        else { return }
+        container.present(UIReferenceLibraryViewController(term: term), animated: true)
+    }
+
     /// With "Send new highlights as quotes" on, a new highlight goes to BookMaster as well — once. A passage
     /// that could not be sent stays unmarked, so it is not mistaken for sent.
     private func autoQuote(_ highlight: Highlight) {
@@ -929,7 +1003,7 @@ final class ReaderModel: ObservableObject {
         }
     }
 
-    private func startReadAloud() {
+    private func startReadAloud(from start: Locator? = nil) {
         // one voice: a book still being read aloud with its reader left gives way
         ReadAloudHost.shared.show(self)
         guard let publication, let navigator,
@@ -949,6 +1023,8 @@ final class ReaderModel: ObservableObject {
             ReadAloudHost.shared.narrationEnded(self)
         }
         readAloud.onNarrated = { [weak self] locator in self?.narrated(to: locator) }
+        // "sleep at the end of the chapter" knows its chapter through the reader's contents
+        readAloud.chapterID = { [weak self] locator in self?.chapterEntry(for: locator)?.id }
         readAloud.onVoiceFallback = { [weak self] in
             guard let self else { return }
             settings.voiceIdentifier = nil
@@ -959,7 +1035,11 @@ final class ReaderModel: ObservableObject {
         self.readAloud = readAloud
         let voice = settings.voiceIdentifier ?? "auto"
         Log.event("readaloud", "started — voice \(voice), rate \(settings.speechRate)")
-        readAloud.start()
+        if let start {
+            readAloud.start(from: start)
+        } else {
+            readAloud.start()
+        }
     }
 
     func stopReadAloud() {
@@ -970,16 +1050,25 @@ final class ReaderModel: ObservableObject {
     // MARK: - Read aloud with the reader away (`ReadAloudHost`)
 
     /// The reader is in front: the voice marks and follows the page again, catching it up first.
-    func readerShown() { readAloud?.setOnScreen(true) }
+    /// The repaint kick covers the path .active misses — the app was resumed with this reader away
+    /// (its strip on another tab), so its webview may have gone stale while nobody looked at it.
+    func readerShown() {
+        readAloud?.setOnScreen(true)
+        refreshAwake()
+    }
 
     /// The reader was left with the voice still going: nothing is chased or painted until it is back.
     func readerHidden() { readAloud?.setOnScreen(false) }
 
     /// The narration of a book whose reader was away has ended: its place and its sitting are written down now.
+    /// The write is drained as well — this runs while the app may already be suspended-bound in the
+    /// background (a sleep timer or the book's end), where no scene-phase handler will flush it after.
+    /// In front the writer's own queue lands it in a blink, so the wait is not paid there.
     func readerLetGo() {
         saveTask?.cancel()
         saveTask = nil
         library.saveReading(book)
+        if UIApplication.shared.applicationState != .active { library.flushSaves() }
         endSession()
     }
 
@@ -989,8 +1078,10 @@ final class ReaderModel: ObservableObject {
         currentLocator = locator
         narrationAhead = locator
         lastActivityAt = Date()
-        book.locatorJSON = try? locator.jsonString()
-        if let progression = locator.locations.totalProgression { book.progression = progression }
+        if let json = try? locator.jsonString() { book.locatorJSON = json }
+        if let progression = locator.locations.totalProgression, progression.isFinite {
+            book.progression = progression
+        }
         let entry = chapterEntry(for: locator)
         chapterTitle = entry?.link.title
         currentChapterID = entry?.id
@@ -1032,8 +1123,14 @@ final class ReaderModel: ObservableObject {
         saveTask?.cancel()
         saveTask = nil
         if !curling, narrationAhead == nil, let locator = navigator?.currentLocation {
-            book.locatorJSON = try? locator.jsonString()
-            book.progression = locator.locations.totalProgression
+            // a locator that won't encode (a non-finite progression from a
+            // half-reloaded page) keeps the last good place rather than
+            // wiping it — and NaN in progression would fail the whole
+            // catalogue write, not just this field
+            if let json = try? locator.jsonString() { book.locatorJSON = json }
+            if let prog = locator.locations.totalProgression, prog.isFinite {
+                book.progression = prog
+            }
         }
         library.saveReading(book)
     }
@@ -1046,6 +1143,38 @@ final class ReaderModel: ObservableObject {
     func refreshAwake() {
         guard let view = navigatorController?.view else { return }
         Self.repaintWebViews(in: view)
+    }
+
+    /// A page's photograph laid over it for the time the app is asleep: a web view
+    /// killed in the background re-renders on wake and blanks for a moment — the
+    /// cover hides that. It comes off when the page next reports a place
+    /// (`locationDidChange` → what it uncovers is the page painted), or when the
+    /// wake's hold gives up waiting — a stale surface reports nothing and only the
+    /// repaint was needed.
+    private var coverHold: Task<Void, Never>?
+
+    /// `.inactive`: photograph the page over itself before the screen can freeze it.
+    func sleepCover(_ on: Bool) {
+        coverHold?.cancel()
+        coverHold = nil
+        let container = navigatorController as? ReaderContainerViewController
+        if on {
+            container?.showSleepCover()
+        } else {
+            container?.hideSleepCover()
+        }
+    }
+
+    /// `.active`: repaint whatever survived, and hold the cover a beat for the page
+    /// to report a place — a reloaded one does, a merely-stale one does not and just
+    /// needed the repaint. The cover always comes off.
+    func wakeFromSleep() {
+        refreshAwake()
+        coverHold = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            self?.sleepCover(false)
+        }
     }
 
     /// Ask every webview under `view` to re-commit its remote layer: the same
@@ -1144,6 +1273,7 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        sleepCover(false)   // the page painted — a wake's cover has done its job
         guard !curling else { return }   // the curl replays it on commit
         // the reader is away with the voice going on: the page behind it is stale, whatever it reports
         guard readAloud?.onScreen != false else { return }
@@ -1153,8 +1283,10 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
         lastActivityAt = Date()
         // reading on from where a jump landed lets the way back go
         if history.back != nil { history.readOn(to: locator.locations.totalProgression ?? book.progression ?? 0) }
-        book.locatorJSON = try? locator.jsonString()
-        book.progression = locator.locations.totalProgression
+        if let json = try? locator.jsonString() { book.locatorJSON = json }
+        if let prog = locator.locations.totalProgression, prog.isFinite {
+            book.progression = prog
+        }
         isCurrentLocationBookmarked = bookmark(matching: locator) != nil
         let entry = chapterEntry(for: locator)
         chapterTitle = entry?.link.title

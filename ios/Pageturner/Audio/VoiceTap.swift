@@ -11,6 +11,10 @@ final class VoiceTap {
         var supported = true
         /// The audio has been quiet for a moment (read by the main thread, written by the audio thread).
         var inSilence: Bool { dsp.inSilence }
+        /// Told when `inSilence` flips — runs on the realtime audio thread, so reply, don't work.
+        var onSilenceChange: ((Bool) -> Void)?
+        /// What `onSilenceChange` last reported (audio thread only) — the flip alone is worth a call.
+        var lastInSilence = false
     }
 
     let state = State()
@@ -47,6 +51,11 @@ final class VoiceTap {
                     planes.append(UnsafeMutableBufferPointer(start: data, count: Int(buffer.mDataByteSize) / MemoryLayout<Float>.size))
                 }
                 state.dsp.process(planes, frames: Int(framesOut.pointee))
+                let silent = state.inSilence
+                if silent != state.lastInSilence {
+                    state.lastInSilence = silent
+                    state.onSilenceChange?(silent)
+                }
             })
         var tap: MTAudioProcessingTap?
         let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap)

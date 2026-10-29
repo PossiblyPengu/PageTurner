@@ -31,8 +31,10 @@ final class ReadingLog: ObservableObject {
     var stats: ReadingStats { ReadingStats.compute(sessions) }
 
     /// Note a finished sitting. Anything under six seconds is a tap, not reading.
+    /// The bounds are finite-checked too: one NaN in a stored session makes every
+    /// later encode of the whole log fail — the sitting is lost, not the log.
     func record(book: Book, minutes: Double, from start: Double, to end: Double, audio: Bool, at date: Date = Date()) {
-        guard AppPrefs.statsTracking, minutes.isFinite, minutes >= 0.1 else { return }
+        guard AppPrefs.statsTracking, minutes.isFinite, minutes >= 0.1, start.isFinite, end.isFinite else { return }
         sessions.append(ReadingSession(
             bookID: book.id, title: book.title, end: date,
             minutes: min(minutes, Self.longestSession),

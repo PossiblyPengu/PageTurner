@@ -25,6 +25,8 @@ final class SystemTTSEngine: NSObject, TTSEngine, AVSpeechSynthesizerDelegate {
         let utterance: AVSpeechUtterance
         let original: String
         let spoken: String
+        /// Spoken words walked against the page's once — each word report is then a lookup.
+        let wordMap: SpeechText.WordMap
         let onSpeakRange: (Range<String.Index>) -> Void
         var continuation: CheckedContinuation<Result<Void, TTSError>, Never>?
         var cancelled = false
@@ -34,6 +36,7 @@ final class SystemTTSEngine: NSObject, TTSEngine, AVSpeechSynthesizerDelegate {
             self.utterance = utterance
             self.original = original
             self.spoken = spoken
+            wordMap = SpeechText.WordMap(spoken: spoken, original: original)
             self.onSpeakRange = onSpeakRange
         }
 
@@ -128,16 +131,16 @@ final class SystemTTSEngine: NSObject, TTSEngine, AVSpeechSynthesizerDelegate {
         flight.finish()
     }
 
-    /// A word's range lands on the cleaned string iOS was given — put it back on the page's text,
-    /// or the whole sentence when the word has no counterpart there.
+    /// A word's range lands on the cleaned string iOS was given — put it back on the page's text.
+    /// A word with no counterpart there (an expansion the rules wrote in) is not reported at all:
+    /// the last mark stays lit for it instead of the whole sentence flashing over it.
     @MainActor
     private func report(_ characterRange: NSRange, of utterance: AVSpeechUtterance) {
         guard let flight, utterance === flight.utterance, !flight.cancelled,
-              let range = Range(characterRange, in: flight.spoken)
+              let range = Range(characterRange, in: flight.spoken),
+              let mapped = flight.wordMap.originalRange(of: range)
         else { return }
-        flight.onSpeakRange(
-            SpeechText.originalRange(of: range, spoken: flight.spoken, original: flight.original)
-                ?? flight.original.startIndex ..< flight.original.endIndex)
+        flight.onSpeakRange(mapped)
     }
 
     // MARK: AVSpeechSynthesizerDelegate — iOS calls these on its own thread, so they hop to the

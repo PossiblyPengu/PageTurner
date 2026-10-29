@@ -310,6 +310,10 @@ final class BackupStore {
         if book.progression == nil {
             book.progression = rec["progression"] as? Double
         }
+        // a hand-edited or buggy export can hold a place outside the book — clamp it
+        // rather than carry it into a locate() or a percent push
+        if let p = book.progression { book.progression = min(max(p, 0), 1) }
+        if let pos = book.audioPosition, !pos.isFinite || pos < 0 { book.audioPosition = nil }
         // the details the web app kept: blurb, year, ISBN, Open Library id, shelves
         if let blurb = rec["desc"] as? String, !blurb.isEmpty { book.bookDescription = blurb }
         if let year = rec["year"] as? String, !year.isEmpty { book.year = year }

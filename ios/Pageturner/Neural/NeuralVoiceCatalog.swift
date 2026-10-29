@@ -51,12 +51,29 @@ struct NeuralVoice: LanguageListed, Codable, Hashable {
     var config: NeuralFile
 
     /// What is saved as the reader's voice, and what Readium is told it is: "piper:en_US-lessac-low".
+    /// A speaker of a multi-speaker voice goes after an "@": "piper:en_US-vctk-medium@42".
     static let idPrefix = "piper:"
     var id: String { Self.idPrefix + key }
 
+    /// The identifier of this voice's `sid` speaker — itself when it is alone.
+    func id(withSpeaker sid: Int) -> String {
+        sid > 0 ? "\(id)@\(sid)" : id
+    }
+
     /// The key from a saved voice identifier — nil for anything that isn't a neural voice's.
+    /// A speaker suffix ("@3") is not part of it.
     static func key(fromID id: String) -> String? {
-        id.hasPrefix(idPrefix) ? String(id.dropFirst(idPrefix.count)) : nil
+        guard id.hasPrefix(idPrefix) else { return nil }
+        let rest = id.dropFirst(idPrefix.count)
+        return String(rest.split(separator: "@", maxSplits: 1).first ?? rest)
+    }
+
+    /// The speaker a saved identifier names ("piper:key@3" → 3); nil for the voice itself.
+    static func speaker(fromID id: String) -> Int? {
+        guard id.hasPrefix(idPrefix),
+              let part = id.dropFirst(idPrefix.count).split(separator: "@", maxSplits: 1).dropFirst().first
+        else { return nil }
+        return Int(part)
     }
 
     // MARK: LanguageListed

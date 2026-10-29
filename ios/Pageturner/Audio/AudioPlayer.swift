@@ -21,7 +21,7 @@ final class AudioPlayer: ObservableObject {
 
     @Published var rate: Float {
         didSet {
-            if isPlaying { player?.rate = rate }
+            if isPlaying { player?.rate = trimmedRate }
             UserDefaults.standard.set(Double(rate), forKey: "audioPlaybackRate")
             // and kept with this book: the next one starts at its own speed
             if abs((book.audioRate ?? 0) - Double(rate)) > 0.001 {
@@ -106,6 +106,9 @@ final class AudioPlayer: ObservableObject {
         // this book's own speed if it has one, else the last one used
         let own = book.audioRate ?? 0
         rate = own > 0 ? Float(own) : (saved > 0 ? Float(saved) : 1.0)
+        voiceTap.state.onSilenceChange = { [weak self] _ in
+            Task { @MainActor in self?.applyTrimRate() }
+        }
         clips = book.audioClips
         libraryChanges = library.$books.sink { [weak self] books in
             guard let self, !self.closed, let latest = books.first(where: { $0.id == self.book.id }) else { return }
@@ -284,7 +287,11 @@ final class AudioPlayer: ObservableObject {
     // MARK: - Voice boost and trimmed silence
 
     private let voiceTap = VoiceTap()
-    private var trimTimer: Timer?
+
+    /// The speed the player should run at right now: the chosen one, boosted while the tap says quiet.
+    private var trimmedRate: Float {
+        AppPrefs.audioTrimSilence && voiceTap.state.inSilence ? min(rate * 2.5, 4) : rate
+    }
 
     /// Put the processing tap on `item` when either switch is on (and take it off when both are off).
     private func applyVoiceTap(to item: AVPlayerItem) {
@@ -293,7 +300,6 @@ final class AudioPlayer: ObservableObject {
         voiceTap.state.dsp.trim = trim
         guard boost || trim else {
             item.audioMix = nil
-            stopTrimTimer()
             return
         }
         Task { [weak self, weak item] in
@@ -302,7 +308,7 @@ final class AudioPlayer: ObservableObject {
             guard let track = tracks.first, let self, !self.closed, item === self.player?.currentItem else { return }
             item.audioMix = self.voiceTap.makeMix(for: track)
         }
-        if trim { startTrimTimer() } else { stopTrimTimer() }
+        if trim { applyTrimRate() }
     }
 
     /// The switches changed: apply them to what is playing now.
@@ -312,21 +318,12 @@ final class AudioPlayer: ObservableObject {
         if !AppPrefs.audioTrimSilence, isPlaying { player?.rate = rate }
     }
 
-    /// While quiet, the player runs faster than the chosen speed; speech brings it back.
-    private func startTrimTimer() {
-        guard trimTimer == nil else { return }
-        trimTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.isPlaying, let player = self.player else { return }
-                let wanted = self.voiceTap.state.inSilence ? min(self.rate * 2.5, 4) : self.rate
-                if abs(player.rate - wanted) > 0.01 { player.rate = wanted }
-            }
-        }
-    }
-
-    private func stopTrimTimer() {
-        trimTimer?.invalidate()
-        trimTimer = nil
+    /// While quiet, the player runs faster than the chosen speed; speech brings it back — the tap
+    /// says when the quiet begins and ends, so nothing is polled.
+    private func applyTrimRate() {
+        guard isPlaying, AppPrefs.audioTrimSilence, let player else { return }
+        let wanted = trimmedRate
+        if abs(player.rate - wanted) > 0.01 { player.rate = wanted }
     }
 
     // MARK: - Marks
@@ -476,10 +473,10 @@ final class AudioPlayer: ObservableObject {
         updateNowPlaying()
     }
 
-    /// `play()` resets rate to `defaultRate` — reapply the user's speed.
+    /// `play()` resets rate to `defaultRate` — reapply the user's speed (boosted, if it paused mid-silence).
     private func resumePlayback() {
         player?.play()
-        player?.rate = rate
+        player?.rate = trimmedRate
     }
 
     func pause() {
@@ -697,8 +694,10 @@ final class AudioPlayer: ObservableObject {
     /// Persist and release — call from the view's onDisappear.
     func close() {
         streamRefresh?.cancel()
-        stopTrimTimer()
         savePosition()
+        // the position write is queued behind the main thread — drain it only when suspension could
+        // beat the queue; on screen it lands in a blink anyway and waiting here would stall the view
+        if UIApplication.shared.applicationState != .active { library.flushSaves() }
         pause()
         releaseSessionTask?.cancel()
         releaseSessionTask = nil

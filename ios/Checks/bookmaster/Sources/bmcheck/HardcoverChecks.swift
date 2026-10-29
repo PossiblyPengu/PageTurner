@@ -39,6 +39,20 @@ func runHardcoverChecks() {
           HardcoverCore.parse(Data(#"{"errors":[{"message":"Unable to verify token"}]}"#.utf8)).isEmpty)
     check("garbage is an empty list", HardcoverCore.parse(Data("nope".utf8)).isEmpty)
 
+    let seriesAnswer = """
+    {"data":{"search":{"results":{"hits":[
+      {"document":{"title":"Book One","series":[{"name":"The Run","position":2.5}]}},
+      {"document":{"title":"Book Two","series":[{"name":"The Run","position":"3"}]}},
+      {"document":{"title":"Book Three","series":[{"name":"The Run","position":"nan"}]}},
+      {"document":{"title":"Book Four","series":[{"name":"The Run","position":1e999}]}}
+    ]}}}}
+    """
+    let seriesHits = HardcoverCore.parse(Data(seriesAnswer.utf8))
+    check("a series position parses, number or string",
+          seriesHits.count == 4 && seriesHits[0].seriesIndex == 2.5 && seriesHits[1].seriesIndex == 3)
+    check("a non-finite position is no position, not a poisoned one",
+          seriesHits[2].seriesIndex == nil && seriesHits[3].seriesIndex == nil)
+
     section("Sweep: covers and matching")
     check("a Cyrillic title folds to its own letters, not to nothing", BookMatch.fold("Война и мир").hasSuffix("и мир") && BookMatch.fold("Война и мир").count > 6)
     check("two Cyrillic titles do not match each other", !BookMatch.titlesMatch("Война и мир", "Преступление и наказание"))

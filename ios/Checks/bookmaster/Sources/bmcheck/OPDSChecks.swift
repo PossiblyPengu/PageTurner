@@ -77,6 +77,70 @@ func runOPDSChecks() {
     check("something that is not a feed is refused", OPDS.parse(Data("<html><body>hi</body></html>".utf8), base: base) == nil)
     check("garbage is refused", OPDS.parse(Data("not xml".utf8), base: base) == nil)
 
+    let prefixed = """
+    <atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
+      <atom:title>Prefixed</atom:title>
+      <atom:entry>
+        <atom:title>Emma</atom:title>
+        <atom:link rel="http://opds-spec.org/acquisition" type="application/epub+zip" href="/emma.epub"/>
+      </atom:entry>
+    </atom:feed>
+    """.data(using: .utf8)!
+    guard let p = OPDS.parse(prefixed, base: base) else { check("a feed with the atom: prefix parses", false); return }
+    check("a feed with the atom: prefix parses",
+          p.entries.count == 1 && p.entries[0].title == "Emma" && p.entries[0].downloads.count == 1
+          && p.entries[0].downloads[0].fileExtension == "epub",
+          "\(p.entries)")
+
+    section("OPDS 2 (JSON) catalogues")
+    let opds2 = """
+    {
+      "metadata": {"title": "Standard Ebooks"},
+      "links": [
+        {"rel": "next", "href": "/feeds/opds/all?page=2"},
+        {"rel": "search", "href": "https://standardebooks.org/feeds/opds/all?query={searchTerms}", "templated": true}
+      ],
+      "navigation": [{"title": "New Releases", "href": "/feeds/opds/new-releases"}],
+      "facets": [{"metadata": {"title": "Author"}, "links": [{"title": "By Author", "href": "/feeds/opds/authors"}]}],
+      "groups": [{"metadata": {"title": "Subjects"}, "publications": [{
+        "metadata": {"title": "The Time Machine", "identifier": "urn:uuid:tm-1",
+                     "author": [{"name": "H. G. Wells"}, {"name": "Second Author"}],
+                     "description": "A traveller."},
+        "links": [
+          {"rel": "self", "href": "/feeds/opds/publications/tm"},
+          {"rel": "http://opds-spec.org/acquisition", "href": "/ebooks/tm.mobi", "type": "application/x-mobipocket-ebook"},
+          {"rel": ["http://opds-spec.org/acquisition", "urn:other"], "href": "/ebooks/tm.epub", "type": "application/epub+zip"}
+        ],
+        "images": [
+          {"href": "/covers/tm.jpg", "type": "image/jpeg", "height": 600},
+          {"href": "/covers/tm-small.jpg", "type": "image/jpeg", "height": 48}
+        ]
+      }]}]
+    }
+    """.data(using: .utf8)!
+    guard let j = OPDS.parse(opds2, base: URL(string: "https://standardebooks.org/feeds/opds/all")!) else {
+        check("an OPDS 2 feed parses", false); return
+    }
+    check("the JSON feed has its title", j.title == "Standard Ebooks")
+    check("next page and search template resolve",
+          j.next?.absoluteString == "https://standardebooks.org/feeds/opds/all?page=2"
+          && j.searchTemplate == "https://standardebooks.org/feeds/opds/all?query={searchTerms}",
+          "\(j.searchTemplate ?? "nil")")
+    check("navigation and facet links become listings",
+          j.entries.count >= 2
+          && j.entries[0].navigation?.absoluteString == "https://standardebooks.org/feeds/opds/new-releases"
+          && j.entries[1].navigation?.absoluteString == "https://standardebooks.org/feeds/opds/authors",
+          "\(j.entries.map { $0.navigation?.absoluteString ?? $0.title })")
+    let tm = j.entries.last!
+    check("a publication carries title, joined authors and description",
+          tm.title == "The Time Machine" && tm.author == "H. G. Wells & Second Author" && tm.summary == "A traveller.",
+          "\(tm.title) / \(tm.author) / \(tm.summary)")
+    check("a rel given as a list still counts; an unopenable format is dropped",
+          tm.downloads.map(\.fileExtension) == ["epub"], "\(tm.downloads)")
+    check("the cover is the smallest image worth showing", tm.cover?.absoluteString == "https://standardebooks.org/covers/tm.jpg")
+    check("an empty OPDS 2 feed still parses", OPDS.parse(Data("{\"metadata\":{\"title\":\"E\"}}".utf8), base: base)?.title == "E")
+    check("a JSON object that is not a feed is refused", OPDS.parse(Data("{\"a\": 1}".utf8), base: base) == nil)
+
     section("Read-aloud skips page numbers")
     check("a bare number or a page label is a page number",
           ["42", "- 42 -", "[ 7 ]", "Page 112", "page 3"].allSatisfy(SpeechText.isPageNumber))

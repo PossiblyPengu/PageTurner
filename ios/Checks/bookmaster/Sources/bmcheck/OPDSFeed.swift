@@ -3,8 +3,9 @@ import Foundation
 import FoundationXML
 #endif
 
-/// An OPDS catalogue page (Atom): what a Calibre content server, Project Gutenberg and most open
-/// libraries speak. Pure parsing — no network — so it can be checked off-device.
+/// An OPDS catalogue page — the Atom kind a Calibre content server, Project Gutenberg and most
+/// open libraries speak, and the JSON kind OPDS 2 catalogues (Standard Ebooks, SimplyE) answer
+/// with. Pure parsing — no network — so it can be checked off-device.
 struct OPDSFeed: Equatable {
     var title = ""
     var entries: [OPDSEntry] = []
@@ -51,8 +52,20 @@ struct OPDSDownload: Equatable {
 }
 
 enum OPDS {
-    /// Parse a feed. `base` resolves the relative links it carries.
+    /// With namespaces off the parser hands over the qualified name — a feed writing
+    /// `<atom:entry>` still means an entry: compare the local part.
+    static func local(_ name: String) -> String {
+        name.components(separatedBy: ":").last ?? name
+    }
+
+    /// Parse a feed. `base` resolves the relative links it carries. An OPDS 2 catalogue
+    /// answers in JSON; the older kind is an Atom page.
     static func parse(_ data: Data, base: URL) -> OPDSFeed? {
+        var bytes = data
+        if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { bytes = bytes.dropFirst(3) }
+        if bytes.first(where: { ![0x20, 0x09, 0x0A, 0x0D].contains($0) }) == 0x7B { // "{"
+            return parseJSON(data, base: base)
+        }
         let delegate = FeedParser(base: base)
         let parser = XMLParser(data: data)
         parser.shouldProcessNamespaces = false
@@ -84,6 +97,18 @@ enum OPDS {
         return URL(string: cleaned, relativeTo: base)?.absoluteURL
     }
 
+    /// A search link's template: kept decoded, resolved against the page it came from.
+    private static func resolvedTemplate(_ href: String, base: URL) -> String {
+        let decoded = href.removingPercentEncoding ?? href
+        guard let url = URL(string: decoded, relativeTo: base)?.absoluteURL else { return decoded }
+        return url.absoluteString.removingPercentEncoding ?? url.absoluteString
+    }
+
+    /// Best format first — the order the rows in a listing show.
+    private static func rank(_ d: OPDSDownload) -> Int {
+        OPDSDownload.preferred.firstIndex(of: d.fileExtension) ?? OPDSDownload.preferred.count
+    }
+
     private final class FeedParser: NSObject, XMLParserDelegate {
         let base: URL
         var feed = OPDSFeed()
@@ -100,6 +125,7 @@ enum OPDS {
 
         func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?,
                     qualifiedName: String?, attributes: [String: String] = [:]) {
+            let name = OPDS.local(name)
             path.append(name)
             text = ""
             if summaryDepth > 0 {
@@ -128,6 +154,7 @@ enum OPDS {
         }
 
         func parser(_ parser: XMLParser, didEndElement name: String, namespaceURI: String?, qualifiedName: String?) {
+            let name = OPDS.local(name)
             defer { path.removeLast(); text = "" }
             let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
             let inEntry = entry != nil
@@ -150,16 +177,12 @@ enum OPDS {
                 }
             case "entry":
                 if var finished = entry {
-                    finished.downloads.sort { rank($0) < rank($1) }
+                    finished.downloads.sort { OPDS.rank($0) < OPDS.rank($1) }
                     feed.entries.append(finished)
                 }
                 entry = nil
             default: break
             }
-        }
-
-        private func rank(_ d: OPDSDownload) -> Int {
-            OPDSDownload.preferred.firstIndex(of: d.fileExtension) ?? OPDSDownload.preferred.count
         }
 
         private func link(_ a: [String: String]) {
@@ -185,10 +208,7 @@ enum OPDS {
                 if rel == "next" { feed.next = url }
                 if rel == "search" {
                     if href.contains("{searchTerms}") || href.removingPercentEncoding?.contains("{searchTerms}") == true {
-                        feed.searchTemplate = href.removingPercentEncoding ?? href
-                        if let resolved = URL(string: feed.searchTemplate!, relativeTo: base) {
-                            feed.searchTemplate = resolved.absoluteString.removingPercentEncoding ?? resolved.absoluteString
-                        }
+                        feed.searchTemplate = OPDS.resolvedTemplate(href, base: base)
                     } else if type.contains("opensearchdescription") {
                         feed.searchDescription = url
                     }
@@ -212,9 +232,173 @@ enum OPDS {
         var template: String?
         func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?,
                     qualifiedName: String?, attributes: [String: String] = [:]) {
-            guard name == "Url", template == nil, let t = attributes["template"],
+            guard OPDS.local(name) == "Url", template == nil, let t = attributes["template"],
                   (attributes["type"] ?? "").contains("atom") else { return }
             template = t
         }
+    }
+
+    // MARK: - OPDS 2 (JSON)
+
+    /// A JSON field that may be a string, a list, or an object carrying `name` — OPDS 2
+    /// lets `rel`, `title` and `author` come in any of those shapes.
+    private enum JSONValue: Decodable {
+        case string(String), array([JSONValue]), object([String: JSONValue]), other
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if let s = try? c.decode(String.self) { self = .string(s); return }
+            if let a = try? c.decode([JSONValue].self) { self = .array(a); return }
+            if let o = try? c.decode([String: JSONValue].self) { self = .object(o); return }
+            self = .other
+        }
+
+        /// The one string it means: itself, a `name` field, or the first it holds.
+        var text: String? {
+            switch self {
+            case .string(let s): return s
+            case .object(let o): return o["name"]?.text ?? o.values.lazy.compactMap(\.text).first
+            case .array(let a): return a.lazy.compactMap(\.text).first
+            case .other: return nil
+            }
+        }
+
+        /// Every string it carries — rel values, author names.
+        var texts: [String] {
+            switch self {
+            case .string(let s): return [s]
+            case .object(let o): return o["name"].map(\.texts) ?? o.values.flatMap(\.texts)
+            case .array(let a): return a.flatMap(\.texts)
+            case .other: return []
+            }
+        }
+    }
+
+    private struct JSONFeed: Decodable {
+        var metadata: JSONMeta?
+        var links: [JSONLink]?
+        var navigation: [JSONLink]?
+        var facets: [JSONFacet]?
+        var groups: [JSONGroup]?
+        var publications: [JSONPublication]?
+    }
+
+    private struct JSONMeta: Decodable {
+        var title: JSONValue?
+        var identifier: String?
+        var author: JSONValue?
+        var description: JSONValue?
+    }
+
+    private struct JSONLink: Decodable {
+        var rel: JSONValue?
+        var href: String?
+        var title: JSONValue?
+        var type: String?
+        var height: Int?
+        var width: Int?
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            rel = try? c.decode(JSONValue.self, forKey: .rel)
+            href = try? c.decode(String.self, forKey: .href)
+            title = try? c.decode(JSONValue.self, forKey: .title)
+            type = try? c.decode(String.self, forKey: .type)
+            // dimensions come as numbers in the spec, strings in the wild — take both
+            height = (try? c.decode(Int.self, forKey: .height)) ?? Int((try? c.decode(String.self, forKey: .height)) ?? "")
+            width = (try? c.decode(Int.self, forKey: .width)) ?? Int((try? c.decode(String.self, forKey: .width)) ?? "")
+        }
+    }
+
+    private struct JSONFacet: Decodable {
+        var metadata: JSONMeta?
+        var links: [JSONLink]?
+    }
+
+    private struct JSONGroup: Decodable {
+        var metadata: JSONMeta?
+        var navigation: [JSONLink]?
+        var publications: [JSONPublication]?
+        var links: [JSONLink]?
+    }
+
+    private struct JSONPublication: Decodable {
+        var metadata: JSONMeta?
+        var links: [JSONLink]?
+        var images: [JSONLink]?
+    }
+
+    private static func parseJSON(_ data: Data, base: URL) -> OPDSFeed? {
+        guard let root = try? JSONDecoder().decode(JSONFeed.self, from: data) else { return nil }
+        // a JSON object that is not a feed at all decodes to nothing either
+        guard root.metadata != nil || root.links != nil || root.navigation != nil || root.publications != nil
+        else { return nil }
+        var feed = OPDSFeed()
+        feed.title = root.metadata?.title?.text ?? ""
+        for link in root.links ?? [] {
+            let rels = (link.rel?.texts ?? []).map { $0.lowercased() }
+            guard let href = link.href else { continue }
+            if rels.contains("next"), let url = URL(string: href, relativeTo: base)?.absoluteURL { feed.next = url }
+            if rels.contains("search"), href.contains("{searchTerms}") {
+                feed.searchTemplate = resolvedTemplate(href, base: base)
+            }
+        }
+        feed.entries = jsonEntries(
+            navigation: root.navigation ?? [], facets: root.facets ?? [],
+            groups: root.groups ?? [], publications: root.publications ?? [], base: base)
+        return feed
+    }
+
+    /// Navigation listings, facet links, groups and books — OPDS 2 keeps them in separate
+    /// arrays; a page's rows are all entries here, listings first.
+    private static func jsonEntries(
+        navigation: [JSONLink], facets: [JSONFacet], groups: [JSONGroup],
+        publications: [JSONPublication], base: URL
+    ) -> [OPDSEntry] {
+        var entries: [OPDSEntry] = []
+        func listing(_ link: JSONLink) {
+            guard let href = link.href, let url = URL(string: href, relativeTo: base)?.absoluteURL else { return }
+            var entry = OPDSEntry(id: url.absoluteString)
+            entry.title = link.title?.text ?? url.lastPathComponent
+            entry.navigation = url
+            entries.append(entry)
+        }
+        navigation.forEach(listing)
+        for facet in facets { (facet.links ?? []).forEach(listing) }
+        for group in groups {
+            (group.navigation ?? []).forEach(listing)
+            (group.links ?? []).forEach(listing)
+            entries += jsonEntries(
+                navigation: [], facets: [], groups: [], publications: group.publications ?? [], base: base)
+        }
+        for pub in publications { entries.append(jsonPublication(pub, base: base)) }
+        return entries
+    }
+
+    private static func jsonPublication(_ pub: JSONPublication, base: URL) -> OPDSEntry {
+        var entry = OPDSEntry(id: pub.metadata?.identifier ?? UUID().uuidString)
+        let meta = pub.metadata
+        entry.title = meta?.title?.text ?? ""
+        entry.author = (meta?.author?.texts ?? []).joined(separator: " & ")
+        entry.summary = meta?.description?.text ?? ""
+        // the smallest image worth a thumbnail box, else whatever was offered
+        let images = (pub.images ?? []).compactMap { image -> (URL, Int)? in
+            guard let href = image.href, let url = URL(string: href, relativeTo: base)?.absoluteURL else { return nil }
+            return (url, image.height ?? Int.max)
+        }.sorted { $0.1 < $1.1 }
+        entry.cover = (images.first { $0.1 >= 64 } ?? images.first)?.0
+        var selfURL: URL?
+        for link in pub.links ?? [] {
+            let rels = (link.rel?.texts ?? []).map { $0.lowercased() }
+            guard let href = link.href, let url = URL(string: href, relativeTo: base)?.absoluteURL else { continue }
+            if rels.contains("self") { selfURL = url; continue }
+            guard rels.contains(where: { $0.contains("acquisition") }) else { continue }
+            let download = OPDSDownload(url: url, type: (link.type ?? "").lowercased())
+            if OPDSDownload.preferred.contains(download.fileExtension) { entry.downloads.append(download) }
+        }
+        entry.downloads.sort { rank($0) < rank($1) }
+        // a book in a format the library can't open is still a page to look at
+        if entry.downloads.isEmpty { entry.navigation = selfURL }
+        return entry
     }
 }

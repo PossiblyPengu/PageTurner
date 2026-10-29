@@ -192,6 +192,13 @@ func runLogic() {
     g2.readOn(to: 0.10)
     g2.readOn(to: 0.01)
     check("reading backwards past it counts too", g2.back == nil)
+    var g2b = JumpHistory()
+    g2b.record(origin: spot("a", 0.10), landed: spot("b", 0.90))
+    g2b.readOn(to: .nan)     // a half-reloaded webview reporting 0/0
+    check("a non-finite report does not touch the way back", g2b.back == spot("a", 0.10))
+    g2b.readOn(to: 0.90)
+    g2b.readOn(to: 0.99)
+    check("and reading on still drops it", g2b.back == nil)
     var g3 = JumpHistory()
     g3.record(origin: spot("a", 0.10), landed: spot("b", 0.90))
     g3.readOn(to: 0.90)

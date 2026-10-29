@@ -121,4 +121,12 @@ func runQueueChecks() async {
     check("offline quote replays while sync is paused", entries().count == 2 && entries().allSatisfy { $0["kind"] as? String == "progress" })
     bm.unlink()
     check("unlink clears pending account data", !FileManager.default.fileExists(atPath: queueURL.path))
+
+    // a denied gate must not push the window forward — an app that comes forward more
+    // often than the interval would otherwise never be due again
+    let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+    check("first auto pull is due", bm.autoPullDue(now: t0))
+    check("a re-entry inside the window is not", !bm.autoPullDue(now: t0 + 60))
+    check("a no does not reset the five-minute clock", !bm.autoPullDue(now: t0 + 299))
+    check("the window opens five minutes after the yes, not the no", bm.autoPullDue(now: t0 + 300))
 }

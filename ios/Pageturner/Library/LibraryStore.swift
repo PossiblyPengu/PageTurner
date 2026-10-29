@@ -945,7 +945,10 @@ final class LibraryStore: ObservableObject {
         mutate(book.id) {
             $0.lastOpenedAt = book.lastOpenedAt
             $0.locatorJSON = book.locatorJSON
-            $0.progression = book.progression
+            // a non-finite progression (a half-reloaded webview reports 0/0) thrown into the
+            // catalogue makes the whole encode fail — the place, the highlights, all of it;
+            // the stored place stands instead
+            if book.progression?.isFinite != false { $0.progression = book.progression }
             $0.bookmarks = book.bookmarks
             $0.highlights = book.highlights
             $0.words = book.words

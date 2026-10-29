@@ -35,7 +35,13 @@ final class SentenceLookahead {
     /// The sentence that follows `current`, or nil at the end of the book (or when this is busy answering
     /// another question — the caller just goes without).
     func sentence(after current: PublicationSpeechSynthesizer.Utterance) async -> Sentence? {
-        guard !busy else { return nil }
+        await sentences(after: current, count: 1).first
+    }
+
+    /// The `count` sentences that follow `current`, in order — fewer at the book's end, none
+    /// there (or while this is busy answering another question).
+    func sentences(after current: PublicationSpeechSynthesizer.Utterance, count: Int) async -> [Sentence] {
+        guard !busy, count > 0 else { return [] }
         busy = true
         defer { busy = false }
 
@@ -58,14 +64,24 @@ final class SentenceLookahead {
             // the first question, or a skip or a jump: begin again from here
             let found = await restart(at: current)
             Self.log("restart \(found ? "found" : "did not find") the sentence; paragraph has \(paragraph.count)")
-            guard found else { return nil }
+            guard found else { return [] }
             at = Self.index(of: current, in: paragraph)
         }
-        guard let at else { return nil }
-        if at + 1 < paragraph.count { return paragraph[at + 1] }
-        // the last of its paragraph: the next is the first of the next paragraph that has any
-        if following == nil { following = await nextElement() }
-        return following?.first
+        guard let at else { return [] }
+        // from the rest of this paragraph, then the start of the next that has any
+        var out: [Sentence] = []
+        var i = at + 1
+        while out.count < count {
+            if i < paragraph.count {
+                out.append(paragraph[i])
+            } else {
+                if following == nil { following = await nextElement() }
+                guard let next = following, i - paragraph.count < next.count else { return out }
+                out.append(next[i - paragraph.count])
+            }
+            i += 1
+        }
+        return out
     }
 
     // MARK: Walking the book

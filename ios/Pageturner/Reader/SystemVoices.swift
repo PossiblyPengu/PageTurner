@@ -84,9 +84,10 @@ final class SpeechPreview: NSObject, ObservableObject, AVSpeechSynthesizerDelega
         synthesizer.speak(utterance)
     }
 
-    /// The same for a neural voice, which must be on this iPhone.
-    func toggle(_ voice: NeuralVoice, rate: Double) {
-        let key = voice.id
+    /// The same for a neural voice, which must be on this iPhone — `sid` hears one
+    /// speaker of a multi-speaker voice.
+    func toggle(_ voice: NeuralVoice, rate: Double, sid: Int = 0) {
+        let key = voice.id(withSpeaker: sid)
         let wasPlaying = playing == key
         halt()
         guard !wasPlaying, let entry = NeuralVoiceStore.shared.index.entry(forID: key) else { return release() }
@@ -94,7 +95,8 @@ final class SpeechPreview: NSObject, ObservableObject, AVSpeechSynthesizerDelega
         begin()
         playing = key
         neuralTask = Task { [weak self] in
-            if let audio = try? await NeuralSynth.shared.generate(text: Self.sample(for: voice.language), directory: entry.directory, info: entry.info),
+            if let audio = try? await NeuralSynth.shared.generate(
+                text: Self.sample(for: voice.language), directory: entry.directory, info: entry.info, sid: entry.sid),
                !Task.isCancelled
             {
                 NeuralPlayer.shared.speed = rate

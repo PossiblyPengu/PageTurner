@@ -34,8 +34,9 @@ enum Log {
         return f
     }()
     /// The last line written and when — a repeated failure (offline page turns)
-    /// earns one log line, not one per retry.
-    private static var lastLine = ""
+    /// earns one log line, not one per retry. The timestamp is left out: the
+    /// same failure a second later still counts as the same event.
+    private static var lastBody = ""
     private static var lastLineAt = Date.distantPast
 
     private static var maxBytes: UInt64 { 256 * 1024 }
@@ -112,11 +113,12 @@ enum Log {
     }
 
     private static func append(_ message: String, category: String, crashFile: Bool) {
-        let line = "\(formatter.string(from: Date()))  \(category)  \(message)\n"
+        let body = "\(category)  \(message)"
+        let line = "\(formatter.string(from: Date()))  \(body)\n"
         // dedupe a hammered failure: the same line inside five seconds is one event
         queue.sync {
-            if !crashFile, line == lastLine, Date().timeIntervalSince(lastLineAt) < 5 { return }
-            lastLine = line; lastLineAt = Date()
+            if !crashFile, body == lastBody, Date().timeIntervalSince(lastLineAt) < 5 { return }
+            lastBody = body; lastLineAt = Date()
             let url = crashFile ? crashURL : currentURL
             if !crashFile, (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map({ UInt64($0) >= maxBytes }) == true {
                 try? fm.removeItem(at: previousURL)

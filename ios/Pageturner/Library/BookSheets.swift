@@ -508,6 +508,10 @@ struct BookEditSheet: View {
     @State private var summary: String
     @State private var pin: String?
     @State private var openLibraryId: String?
+    /// The series the picked match named — not a field of its own, so it is
+    /// carried silently like the Open Library id and the shelf pin.
+    @State private var series: String?
+    @State private var seriesIndex: Double?
     /// Jacket guesses the picked match will bring (lookup) or the jacket
     /// picked online on its own — either way a chain `applyCover` walks.
     @State private var pickedCovers: [URL] = []
@@ -530,6 +534,8 @@ struct BookEditSheet: View {
         _summary = State(initialValue: book.bookDescription ?? "")
         _pin = State(initialValue: book.bookmasterId)
         _openLibraryId = State(initialValue: book.openLibraryId)
+        _series = State(initialValue: book.series)
+        _seriesIndex = State(initialValue: book.seriesIndex)
         original = book
         self.onSave = onSave
     }
@@ -675,6 +681,7 @@ struct BookEditSheet: View {
         if !candidate.summary.isEmpty { summary = candidate.summary }
         if let isbn = candidate.isbn { self.isbn = isbn }
         if let olid = candidate.openLibraryId { openLibraryId = olid }
+        if let named = candidate.series { series = named; seriesIndex = candidate.seriesIndex }
         // a shelf row the match names is the one to push to — never a guess
         if let id = candidate.bookmasterId { pin = id }
         // the match's jacket comes with it, over a photo or a removal chosen
@@ -700,6 +707,8 @@ struct BookEditSheet: View {
         book.isbn = ISBN.normalize(isbn)
         book.openLibraryId = openLibraryId
         book.bookmasterId = pin
+        book.series = series
+        book.seriesIndex = seriesIndex
         onSave(book)
         if removeCover {
             try? FileManager.default.removeItem(at: library.coverURL(for: book))

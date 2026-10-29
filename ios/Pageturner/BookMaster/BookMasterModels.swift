@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Security)
+import Security
+#endif
 
 /// The reader this device is linked as. The bridge secret lives in the Pages
 /// Function; `deviceKey` is this device's own credential, minted at link and
@@ -12,6 +15,49 @@ struct BMUser: Codable, Equatable {
         case username
         case displayName = "display_name"
         case deviceKey = "device_key"
+    }
+}
+
+/// The per-device key BookMaster mints at link. A credential, so it lives in the
+/// Keychain — this device only, while it is unlocked — rather than inside the account
+/// record in the settings plist. (The check build has no Keychain: there the key simply
+/// is not persisted, which changes nothing a check can see.)
+enum BMKeychain {
+    private static let service = "io.github.possiblypengu.pageturner.bookmaster"
+
+    static func key(for username: String) -> String? {
+        #if canImport(Security)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: username,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+        #else
+        return nil
+        #endif
+    }
+
+    static func setKey(_ key: String?, for username: String) {
+        #if canImport(Security)
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: username,
+        ]
+        SecItemDelete(base as CFDictionary)
+        guard let key, !key.isEmpty, let data = key.data(using: .utf8) else { return }
+        var add = base
+        add[kSecValueData as String] = data
+        // the key names this device: a backup or another device has no use for it
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(add as CFDictionary, nil)
+        #endif
     }
 }
 

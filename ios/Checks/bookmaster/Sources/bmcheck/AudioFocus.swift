@@ -34,8 +34,11 @@ final class AudioFocus {
     }
 
     /// `id` is about to make sound: pause everything else, and hand it the buttons.
+    /// The pauses are copied out first — a pause that unregisters itself must
+    /// not mutate `owners` underneath this loop.
     func claim(_ id: String) {
-        for (other, pause) in owners where other != id { pause() }
+        let pauses = owners.filter { $0.key != id }.map(\.value)
+        for pause in pauses { pause() }
         RemoteControls.shared.activate(id)
         holder = RemoteControls.shared.activeOwner
     }
@@ -50,6 +53,6 @@ final class AudioFocus {
     func soleOwner(_ id: String) -> Bool { owners.count == 1 && owners[id] != nil }
 
     func pauseAll() {
-        for pause in owners.values { pause() }
+        for pause in owners.values.map({ $0 }) { pause() }
     }
 }

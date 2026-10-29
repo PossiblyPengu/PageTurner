@@ -11,6 +11,8 @@ struct HardcoverHit: Hashable {
     var isbn: String?
     var coverURL: URL?
     var series: String
+    /// The book's place in the series, when the document carries it.
+    var seriesIndex: Double? = nil
 }
 
 enum HardcoverCore {
@@ -30,6 +32,17 @@ enum HardcoverCore {
         let q = "query($q: String!, $n: Int!) { search(query: $q, query_type: \"Book\", per_page: $n, page: 1) { results } }"
         let payload: [String: Any] = ["query": q, "variables": ["q": query, "n": perPage]]
         return try? JSONSerialization.data(withJSONObject: payload)
+    }
+
+    /// "1.5" parses; so do "nan" and "inf" — and JSONSerialization answers a
+    /// runaway exponent like `1e999` as +inf too. Those would fail the catalogue
+    /// encode the number eventually lands in, so only finite makes a position.
+    private static func finite(_ d: Double?) -> Double? {
+        d?.isFinite == true ? d : nil
+    }
+
+    private static func finite(_ s: String?) -> Double? {
+        finite(s.flatMap(Double.init))
     }
 
     /// `data.search.results.hits[].document` — Typesense's shape, passed through by Hardcover. Anything missing is
@@ -54,12 +67,17 @@ enum HardcoverCore {
                 ?? String(((doc["release_date"] as? String) ?? "").prefix(4))
             let isbns = doc["isbns"] as? [String] ?? []
             let cover = ((doc["image"] as? [String: Any])?["url"] as? String).flatMap { URL(string: $0) }
-            let series = (doc["series_names"] as? [String])?.first ?? ""
+            // `series` lists {id, name, position} objects; `series_names` just the names.
+            let seriesDoc = (doc["series"] as? [[String: Any]])?.first
+            let position = finite(seriesDoc?["position"] as? Double)
+                ?? finite(seriesDoc?["position"] as? String)
+            let series = (seriesDoc?["name"] as? String)
+                ?? (doc["series_names"] as? [String])?.first ?? ""
             return HardcoverHit(
                 title: title, authors: authors, year: year,
                 summary: (doc["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
                 isbn: isbns.first(where: { $0.count == 13 }) ?? isbns.first,
-                coverURL: cover, series: series)
+                coverURL: cover, series: series, seriesIndex: position)
         }
     }
 }

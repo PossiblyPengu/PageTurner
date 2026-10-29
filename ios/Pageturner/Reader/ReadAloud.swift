@@ -55,6 +55,7 @@ final class ReadAloud: NSObject, ObservableObject {
     private let synthesizer: PublicationSpeechSynthesizer
     private let tuning: SpeechTuning
     private let neural: NeuralTTSEngine
+    private let composite: CompositeTTSEngine
     private let startup = AudioStartup()
     /// Something else owns the stage (a voice sample, the audiobook, the voice sheet):
     /// narration stays paused until the reader asks for it. A play task parked between
@@ -106,10 +107,20 @@ final class ReadAloud: NSObject, ObservableObject {
     private var subscriptions: Set<AnyCancellable> = []
     private var sleepTimer: Timer?
     private var sleepDeadline: Date?
+    /// "Stop at the end of the chapter": the chapter armed when asked. Armed while no
+    /// sentence has named one yet — the first that does takes it.
+    private var sleepChapterID: String?
+    /// The chapter a locator is in — wired by the reader, which knows the contents.
+    var chapterID: ((Locator) -> String?)?
+    /// A chapter-end bell is armed (the countdown kind publishes `sleepRemaining` instead).
+    @Published private(set) var sleepAtChapterEnd = false
     /// The navigator that takes decorations — kept so a Low Power Mode change
     /// can repaint without waiting for the next spoken thing.
     private var decorable: DecorableNavigator?
     private var lowPowerObserver: NSObjectProtocol?
+    /// A voice model is the biggest single thing the app holds (~60 MB): a memory
+    /// warning gives it back at once; the next sentence loads it again.
+    private var memoryObserver: NSObjectProtocol?
     /// A call or Siri taking the session makes iOS cancel the utterance — and Readium's
     /// AVTTSEngine reports a cancel as finished, so without this the synthesizer walks
     /// silently through sentences nobody hears, and three of those read as failures that
@@ -167,10 +178,15 @@ final class ReadAloud: NSObject, ObservableObject {
         // Low Power Mode drops the per-word work entirely: no word schedule,
         // no 30Hz playhead report, no mark repainted for every word
         neural.reportsWords = settings.highlights.needsWords && !LowPower.on
+        var composite: CompositeTTSEngine!
         guard let synthesizer = PublicationSpeechSynthesizer(
             publication: publication,
             config: .init(voiceIdentifier: settings.voiceIdentifier),
-            engineFactory: { CompositeTTSEngine(system: SystemTTSEngine(tuning: tuning), neural: neural) },
+            engineFactory: {
+                let engine = CompositeTTSEngine(system: SystemTTSEngine(tuning: tuning), neural: neural)
+                composite = engine
+                return engine
+            },
             tokenizerFactory: makeReadingTokenizer
         ) else { return nil }
 
@@ -179,17 +195,20 @@ final class ReadAloud: NSObject, ObservableObject {
         self.synthesizer = synthesizer
         self.tuning = tuning
         self.neural = neural
+        self.composite = composite
+        // Automatic: a downloaded neural voice is the best voice there is for its language
+        composite.preferNeural = settings.voiceIdentifier == nil
         self.displayTitle = displayTitle
         self.displayAuthor = displayAuthor
         rate = settings.speechRate
         highlights = settings.highlights
         super.init()
         synthesizer.delegate = self
-        // the next sentence is made while this one is said: ask the book what it is
+        // the next sentences are made while this one is said: ask the book what they are
         let lookahead = SentenceLookahead(publication: publication)
         neural.upcoming = { [weak self] text in
-            guard let self, case let .playing(utterance, range: _) = self.synthesizer.state, utterance.text == text else { return nil }
-            return await lookahead.sentence(after: utterance)
+            guard let self, case let .playing(utterance, range: _) = self.synthesizer.state, utterance.text == text else { return [] }
+            return await lookahead.sentences(after: utterance, count: 2)
         }
 
         // light the sentence, the line and the word being spoken, as chosen
@@ -214,6 +233,10 @@ final class ReadAloud: NSObject, ObservableObject {
                 }
             }
         }
+
+        memoryObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { _ in NeuralSynth.shared.unload() }
 
         // a call or an alarm takes the audio session: iOS cancels the utterance, which
         // AVTTSEngine passes on as finished — hold a real pause instead, then resume
@@ -346,7 +369,8 @@ final class ReadAloud: NSObject, ObservableObject {
 
     /// The spoken line's mark, measured and — if it is near an edge, or `center` asks — scrolled to 40% down the
     /// screen. Answers "none" (no mark on this page), "held" (the reader has scrolled the page off the spoken line),
-    /// "wait" (they are on it, finger still busy), "moved" or "shown". The mark queried is the painted line, not the decoration's own wrapper: a group container holds a
+    /// "wait" (they are on it, finger still busy), "moved" or "shown". The mark queried is the band — painted first
+    /// in its group, or the word's when no band is on — not the decoration's own wrapper: a group container holds a
     /// plain div per item that sits at the end of the document; only the absolutely-positioned children carry
     /// `data-writing-mode`.
     private func keepSpokenInView(on navigator: EPUBNavigatorViewController, center: Bool) async -> String {
@@ -360,8 +384,7 @@ final class ReadAloud: NSObject, ObservableObject {
               document.addEventListener(name, note, { passive: true, capture: true });
             });
           }
-          var el = document.querySelector('[data-group="tts-line"] [data-writing-mode]')
-                || document.querySelector('[data-group="tts-word"] [data-writing-mode]')
+          var el = document.querySelector('[data-group="tts-word"] [data-writing-mode]')
                 || document.querySelector('[data-group="tts"] [data-writing-mode]');
           if (!el) { return 'none'; }
           var center = \(center ? "true" : "false");
@@ -417,13 +440,26 @@ final class ReadAloud: NSObject, ObservableObject {
 
     /// Start from the first sentence on screen.
     func start() {
+        begin(locate: { [weak self] in
+            await self?.navigator?.firstVisibleElementLocator() ?? self?.navigator?.currentLocation
+        })
+    }
+
+    /// Start at a locator the reader picked (a text selection) rather than the screen's first.
+    func start(from locator: Locator) {
+        begin(locate: { locator })
+    }
+
+    private func begin(locate: @escaping @MainActor () async -> Locator?) {
         heldForFocus = false
         registerAudio()
         AudioFocus.shared.claim("readaloud")
         isActive = true
-        startup.start(locate: { [weak self] in
-            await self?.navigator?.firstVisibleElementLocator() ?? self?.navigator?.currentLocation
-        }, play: { [weak self] start in
+        // a neural voice's model takes a moment to load — have it ready before the first ask
+        composite.warmVoice(
+            synthesizer.config.voiceIdentifier,
+            bookLanguage: publication.metadata.language?.code.bcp47)
+        startup.start(locate: locate, play: { [weak self] start in
             self?.synthesizer.start(from: start)
         })
         publishNowPlaying()
@@ -452,6 +488,7 @@ final class ReadAloud: NSObject, ObservableObject {
 
     deinit {
         if let lowPowerObserver { NotificationCenter.default.removeObserver(lowPowerObserver) }
+        if let memoryObserver { NotificationCenter.default.removeObserver(memoryObserver) }
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
     }
 
@@ -477,12 +514,14 @@ final class ReadAloud: NSObject, ObservableObject {
 
     // MARK: - Sleep timer
 
-    /// Stop read-aloud after the given number of minutes; nil cancels. One bell
-    /// rung once at the deadline — the label refreshes on each spoken sentence
-    /// (`noteProgression`), so no poll is needed just to count down.
+    /// Stop read-aloud after the given number of minutes; nil cancels — and cancels a
+    /// chapter-end bell too: only one bell is ever set. One bell rung once at the
+    /// deadline — the label refreshes on each spoken sentence (`noteProgression`).
     func setSleepTimer(minutes: Int?) {
         sleepTimer?.invalidate()
         sleepTimer = nil
+        sleepChapterID = nil
+        sleepAtChapterEnd = false
         guard let minutes, minutes > 0 else {
             sleepDeadline = nil
             sleepRemaining = nil
@@ -499,6 +538,15 @@ final class ReadAloud: NSObject, ObservableObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         sleepTimer = timer
+    }
+
+    /// Stop read-aloud when the chapter ends — the one being read now, or the first the
+    /// voice names if none has started yet. A timed bell is cancelled by it (and it by one).
+    func setSleepTimer(atChapterEnd: Bool) {
+        setSleepTimer(minutes: nil)
+        guard atChapterEnd else { return }
+        sleepChapterID = spoken.sentence.flatMap { chapterID?($0) }
+        sleepAtChapterEnd = true
     }
 
     /// Takes effect from the next sentence.
@@ -551,6 +599,9 @@ final class ReadAloud: NSObject, ObservableObject {
     func setVoice(_ identifier: String?) {
         synthesizer.config.voiceIdentifier = identifier
         tuning.chosenVoiceID = identifier
+        composite.preferNeural = identifier == nil
+        // a freshly chosen neural voice is loaded now, not when its first sentence comes
+        if let id = identifier { composite.warmVoice(id, bookLanguage: nil) }
     }
 
     // MARK: - Highlights
@@ -570,8 +621,9 @@ final class ReadAloud: NSObject, ObservableObject {
         }
     }
 
-    /// What is on the page now, so that only what changed is sent to it.
-    private var painted: (sentence: [Decoration], line: [Decoration], word: [Decoration]) = ([], [], [])
+    /// What is on the page now, so that only what changed is sent to it. The marks that move per
+    /// word — the band and the word — share a group, so a word's step is one call to the page.
+    private var painted: (sentence: [Decoration], marks: [Decoration]) = ([], [])
 
     /// A mark's id names its chapter file as well as its group. Readium tells only the file a changed
     /// decoration is now in, so with one id throughout, the marks in the file the voice has just left would
@@ -583,34 +635,31 @@ final class ReadAloud: NSObject, ObservableObject {
 
     /// Put the sentence, line and word being said on the page as chosen — and take away the rest.
     private func paint(_ spoken: Spoken, as highlights: ReadAloudHighlights, on navigator: DecorableNavigator) {
-        var sentence: [Decoration] = [], line: [Decoration] = [], word: [Decoration] = []
+        var sentence: [Decoration] = [], marks: [Decoration] = []
         if highlights.sentence, let locator = spoken.sentence {
             sentence = [Decoration(id: markID("tts", locator), locator: locator.paintable, style: .highlight(tint: .systemOrange))]
         }
         // Low Power Mode: the marks that move for every word — the word itself
         // and the line band it sits on — are the per-word cost; drop them both.
         if let locator = spoken.word, !spoken.wordIsTheSentence, !LowPower.on {
+            // the band goes in first so the word mark draws on top and the follow query finds it
+            if highlights.line, navigator.supports(decorationStyle: .spokenLine) {
+                marks.append(Decoration(id: markID("tts-line", locator), locator: locator.paintable, style: .spokenLine))
+            }
             if highlights.word {
                 // a navigator that doesn't know the stronger mark gets the plain highlight
                 let style: Decoration.Style = navigator.supports(decorationStyle: .spokenWord)
                     ? .spokenWord(tint: .systemOrange) : .highlight(tint: .systemOrange)
-                word = [Decoration(id: markID("tts-word", locator), locator: locator.paintable, style: style)]
-            }
-            if highlights.line, navigator.supports(decorationStyle: .spokenLine) {
-                line = [Decoration(id: markID("tts-line", locator), locator: locator.paintable, style: .spokenLine)]
+                marks.append(Decoration(id: markID("tts-word", locator), locator: locator.paintable, style: style))
             }
         }
         if sentence != painted.sentence {
             navigator.apply(decorations: sentence, in: "tts")
             painted.sentence = sentence
         }
-        if line != painted.line {
-            navigator.apply(decorations: line, in: "tts-line")
-            painted.line = line
-        }
-        if word != painted.word {
-            navigator.apply(decorations: word, in: "tts-word")
-            painted.word = word
+        if marks != painted.marks {
+            navigator.apply(decorations: marks, in: "tts-word")
+            painted.marks = marks
         }
     }
 
@@ -639,7 +688,7 @@ final class ReadAloud: NSObject, ObservableObject {
         // isPlaying still reads true (the pauseFlash hasn't flipped it), which would
         // count the whole pause as spoken time on the next sentence
         if case .playing = synthesizer.state { lastTickAt = now } else { lastTickAt = nil }
-        guard let prog = locator.locations.totalProgression else { return }
+        guard let prog = locator.locations.totalProgression, prog.isFinite else { return }
         if startProgression == nil { startProgression = prog }
         currentProgression = prog
         // under ~0.2% read the ratio is mostly noise; past it, the estimate holds
@@ -707,9 +756,22 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             }
             pauseFlash?.cancel()
             isActive = true
+            let wasPlaying = isPlaying
             isPlaying = true
             noteProgression(utterance.locator)
-            publishNowPlaying()
+            // the chapter-end bell rings the first sentence in a different chapter;
+            // one that names no chapter (a locator outside the contents) leaves it armed
+            if sleepAtChapterEnd {
+                let now = chapterID?(utterance.locator)
+                if let armed = sleepChapterID, let now, now != armed {
+                    stop()
+                    return
+                }
+                if sleepChapterID == nil { sleepChapterID = now }
+            }
+            // the lock screen's clock moves with the sentence — a word report repeats
+            // the same locator, so publishing it again would only resend what is there
+            if !wasPlaying || utterance.locator != spoken.sentence { publishNowPlaying() }
             // the sentence, and in it the word being said — the first until the voice says which
             spoken = Spoken(sentence: utterance.locator, word: word ?? firstWord(of: utterance))
             if word != nil {

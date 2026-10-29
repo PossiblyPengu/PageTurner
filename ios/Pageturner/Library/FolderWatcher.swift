@@ -20,6 +20,8 @@ final class FolderWatcher {
     private let bookmarkKey = "watchedFolderBookmark"
     private let seenKey = "watchedFolderSeen"
     private let seenMax = 5000
+    /// The last scan — a foreground storm isn't a reason to walk the folder every time.
+    private var lastScan: Date?
     /// A file touched this recently may still be arriving.
     private let fileSettle: TimeInterval = 10
     /// An audio folder has to be quiet this long before its tracks are imported.
@@ -52,6 +54,7 @@ final class FolderWatcher {
         UserDefaults.standard.set(data, forKey: bookmarkKey)
         UserDefaults.standard.removeObject(forKey: seenKey)
         folderName = url.lastPathComponent
+        lastScan = nil   // a folder just chosen is scanned whatever the clock says
         await scan(library: library)
     }
 
@@ -61,9 +64,12 @@ final class FolderWatcher {
         folderName = nil
     }
 
-    /// Import anything new in the folder. Safe to call often.
+    /// Import anything new in the folder. Safe to call often — and cheap to call again inside
+    /// the same minute, when nothing could have settled since.
     func scan(library: LibraryStore) async {
         guard !scanning, let folder = resolve() else { return }
+        guard lastScan.map({ Date().timeIntervalSince($0) >= 60 }) ?? true else { return }
+        lastScan = Date()
         scanning = true
         defer { scanning = false }
         let scoped = folder.startAccessingSecurityScopedResource()

@@ -62,8 +62,10 @@ struct JumpHistory {
 
     /// The reader reported a new position. The first one after a jump is where
     /// it landed; once the reader is well past that, the way back is dropped.
+    /// A non-finite report (a half-reloaded webview answers 0/0) is ignored —
+    /// stored, it would compare false to everything and pin the way back forever.
     mutating func readOn(to progression: Double) {
-        guard let i = entries.indices.last else { return }
+        guard progression.isFinite, let i = entries.indices.last else { return }
         guard let landed = entries[i].landedAt else {
             entries[i].landedAt = progression
             return

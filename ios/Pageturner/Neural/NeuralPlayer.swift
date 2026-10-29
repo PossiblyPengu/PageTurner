@@ -252,8 +252,11 @@ final class NeuralPlayer {
                 guard let self, !self.pending.isEmpty else { break }
                 self.tick()
                 // the word timing is fitted to ~105ms, so 15Hz is already finer
-                // than the marks can show; Low Power Mode trades it for wakeups
-                try? await Task.sleep(nanoseconds: LowPower.on ? 200_000_000 : 66_000_000)
+                // than the marks can show; a lead-only wait doesn't need that, and
+                // Low Power Mode trades it all for wakeups
+                let interval: UInt64 = LowPower.on ? 200_000_000
+                    : self.follower != nil ? 66_000_000 : 120_000_000
+                try? await Task.sleep(nanoseconds: interval)
             }
             self?.ticker = nil
         }

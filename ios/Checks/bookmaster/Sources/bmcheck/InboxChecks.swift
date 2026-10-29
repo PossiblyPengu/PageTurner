@@ -69,6 +69,9 @@ func runInboxChecks() {
           && !BMKeepAlive.shouldRun(enabled: true, linked: true, background: false))
     check("it looks every half minute, and less often in Low Power Mode",
           BMKeepAlive.pollInterval(lowPower: false) == 30 && BMKeepAlive.pollInterval(lowPower: true) == 90)
+    check("the app in front looks every two minutes, and three in Low Power Mode",
+          BMKeepAlive.foregroundPollInterval(lowPower: false) == 120
+          && BMKeepAlive.foregroundPollInterval(lowPower: true) == 180)
     let wav = BMKeepAlive.silence()
     let header = String(decoding: wav.prefix(4), as: UTF8.self) + String(decoding: wav[8 ..< 12], as: UTF8.self)
         + String(decoding: wav[12 ..< 16], as: UTF8.self) + String(decoding: wav[36 ..< 40], as: UTF8.self)

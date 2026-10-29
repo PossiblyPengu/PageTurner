@@ -21,11 +21,11 @@ enum BookMatch {
             scalars.append(scalar)
         }
         var s = String(scalars).lowercased()
-        s = s.replacingOccurrences(of: #"\([^)]*\)|\[[^\]]*\]"#, with: " ", options: .regularExpression)
+        s = replacing(#"\([^)]*\)|\[[^\]]*\]"#, in: s, with: " ")
         // Apostrophes are dropped rather than spaced out, so that "Ender's
         // Game" folds to "enders game" and not to "ender s game".
-        s = s.replacingOccurrences(of: #"['‘’]"#, with: "", options: .regularExpression)
-        s = s.replacingOccurrences(of: #"[^\p{L}\p{N}]+"#, with: " ", options: .regularExpression)
+        s = replacing(#"['‘’]"#, in: s, with: "")
+        s = replacing(#"[^\p{L}\p{N}]+"#, in: s, with: " ")
         return s.trimmingCharacters(in: .whitespaces)
     }
 
@@ -34,9 +34,31 @@ enum BookMatch {
         "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
     ]
 
+    /// Patterns compiled once: matching and ranking run them for every title of every result, and compiling each
+    /// time was most of the cost of a bulk lookup.
+    private static let compiledLock = NSLock()
+    private static var compiled: [String: NSRegularExpression] = [:]
+
+    static func regex(_ pattern: String, _ options: NSRegularExpression.Options = []) -> NSRegularExpression? {
+        let key = "\(options.rawValue)|\(pattern)"
+        compiledLock.lock()
+        defer { compiledLock.unlock() }
+        if let hit = compiled[key] { return hit }
+        guard let re = try? NSRegularExpression(pattern: pattern, options: options) else { return nil }
+        compiled[key] = re
+        return re
+    }
+
+    /// `pattern` replaced in `s` (the template is literal text: no `$` groups are used here).
+    static func replacing(_ pattern: String, in s: String, with template: String,
+                          options: NSRegularExpression.Options = []) -> String {
+        guard let re = regex(pattern, options) else { return s }
+        return re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: template)
+    }
+
     /// The first capture group of `pattern` in `s`, when it matches.
     private static func group(_ pattern: String, in s: String, options: NSRegularExpression.Options = []) -> String? {
-        guard let re = try? NSRegularExpression(pattern: pattern, options: options),
+        guard let re = regex(pattern, options),
               let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
               let r = Range(m.range(at: 1), in: s)
         else { return nil }
@@ -45,7 +67,7 @@ enum BookMatch {
 
     /// Whether `pattern` matches anywhere in `s`.
     static func matches(_ pattern: String, in s: String, options: NSRegularExpression.Options = [.caseInsensitive]) -> Bool {
-        guard let re = try? NSRegularExpression(pattern: pattern, options: options) else { return false }
+        guard let re = regex(pattern, options) else { return false }
         return re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
     }
 
@@ -63,7 +85,7 @@ enum BookMatch {
             if let n = wordNumbers[raw] { return n }
         }
 
-        let bare = title.replacingOccurrences(of: #"\([^)]*\)"#, with: " ", options: .regularExpression)
+        let bare = replacing(#"\([^)]*\)"#, in: title, with: " ")
             .trimmingCharacters(in: .whitespaces)
         if let trailing = group(#"\s(\d{1,2})$"#, in: bare) { return Int(trailing) }
         return nil
@@ -107,7 +129,7 @@ enum BookMatch {
         // Hobbit".
         add(String(bare.split(separator: ",").first ?? ""))
 
-        if let m = try? NSRegularExpression(pattern: #"\(([^,)#]+?)[,\s]*#([\d.]+)\)"#)
+        if let m = regex(#"\(([^,)#]+?)[,\s]*#([\d.]+)\)"#)?
             .firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
            let series = Range(m.range(at: 1), in: title),
            let number = Range(m.range(at: 2), in: title) {
@@ -119,9 +141,7 @@ enum BookMatch {
 
     /// A title with its series note removed, which is what to search on.
     static func bareTitle(_ title: String) -> String {
-        let stripped = title
-            .replacingOccurrences(of: #"\([^)]*\)"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        let stripped = replacing(#"\s+"#, in: replacing(#"\([^)]*\)"#, in: title, with: " "), with: " ")
             .trimmingCharacters(in: .whitespaces)
         return stripped.isEmpty ? title : stripped
     }
@@ -147,8 +167,7 @@ enum BookMatch {
     /// as a single name puts the surname at "Valenti" and loses the co-author
     /// entirely.
     static func splitAuthors(_ credit: String) -> [String] {
-        credit
-            .replacingOccurrences(of: #"\s*&\s*|\s+and\s+"#, with: "\u{1}", options: [.regularExpression, .caseInsensitive])
+        replacing(#"\s*&\s*|\s+and\s+"#, in: credit, with: "\u{1}", options: [.caseInsensitive])
             .split(separator: "\u{1}")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }

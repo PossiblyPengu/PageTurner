@@ -54,6 +54,37 @@ func runSpeechTextChecks() {
     check("layout spaces alone do not merge sentences",
           !SpeechText.shouldJoin(previous: "It ended.", separator: "   ", next: "Another began."))
 
+    section("Read-aloud typographic debris")
+    check("a black circle ornament is not named",
+          SpeechText.spoken("It grew ● quiet.") == "It grew quiet.", SpeechText.spoken("It grew ● quiet."))
+    check("an ornament line is nothing to say",
+          SpeechText.spoken("● ● ●") == "" && SpeechText.spoken("* * *") == "" && SpeechText.spoken("———") == "")
+    check("a scene break between words becomes a pause",
+          SpeechText.spoken("The End * * * Next chapter") == "The End Next chapter")
+    check("a link is not spelled out",
+          SpeechText.spoken("See https://example.com/page. It was good.") == "See. It was good.",
+          SpeechText.spoken("See https://example.com/page. It was good."))
+    check("a bare domain too",
+          SpeechText.spoken("From www.gutenberg.org today") == "From today", SpeechText.spoken("From www.gutenberg.org today"))
+    check("an email is not spelled out",
+          SpeechText.spoken("Write me@example.com soon.") == "Write soon.")
+    check("a footnote asterisk is not an asterisk",
+          SpeechText.spoken("The claim.* It was true.") == "The claim. It was true.")
+    check("a dagger footnote mark goes",
+          SpeechText.spoken("A dagger† mark.") == "A dagger mark.")
+    check("a stray symbol between words goes",
+          SpeechText.spoken("love ♥ you") == "love you" && SpeechText.spoken("point → here") == "point here")
+    check("markup debris goes but its words stay",
+          SpeechText.spoken("under_score [see page 4]") == "under score see page 4")
+    check("a multiplication sign between digits is kept",
+          SpeechText.spoken("it was 5×3 total") == "it was 5×3 total")
+    check("a Catalan middle dot is kept",
+          SpeechText.spoken("la cel·la") == "la cel·la")
+    check("a real phone number keeps its hyphen",
+          SpeechText.spoken("call 555-1234") == "call 555-1234")
+    check("a double hyphen between words goes",
+          SpeechText.spoken("it was--she said--true") == "it was she said true")
+
     section("Read-aloud word ranges back onto the page")
     /// The word `word` as the voice reports it in the cleaned text, found again in `original`.
     func backOnPage(_ original: String, _ word: String) -> String? {
@@ -84,6 +115,50 @@ func runSpeechTextChecks() {
           backOnPage("Chapter XIV Morning", "Morning") == "Morning")
     check("punctuation alone has no range",
           backOnPage("Well, then.", ",") == nil)
+    check("a word past a stripped link still finds its place",
+          backOnPage("a the https://aa.bb/cc/dd/ee/ff/gg/hh/ii last the z", "last") == "last")
+    check("a word past a stripped email still finds its place",
+          backOnPage("write to me@example.com today", "today") == "today")
+    check("a repeated word maps to the instance after a stripped link",
+          {
+              let original = "the https://aa.bb/cc/dd/ee/ff/gg/hh/ii/jj/kk/ll the end"
+              let spoken = SpeechText.spoken(original)
+              guard let r = spoken.range(of: "the", options: .backwards) else { return false }
+              return SpeechText.originalRange(of: r, spoken: spoken, original: original)
+                  == original.range(of: "the", options: .backwards)
+          }())
+
+    section("WordMap — per-utterance word mapping")
+    /// Every reportable range must answer the same through the cached map as through the
+    /// one-shot walk — the engines moved to the map, nothing else may change. A scan at
+    /// character granularity covers word boundaries, punctuation and whitespace reports.
+    func mapAgrees(_ original: String) -> Bool {
+        let spoken = SpeechText.spoken(original)
+        let map = SpeechText.WordMap(spoken: spoken, original: original)
+        var index = spoken.startIndex
+        while index < spoken.endIndex {
+            let r = index ..< spoken.index(after: index)
+            if SpeechText.originalRange(of: r, spoken: spoken, original: original)
+                != map.originalRange(of: r) { return false }
+            index = r.upperBound
+        }
+        return true
+    }
+    check("a word map agrees with the one-shot walk",
+          mapAgrees("Hello there, friend.")
+              && mapAgrees("The extra\u{00AD}ordinary answer came.")
+              && mapAgrees("diﬃcult ﬂowers bloom")
+              && mapAgrees("Use it, e.g. here now"))
+    check("a word map agrees through stripped debris",
+          mapAgrees("the war of 1914–1918 ended")
+              && mapAgrees("It was over.¹ She left.")
+              && mapAgrees("a the https://aa.bb/cc/dd/ee/ff/gg/hh/ii last the z")
+              && mapAgrees("write to me@example.com today")
+              && mapAgrees("the https://aa.bb/cc/dd/ee/ff/gg/hh/ii/jj/kk/ll the end"))
+    check("a word map agrees where the word count held but the word changed",
+          mapAgrees("Chapter XIV Morning") && mapAgrees("XII. Night"))
+    check("a word map on an empty or all-debris text agrees",
+          mapAgrees("") && mapAgrees("● ● ●") && mapAgrees("Well, then."))
 
     section("Read-aloud dates")
     func said(_ t: String) -> String { SpeechText.spoken(t) }

@@ -116,6 +116,10 @@ enum BMKeepAlive {
     /// How often it looks: every half minute, and every minute and a half in Low Power Mode.
     static func pollInterval(lowPower: Bool) -> TimeInterval { lowPower ? 90 : 30 }
 
+    /// How often the app itself looks while it is in front — a banner arriving two minutes late
+    /// beats a request every half minute; the background keep-alive stays snappier.
+    static func foregroundPollInterval(lowPower: Bool) -> TimeInterval { lowPower ? 180 : 120 }
+
     /// A WAV file of silence: 16-bit mono PCM, `seconds` long. Played on a loop it is a sound the system
     /// counts, and nobody hears.
     static func silence(seconds: Int = 1, sampleRate: Int = 8000) -> Data {

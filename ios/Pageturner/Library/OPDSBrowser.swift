@@ -108,7 +108,7 @@ struct OPDSClient {
     private func request(_ url: URL) -> URLRequest {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
-        request.setValue("application/atom+xml, application/xml;q=0.9, */*;q=0.5", forHTTPHeaderField: "Accept")
+        request.setValue("application/atom+xml, application/opds+json;q=0.9, application/json;q=0.8, application/xml;q=0.7, */*;q=0.5", forHTTPHeaderField: "Accept")
         if let user = catalog.username, let password {
             let token = Data("\(user):\(password)".utf8).base64EncodedString()
             request.setValue("Basic \(token)", forHTTPHeaderField: "Authorization")

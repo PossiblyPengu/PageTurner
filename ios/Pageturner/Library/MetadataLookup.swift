@@ -26,11 +26,18 @@ struct MetadataCandidate: Identifiable, Hashable, Codable {
     /// later push can never write a duplicate. Found by matching the candidate
     /// against the shelf copy the app keeps, not by asking BookMaster.
     var bookmasterId: String?
+    /// The series the source names, and the book's place in it.
+    var series: String?
+    var seriesIndex: Double?
+    /// A print page count, when the source has one — a median (Open Library)
+    /// or the listed edition's (Google Books).
+    var pages: Int?
 
     /// `id` is only for the list on screen; what is kept on disk is the rest.
     /// `coverURL` is read for lists cached by older builds, which kept one.
     enum CodingKeys: String, CodingKey {
-        case title, authors, year, summary, isbn, openLibraryId, coverURL, coverURLs, source, contributors, bookmasterId
+        case title, authors, year, summary, isbn, openLibraryId, coverURL, coverURLs, source, contributors, bookmasterId,
+             series, seriesIndex, pages
     }
 }
 
@@ -51,6 +58,9 @@ extension MetadataCandidate {
         source = try c.decode(String.self, forKey: .source)
         contributors = try c.decodeIfPresent([String].self, forKey: .contributors) ?? []
         bookmasterId = try c.decodeIfPresent(String.self, forKey: .bookmasterId)
+        series = try c.decodeIfPresent(String.self, forKey: .series)
+        seriesIndex = try c.decodeIfPresent(Double.self, forKey: .seriesIndex)
+        pages = try c.decodeIfPresent(Int.self, forKey: .pages)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -65,6 +75,9 @@ extension MetadataCandidate {
         try c.encode(source, forKey: .source)
         try c.encodeIfPresent(contributors.isEmpty ? nil : contributors, forKey: .contributors)
         try c.encodeIfPresent(bookmasterId, forKey: .bookmasterId)
+        try c.encodeIfPresent(series, forKey: .series)
+        try c.encodeIfPresent(seriesIndex, forKey: .seriesIndex)
+        try c.encodeIfPresent(pages, forKey: .pages)
     }
 }
 
@@ -88,6 +101,10 @@ extension MetadataLookup {
                 // merge cover guesses, keeping the survivor's own first
                 out[i].coverURLs.append(contentsOf: c.coverURLs.filter { !out[i].coverURLs.contains($0) })
                 if out[i].year.isEmpty { out[i].year = c.year }
+                if out[i].series == nil { out[i].series = c.series; out[i].seriesIndex = c.seriesIndex }
+                if out[i].pages == nil { out[i].pages = c.pages }
+                // the folded-in match's shelf pin is a fact, not a guess — keep it
+                if out[i].bookmasterId == nil { out[i].bookmasterId = c.bookmasterId }
                 // the folded-in match keeps a name in the sources line
                 for name in [c.source] + c.contributors
                 where name != out[i].source && !out[i].contributors.contains(name) {
@@ -177,6 +194,17 @@ enum MetadataLookup {
             }
         }
         if let data = try? JSONEncoder().encode(remembered) { try? data.write(to: rememberedFile, options: .atomic) }
+    }
+
+    /// "1.5" parses; so do "nan" and "inf" — and JSONSerialization answers a
+    /// runaway exponent like `1e999` as +inf too. Those would fail the encode
+    /// of any catalogue or cache they end up stored in, so only finite counts.
+    private static func finite(_ d: Double?) -> Double? {
+        d?.isFinite == true ? d : nil
+    }
+
+    private static func finite(_ s: String?) -> Double? {
+        finite(s.flatMap(Double.init))
     }
 
     /// All sources at once. `progress` hears the merged list each time one answers (the fastest shows at once, the
@@ -296,7 +324,8 @@ enum MetadataLookup {
                 isbn: hit.isbn.flatMap { ISBN.normalize($0) },
                 openLibraryId: hit.openLibraryId.isEmpty ? nil : hit.openLibraryId,
                 coverURLs: hit.coverURLs,
-                source: hit.source)
+                source: hit.source,
+                pages: hit.totalPages)
         }
     }
 
@@ -335,7 +364,7 @@ enum MetadataLookup {
         comp.queryItems = [
             URLQueryItem(name: "q", value: q),
             URLQueryItem(name: "maxResults", value: "8"),
-            URLQueryItem(name: "fields", value: "items(id,volumeInfo(title,authors,publishedDate,imageLinks,description,industryIdentifiers))"),
+            URLQueryItem(name: "fields", value: "items(id,volumeInfo(title,authors,publishedDate,imageLinks,description,industryIdentifiers,seriesInfo,pageCount))"),
         ]
         guard let url = comp.url,
               let (data, _) = try? await session.data(from: url),
@@ -370,10 +399,14 @@ enum MetadataLookup {
                 .compactMap { $0["identifier"] as? String }
             let isbn = ISBN.best(of: identifiers)
             covers += CoverLinks.isbn(isbn)
+            let seriesEntry = ((info["seriesInfo"] as? [String: Any])?["series"] as? [[String: Any]])?.first
             return MetadataCandidate(
                 title: t, authors: authors, year: year,
                 summary: BookText.plain(fromHTML: info["description"] as? String ?? ""),
-                isbn: isbn, coverURLs: covers, source: "Google Books")
+                isbn: isbn, coverURLs: covers, source: "Google Books",
+                series: seriesEntry?["title"] as? String,
+                seriesIndex: finite(seriesEntry?["issueNumber"] as? String),
+                pages: info["pageCount"] as? Int)
         }
     }
 
@@ -387,7 +420,9 @@ enum MetadataLookup {
                 title: hit.title, authors: hit.authors, year: hit.year, summary: hit.summary,
                 isbn: hit.isbn.flatMap { ISBN.normalize($0) },
                 coverURLs: (hit.coverURL.map { [$0] } ?? []) + CoverLinks.isbn(hit.isbn) + CoverLinks.amazon(hit.isbn),
-                source: "Hardcover")
+                source: "Hardcover",
+                series: hit.series.isEmpty ? nil : hit.series,
+                seriesIndex: hit.seriesIndex)
         }, failed)
     }
 
@@ -416,11 +451,15 @@ enum MetadataLookup {
             let isbn = ISBN.best(of: [(item["isbn"] as? String) ?? ""])
             var covers = CoverLinks.audibleArt(item["image"] as? String)
             covers += CoverLinks.isbn(isbn)
+            // "seriesPrimary"/"seriesSecondary": {name, position} — the run the book is in
+            let run = (item["seriesPrimary"] as? [String: Any]) ?? (item["seriesSecondary"] as? [String: Any])
             return MetadataCandidate(
                 title: t, authors: authors,
                 year: String((item["releaseDate"] as? String ?? "").prefix(4)),
                 summary: BookText.plain(fromHTML: (item["description"] as? String) ?? (item["summary"] as? String) ?? ""),
-                isbn: isbn, coverURLs: covers, source: "Audible")
+                isbn: isbn, coverURLs: covers, source: "Audible",
+                series: run?["name"] as? String,
+                seriesIndex: finite(run?["position"] as? Double) ?? finite(run?["position"] as? String))
         }
     }
 
@@ -503,6 +542,8 @@ enum MetadataLookup {
             if current.bookDescription == nil, !match.summary.isEmpty { current.bookDescription = match.summary }
             if current.isbn == nil { current.isbn = match.isbn }
             if current.openLibraryId == nil { current.openLibraryId = match.openLibraryId }
+            if current.series == nil { current.series = match.series; current.seriesIndex = match.seriesIndex }
+            if current.pages == nil { current.pages = match.pages }
             changed = current != before
         }
         if let pin = match.bookmasterId, book.bookmasterId == nil {
