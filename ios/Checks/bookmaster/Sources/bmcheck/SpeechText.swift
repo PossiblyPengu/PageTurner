@@ -211,9 +211,9 @@ enum SpeechText {
         // a link or an email read letter by letter is noise — take the whole thing
         (rx(#"https?://[^\s<>"')\]]+[\p{L}\p{N}/]|www\.[^\s<>"')\]]+[\p{L}\p{N}/]"#), " "),
         (rx(#"[\p{L}\p{N}._+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+"#), " "),
-        // a run of separators — "***", "• • •", "———", "— * —" — is a scene break, not words;
-        // two members minimum, so a lone dash or mid-word mark stays
-        (rx(#"(?:[*＊✱✳⁂※•·~=_†‡¶⁋\x{2010}-\x{2015}\x{2212}]+\s*){2,}"#), " "),
+        // a run of separators — "***", "• • •", "———", "— * —", "was--she" — is a scene break,
+        // not words; two members minimum, so a lone dash or mid-word hyphen stays
+        (rx(#"(?:[*＊✱✳⁂※•·~=_†‡¶⁋\x{2010}-\x{2015}\x{2212}-]+\s*){2,}"#), " "),
         // a lone asterism mark, or a footnote asterisk after a word ("the claim.*")
         (rx(#"(?<![\p{L}\p{N}])[*＊✱✳⁂※]+|[*＊✱✳⁂※]+(?=[.,;:!?\s]|$)"#), " "),
         // symbols a voice can only name — geometric shapes, arrows, dingbats, emoji, box drawing
