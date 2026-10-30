@@ -732,7 +732,6 @@ struct ReaderView: View {
                         DispatchQueue.main.async { proxy.scrollTo("toc-" + current, anchor: .center) }
                     }
                     }
-                    }
                 }
             }
             .navigationTitle("Contents")
