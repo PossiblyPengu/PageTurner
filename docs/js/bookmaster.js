@@ -66,6 +66,7 @@ export const finishBookmasterLink = async () => {
       deviceKey: data.device_key,
     };
     await kvSet(USER_KEY, userCache);
+    brokeWarned = false; // a fresh link earns a fresh warning if it later dies
     toast("Linked to BookMaster");
     return true;
   } catch (err) {
@@ -78,6 +79,7 @@ export const finishBookmasterLink = async () => {
 export const bookmasterUnlink = async () => {
   userCache = null;
   lastPush.clear();
+  brokeWarned = false;
   await kvSet(USER_KEY, null);
   await kvSet(QUEUE_KEY, []);
 };

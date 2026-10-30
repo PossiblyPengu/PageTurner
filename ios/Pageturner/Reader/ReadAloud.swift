@@ -178,15 +178,13 @@ final class ReadAloud: NSObject, ObservableObject {
         // Low Power Mode drops the per-word work entirely: no word schedule,
         // no 30Hz playhead report, no mark repainted for every word
         neural.reportsWords = settings.highlights.needsWords && !LowPower.on
-        var composite: CompositeTTSEngine!
+        // Readium's `engine` is a lazy var — the factory only runs at the first sentence,
+        // so the engine is made up front and the factory hands the same one back
+        let composite = CompositeTTSEngine(system: SystemTTSEngine(tuning: tuning), neural: neural)
         guard let synthesizer = PublicationSpeechSynthesizer(
             publication: publication,
             config: .init(voiceIdentifier: settings.voiceIdentifier),
-            engineFactory: {
-                let engine = CompositeTTSEngine(system: SystemTTSEngine(tuning: tuning), neural: neural)
-                composite = engine
-                return engine
-            },
+            engineFactory: { composite },
             tokenizerFactory: makeReadingTokenizer
         ) else { return nil }
 

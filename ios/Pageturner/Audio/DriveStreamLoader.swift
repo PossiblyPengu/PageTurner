@@ -67,7 +67,9 @@ final class DriveStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @uncheck
         let declared = Int64(items.first(where: { $0.name == "size" })?.value ?? "") ?? 0
         let ext = url.pathExtension.lowercased()
         let task = Task { [weak self] in
-            guard let self else { return }
+            // a loader that went away mid-answer still owes the request an ending
+            guard let self else { request.finishLoading(with: URLError(.cancelled)); return }
+            defer { self.finish(request) }
             // a size Drive did not give is found out from the first byte's answer
             let size = declared > 0 ? declared : (await self.fetchSize(id) ?? 0)
             guard size > 0 else {
@@ -95,7 +97,6 @@ final class DriveStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @uncheck
                 offset += Int64(bytes.count)
             }
             if !Task.isCancelled { request.finishLoading() }
-            self.finish(request)
         }
         lock.lock(); work[ObjectIdentifier(request)] = task; lock.unlock()
         return true

@@ -9,7 +9,6 @@
 
 import { kvGet } from "./db.js";
 import { shrinkCover } from "./util.js";
-import { bookmasterUser } from "./bookmaster.js";
 
 const GB_KEY = ""; // Google Books works keyless at low volume
 const UA_TIMEOUT = 12000;
@@ -82,61 +81,26 @@ const searchOpenLibrary = async (query) => {
   );
 };
 
-/**
- * BookMaster's own search — the same Open Library query its add-book flow
- * runs, with the reader's shelf folded in ahead of it. A candidate that names
- * a shelf row carries its pin (bookmasterId/bmBookId), so applying it can
- * never later push a duplicate: the bridge resolves the pin before any guess.
- */
-const searchBookmaster = async (title, author, q) => {
-  const user = await bookmasterUser().catch(() => null);
-  if (!user?.username) return [];
-  const p = new URLSearchParams({ username: user.username, title: title || "", author: author || "", q });
-  const data = await fetchJson(`/api/bookmaster/search?${p}`);
-  if (!data?.books) return [];
-  // A cover the bridge itself stored is served root-relative on BookMaster —
-  // resolving it here, it would ask this origin and get the app shell back.
-  const abs = (u) => (u?.startsWith("/") ? `https://bookmaster.pages.dev${u}` : u);
-  return data.books.map((b) => ({
-    ...cand({
-      title: b.title,
-      author: b.author,
-      year: b.year,
-      cover: abs(b.coverUrl),
-      source: b.userBookId ? "On your BookMaster shelf" : "BookMaster",
-      identifiers: {
-        isbn13: b.isbn?.length === 13 ? b.isbn : undefined,
-        isbn10: b.isbn?.length === 10 ? b.isbn : undefined,
-        open_library: b.openLibraryId,
-      },
-    }),
-    bookmasterId: b.userBookId || undefined,
-    bmBookId: b.bookId || undefined,
-    bmStatus: b.status || undefined,
-    bmTotalPages: b.totalPages || undefined,
-  }));
-};
-
 // Session query cache — the same book looked up twice (import → later manual
 // search) shouldn't cost two round trips. FIFO-capped; failures aren't kept.
 const queryCache = new Map();
 
-/** Search the sources — BookMaster first when linked, then Google's and Open
- * Library's public catalogues — returning combined, deduplicated candidates. */
+/** Search Google's and Open Library's public catalogues — returning combined,
+ * deduplicated candidates. (BookMaster's search route is gone — the bridge
+ * only carries push/pull now.) */
 export const searchMetadata = async (title, author = "") => {
   const q = [title, author].filter(Boolean).join(" ").trim();
   if (!q) return [];
   if (!(await kvGet("meta-online", true))) return [];
   const key = q.toLowerCase();
   if (queryCache.has(key)) return queryCache.get(key);
-  const [bm, gb, ol] = await Promise.all([
-    searchBookmaster(title, author, q).catch(() => []),
+  const [gb, ol] = await Promise.all([
     searchGoogleBooks(q).catch(() => []),
     searchOpenLibrary(q).catch(() => []),
   ]);
   const seen = new Map();
   const out = [];
-  for (const c of [...bm, ...gb, ...ol]) {
+  for (const c of [...gb, ...ol]) {
     const k = `${norm(c.title)}|${norm(c.author)}`;
     const prior = seen.get(k);
     if (prior) {

@@ -39,7 +39,12 @@ const bridgePost = async (path, body) => {
   if (!user?.username) throw new Error("not linked");
   const res = await fetch(`/api/bookmaster/${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      // the device's own key — these routes are pageturner/* upstream, so they
+      // need it as much as any other push once REQUIRE_KEY is on
+      ...(user.deviceKey ? { "x-pt-key": user.deviceKey } : {}),
+    },
     body: JSON.stringify({ username: user.username, ...body }),
   });
   const data = await res.json().catch(() => ({}));
