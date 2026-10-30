@@ -39,6 +39,93 @@ struct FootnoteSheet: View {
     }
 }
 
+/// The two light controls touched most — dim and warmth — without the whole
+/// settings sheet. Press and hold the footer's settings button for it.
+struct QuickLightSheet: View {
+    @Binding var settings: ReaderSettings
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Dim").font(.subheadline)
+                        Slider(value: $settings.dim, in: 0 ... 0.6)
+                            .accessibilityLabel("Dim the page")
+                            .accessibilityValue("\(Int(settings.dim / 0.6 * 100)) percent")
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Warmth").font(.subheadline)
+                        Slider(value: $settings.warmth, in: 0 ... 1)
+                            .accessibilityLabel("Warm the page")
+                            .accessibilityValue("\(Int(settings.warmth * 100)) percent")
+                    }
+                    Toggle("Reading ruler", isOn: $settings.ruler)
+                } footer: {
+                    Text("Dimming and warmth are for this app only; the ruler shades everything but a few lines.")
+                }
+            }
+            .navigationTitle("Light")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.height(320)])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// "Go to 63%" — for jumps too exact for the scrubber's thumb. Opened by
+/// pressing and holding the footer's percent.
+struct GoToSheet: View {
+    /// Where the book is now, 0…1 — the slider starts here.
+    let at: Double
+    let onGo: (Double) -> Void
+    @State private var percent: Double
+    @Environment(\.dismiss) private var dismiss
+
+    init(at: Double, onGo: @escaping (Double) -> Void) {
+        self.at = at
+        self.onGo = onGo
+        _percent = State(initialValue: min(max(at, 0), 1) * 100)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text("\(Int(percent.rounded()))%")
+                    .font(.system(size: 56, weight: .bold).monospacedDigit())
+                    .ptNumberRoll(on: Int(percent.rounded()))
+                Slider(value: $percent, in: 0...100, step: 1)
+                    .accessibilityLabel("Percent through the book")
+                    .accessibilityValue("\(Int(percent.rounded())) percent")
+                Button {
+                    onGo(percent / 100)
+                    dismiss()
+                } label: {
+                    Label("Go to \(Int(percent.rounded()))%", systemImage: "arrow.right.to.line")
+                        .frame(maxWidth: .infinity)
+                }
+                .ptButtonStyle(prominent: true)
+            }
+            .padding(24)
+            .navigationTitle("Go to")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.height(300)])
+        .presentationDragIndicator(.visible)
+    }
+}
+
 /// A highlight's colour and note — opened by tapping the highlight in the page.
 struct HighlightEditorSheet: View {
     let highlight: Highlight

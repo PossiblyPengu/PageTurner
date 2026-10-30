@@ -9,6 +9,8 @@ struct LibraryView: View {
     @AppStorage("libraryStatus") private var status: Status = .any
     @AppStorage("librarySort") private var sortOrder = LibraryStore.SortOrder.recent.rawValue
     @AppStorage("libraryShelf") private var shelfKey = LibraryView.allKey
+    /// One book per line instead of a wall of covers — kept between launches.
+    @AppStorage("libraryListView") private var listView = false
 
     // select mode
     @State private var selecting = false
@@ -317,11 +319,11 @@ struct LibraryView: View {
                     ForEach(seriesSections(books), id: \.title) { section in
                         VStack(alignment: .leading, spacing: 12) {
                             Text(section.title).font(.title3.weight(.semibold))
-                            BookGrid(books: section.books, selection: selecting ? $selected : nil)
+                            BookGrid(books: section.books, selection: selecting ? $selected : nil, listStyle: listView)
                         }
                     }
                 } else {
-                    BookGrid(books: books, selection: selecting ? $selected : nil)
+                    BookGrid(books: books, selection: selecting ? $selected : nil, listStyle: listView)
                 }
             }
             .padding(.horizontal, 18)
@@ -438,6 +440,10 @@ struct LibraryView: View {
                     Section("Show") {
                         Picker("Status", selection: $status) {
                             ForEach(Status.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        Button { listView.toggle() } label: {
+                            Label(listView ? "Show as Covers" : "Show as List",
+                                  systemImage: listView ? "square.grid.2x2" : "list.bullet")
                         }
                     }
                     Section("Notes") {

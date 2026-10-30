@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var path: [SettingsDestination] = []
     /// Where the screen under this sheet said it was — handed back on the way out.
     @State private var prevPlace = "library"
+    @State private var query = ""
     private let bookMaster = BookMaster.shared
     private let notifier = Notifier.shared
     private let watcher = FolderWatcher.shared
@@ -62,8 +63,43 @@ struct SettingsView: View {
 
     // MARK: The list
 
+    /// Every destination the list can show — what the search field matches on.
+    /// Keep in step with the sections below.
+    private var searchableRows: [(page: SettingsDestination, title: String, symbol: String, tint: Color)] {
+        var rows: [(SettingsDestination, String, String, Color)] = [
+            (.bookmaster, "BookMaster", "link", .ptAccent),
+            (.reading, "Reading", "book.fill", .blue),
+            (.readaloud, "Read Aloud", "speaker.wave.2.fill", .indigo),
+            (.playback, "Audiobooks", "headphones", .orange),
+            (.appearance, "Appearance", "circle.lefthalf.filled", .purple),
+            (.library, "Library & import", "books.vertical.fill", .green),
+            (.drive, "Google Drive", "icloud.and.arrow.down.fill", .blue),
+            (.backup, "Backup", "externaldrive.fill", .teal),
+            (.diagnostics, "Diagnostics", "stethoscope", .gray),
+        ]
+        if bookMaster.isLinked {
+            rows.insert(contentsOf: [
+                (.notifications, "Notifications", "bell.badge.fill", .red),
+                (.chat, "Chat & web apps", "bubble.left.and.bubble.right.fill", .blue),
+            ], at: 1)
+        }
+        return rows
+    }
+
+    private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
     private var list: some View {
         Form {
+            if searching {
+                // a flat list while searching — sections would only crowd it
+                Section {
+                    ForEach(Array(searchableRows.filter {
+                        $0.title.localizedCaseInsensitiveContains(query)
+                    }.enumerated()), id: \.offset) { _, match in
+                        row(match.page, match.title, match.symbol, match.tint)
+                    }
+                }
+            } else {
             suite
             Section("Reading & listening") {
                 row(.reading, "Reading", "book.fill", .blue)
@@ -86,8 +122,10 @@ struct SettingsView: View {
             } footer: {
                 Text("Reading is built on the Readium toolkit.")
             }
+            }
         }
         .navigationTitle("Settings")
+        .searchable(text: $query, prompt: "Search settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }

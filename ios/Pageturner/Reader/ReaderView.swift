@@ -9,6 +9,8 @@ struct ReaderView: View {
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showVoices = false
+    @State private var showGoTo = false
+    @State private var showLight = false
     /// The scrubber's value while the finger is on it (or until the page catches up).
     @State private var scrubbing: Double?
     @AppStorage("readerShowsTimeLeft") private var showsTimeLeft = false
@@ -229,8 +231,16 @@ struct ReaderView: View {
             .sheet(isPresented: $showSettings, onDismiss: model.revealChrome) {
                 settingsSheet.preferredColorScheme(scheme)
             }
+            .sheet(isPresented: $showLight, onDismiss: model.revealChrome) {
+                QuickLightSheet(settings: $model.settings)
+                    .preferredColorScheme(scheme)
+            }
             .sheet(isPresented: $showSearch, onDismiss: model.revealChrome) {
                 searchSheet.preferredColorScheme(scheme)
+            }
+            .sheet(isPresented: $showGoTo, onDismiss: model.revealChrome) {
+                GoToSheet(at: shownProgress) { model.go(toProgression: $0) }
+                    .preferredColorScheme(scheme)
             }
             .sheet(item: $model.footnote) { note in
                 FootnoteSheet(note: note) { model.goToFootnote(note) }
@@ -375,6 +385,13 @@ struct ReaderView: View {
         PTGlassGroup(spacing: 10) {
             HStack(spacing: 10) {
                 PTIconButton(systemImage: "textformat.size", label: "Reading settings") { model.holdChrome(); showSettings = true }
+                    // press and hold skips to the two sliders tuned most
+                    .contextMenu {
+                        Button { showLight = true } label: {
+                            Label("Dim and Warmth…", systemImage: "sun.max")
+                        }
+                    }
+                    .accessibilityAction(named: "Dim and warmth") { showLight = true }
 
                 HStack(spacing: 10) {
                     progressLabel
@@ -493,8 +510,21 @@ struct ReaderView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(left ?? "\(percent) through the book")
                 .accessibilityHint("Switches between percent and time left")
+                .contextMenu {
+                    Button { showGoTo = true } label: {
+                        Label("Go to Percentage…", systemImage: "arrow.right.to.line")
+                    }
+                }
+                .accessibilityAction(named: "Go to percentage") { showGoTo = true }
         } else {
-            label.accessibilityLabel("\(percent) through the book")
+            label
+                .accessibilityLabel("\(percent) through the book")
+                .contextMenu {
+                    Button { showGoTo = true } label: {
+                        Label("Go to Percentage…", systemImage: "arrow.right.to.line")
+                    }
+                }
+                .accessibilityAction(named: "Go to percentage") { showGoTo = true }
         }
     }
 
@@ -606,7 +636,8 @@ struct ReaderView: View {
     private func contentsHas(_ tab: ContentsTab) -> Bool {
         switch tab {
         case .chapters: return !model.toc.isEmpty
-        case .bookmarks: return !model.book.bookmarks.isEmpty
+        // always offered — its "Bookmark this page" is how the first one gets made
+        case .bookmarks: return true
         case .highlights: return !model.book.highlights.isEmpty
         }
     }
@@ -629,12 +660,9 @@ struct ReaderView: View {
         let tab = contentsTabNow
         return NavigationStack {
             Group {
-                if model.toc.isEmpty, model.book.bookmarks.isEmpty, model.book.highlights.isEmpty {
-                    Text("No table of contents.")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollViewReader { proxy in
+                // the Bookmarks tab is always there — "Bookmark this page" works
+                // even when a book ships no table of contents
+                ScrollViewReader { proxy in
                     VStack(spacing: 0) {
                     contentsPicker
                     List {
@@ -649,6 +677,13 @@ struct ReaderView: View {
                         }
                         if tab == .bookmarks {
                             Section("Bookmarks") {
+                                Button {
+                                    model.toggleBookmark()
+                                } label: {
+                                    Label(model.isCurrentLocationBookmarked ? "This page is bookmarked" : "Bookmark this page",
+                                          systemImage: model.isCurrentLocationBookmarked ? "bookmark.fill" : "bookmark")
+                                }
+                                .disabled(model.isCurrentLocationBookmarked)
                                 ForEach(model.book.bookmarks.sorted { ($0.progression ?? 0) < ($1.progression ?? 0) }) { bm in
                                     Button {
                                         showContents = false

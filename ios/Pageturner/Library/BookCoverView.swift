@@ -165,11 +165,15 @@ struct CloudBadge: View {
     }
 }
 
-/// The cover grid shared by the library and search.
+/// The cover grid shared by the library and search — or, with `listStyle`, the
+/// same books one per line. The tap, the menu and the confirms are the same
+/// either way; only the cell changes shape.
 struct BookGrid: View {
     let books: [Book]
     /// Set in select mode: taps tick books instead of opening them.
     var selection: Binding<Set<UUID>>?
+    /// True for one book per row instead of a wall of covers.
+    var listStyle = false
     @EnvironmentObject private var library: LibraryStore
     @Environment(AppRouter.self) private var router
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -190,127 +194,14 @@ struct BookGrid: View {
 
     var body: some View {
         let textVersions = library.pdfsWithTextVersions
-        return LazyVGrid(columns: columns, spacing: 24) {
-            ForEach(books) { book in
-                let cloud = downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id))
-                Button {
-                    if let selection {
-                        if selection.wrappedValue.contains(book.id) { selection.wrappedValue.remove(book.id) }
-                        else { selection.wrappedValue.insert(book.id) }
-                    } else {
-                        router.open(book, library: library)
-                    }
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        BookCoverView(
-                            book: book, cover: library.coverThumbnail(for: book, maxPixels: 640),
-                            selected: selection.map { $0.wrappedValue.contains(book.id) },
-                            missing: library.missing.contains(book.id),
-                            cloud: cloud,
-                            hasTextVersion: textVersions.contains(book.id))
-                        Text(book.title)
-                            .font(.footnote.weight(.semibold))
-                            .lineLimit(2)
-                            .foregroundStyle(.primary)
-                        if !book.author.isEmpty {
-                            Text(book.author)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        // the ring on the cover says it is coming; this says how far
-                        switch cloud {
-                        case let .downloading(fraction)?:
-                            Text(fraction.map { "Downloading \(Int(($0 * 100).rounded()))%" } ?? "Downloading…")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                                .lineLimit(1)
-                        case .failed?:
-                            Text("Download failed")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                                .lineLimit(1)
-                        default:
-                            EmptyView()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        return Group {
+            if listStyle {
+                LazyVStack(spacing: 0) {
+                    ForEach(books) { bookCell($0, hasTextVersion: textVersions.contains($0.id)) }
                 }
-                .buttonStyle(PressableStyle())
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(accessibilityLabel(for: book))
-                .accessibilityAddTraits(selection?.wrappedValue.contains(book.id) == true ? .isSelected : [])
-                .accessibilityHint(selection == nil ? (library.inCloud.contains(book.id) ? "Opens the book’s page, where it can be downloaded" : "Opens the book")
-                    : (selection?.wrappedValue.contains(book.id) == true ? "Double tap to deselect" : "Double tap to select"))
-                .contextMenu {
-                    // no menu while ticking books
-                    if selection == nil {
-                        if library.inCloud.contains(book.id) {
-                            if downloads.isRunning(book.id) {
-                                Button { downloads.cancel(book.id) } label: {
-                                    Label("Cancel Download", systemImage: "xmark.circle")
-                                }
-                            } else {
-                                Button { downloads.start(book, library: library) } label: {
-                                    Label("Download", systemImage: "icloud.and.arrow.down")
-                                }
-                            }
-                        } else {
-                            Button { router.open(book, library: library) } label: {
-                                Label(book.isAudio ? "Play" : "Read", systemImage: book.isAudio ? "play.fill" : "book.fill")
-                            }
-                        }
-                        if (book.progression ?? 0) < 0.995 {
-                            Button { router.markFinished(book, library: library) } label: {
-                                Label(book.isAudio ? "Mark as Listened" : "Mark as Finished", systemImage: "checkmark.circle")
-                            }
-                        }
-                        if (book.progression ?? 0) > 0 {
-                            Button { restarting = book } label: {
-                                Label(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning", systemImage: "arrow.counterclockwise")
-                            }
-                        }
-                        if BookMaster.shared.isLinked {
-                            if book.bmStatus != BMShelfStatus.wantToRead.rawValue {
-                                Button {
-                                    if (book.progression ?? 0) > 0.001 { wantToRead = book }
-                                    else { BookMaster.shared.moveToShelf(.wantToRead, bookID: book.id, library: library) }
-                                } label: {
-                                    Label("Move to Want to Read", systemImage: "bookmark")
-                                }
-                            }
-                            if book.bmStatus != BMShelfStatus.abandoned.rawValue {
-                                Button { BookMaster.shared.moveToShelf(.abandoned, bookID: book.id, library: library) } label: {
-                                    Label("Mark as Abandoned", systemImage: "pause.circle")
-                                }
-                            }
-                        }
-                        Divider()
-                        Button { router.detail = book } label: {
-                            Label("Book Info", systemImage: "info.circle")
-                        }
-                        Button { router.openShelves([book.id]) } label: {
-                            Label("Shelves…", systemImage: "books.vertical")
-                        }
-                        Button { router.editing = book } label: {
-                            Label("Edit Details", systemImage: "pencil")
-                        }
-                        Divider()
-                        if book.drive != nil, !library.inCloud.contains(book.id) {
-                            Button { router.removeDownload(book, library: library) } label: {
-                                Label("Remove Download", systemImage: "icloud.and.arrow.up")
-                            }
-                        }
-                        if book.drive == nil, (book.progression ?? 0) >= 0.995, !library.missing.contains(book.id) {
-                            Button { clearing = book } label: {
-                                Label("Remove File", systemImage: "doc.badge.minus")
-                            }
-                        }
-                        Button(role: .destructive) { router.askDelete([book]) } label: {
-                            Label("Remove from Library", systemImage: "trash")
-                        }
-                    }
+            } else {
+                LazyVGrid(columns: columns, spacing: 24) {
+                    ForEach(books) { bookCell($0, hasTextVersion: textVersions.contains($0.id)) }
                 }
             }
         }
@@ -346,6 +237,209 @@ struct BookGrid: View {
             Button("Remove File", role: .destructive) { router.clearFinished(book, library: library) }
         } message: { _ in
             Text("The file is the book’s only copy — the book is removed from the library with it. Your BookMaster shelf isn’t touched.")
+        }
+    }
+
+    /// One book, whichever shape the list takes — the tap, the menu and what it
+    /// says to VoiceOver are the same either way.
+    private func bookCell(_ book: Book, hasTextVersion: Bool) -> some View {
+        let cloud = downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id))
+        return Button {
+            if let selection {
+                if selection.wrappedValue.contains(book.id) { selection.wrappedValue.remove(book.id) }
+                else { selection.wrappedValue.insert(book.id) }
+            } else {
+                router.open(book, library: library)
+            }
+        } label: {
+            if listStyle {
+                listRow(book, cloud: cloud, hasTextVersion: hasTextVersion)
+            } else {
+                gridCell(book, cloud: cloud, hasTextVersion: hasTextVersion)
+            }
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel(for: book))
+        .accessibilityAddTraits(selection?.wrappedValue.contains(book.id) == true ? .isSelected : [])
+        .accessibilityHint(selection == nil ? (library.inCloud.contains(book.id) ? "Opens the book’s page, where it can be downloaded" : "Opens the book")
+            : (selection?.wrappedValue.contains(book.id) == true ? "Double tap to deselect" : "Double tap to select"))
+        .contextMenu { bookMenu(book) }
+    }
+
+    private var ticked: Bool { selection != nil }
+
+    private func gridCell(_ book: Book, cloud: DriveDownloads.Badge?, hasTextVersion: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            BookCoverView(
+                book: book, cover: library.coverThumbnail(for: book, maxPixels: 640),
+                selected: selection.map { $0.wrappedValue.contains(book.id) },
+                missing: library.missing.contains(book.id),
+                cloud: cloud,
+                hasTextVersion: hasTextVersion)
+            Text(book.title)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(2)
+                .foregroundStyle(.primary)
+            if !book.author.isEmpty {
+                Text(book.author)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            // the ring on the cover says it is coming; this says how far
+            switch cloud {
+            case let .downloading(fraction)?:
+                Text(fraction.map { "Downloading \(Int(($0 * 100).rounded()))%" } ?? "Downloading…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            case .failed?:
+                Text("Download failed")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+            default:
+                EmptyView()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The row for list style: a small cover, the title, and the facts the grid
+    /// keeps in badges — progress, audio, cloud — as marks beside it.
+    private func listRow(_ book: Book, cloud: DriveDownloads.Badge?, hasTextVersion: Bool) -> some View {
+        HStack(spacing: 12) {
+            ZStack(alignment: .topTrailing) {
+                BookCoverView(
+                    book: book, cover: library.coverThumbnail(for: book, maxPixels: 128),
+                    showsBadges: false, corner: 6)
+                if let selection {
+                    Image(systemName: selection.wrappedValue.contains(book.id) ? "checkmark.circle.fill" : "circle")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(selection.wrappedValue.contains(book.id) ? Color.ptAccent : Color.white)
+                        .background(Circle().fill(Color.black.opacity(selection.wrappedValue.contains(book.id) ? 0 : 0.3)))
+                        .padding(3)
+                }
+            }
+            .frame(width: 40, height: 60)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(book.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .foregroundStyle(.primary)
+                Text(book.author.isEmpty ? (book.series ?? "") : book.author)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    if book.isAudio {
+                        Image(systemName: "headphones").foregroundStyle(.secondary)
+                    }
+                    if library.missing.contains(book.id) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    }
+                    switch cloud {
+                    case let .downloading(fraction)?:
+                        Text(fraction.map { "Downloading \(Int(($0 * 100).rounded()))%" } ?? "Downloading…")
+                            .monospacedDigit()
+                    case .failed?:
+                        Text("Download failed").foregroundStyle(.orange)
+                    case .available?:
+                        Image(systemName: "icloud.and.arrow.down").foregroundStyle(.secondary)
+                    default:
+                        EmptyView()
+                    }
+                    if hasTextVersion {
+                        Image(systemName: "doc.plaintext").foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption2)
+            }
+            Spacer(minLength: 4)
+            if let p = book.progression, p > 0 {
+                Text("\(Int((p * 100).rounded()))%")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) {
+            Divider().padding(.leading, 52)
+        }
+    }
+
+    /// The hold-menu on a book — shelved while ticking.
+    @ViewBuilder
+    private func bookMenu(_ book: Book) -> some View {
+        if !ticked {
+            if library.inCloud.contains(book.id) {
+                if downloads.isRunning(book.id) {
+                    Button { downloads.cancel(book.id) } label: {
+                        Label("Cancel Download", systemImage: "xmark.circle")
+                    }
+                } else {
+                    Button { downloads.start(book, library: library) } label: {
+                        Label("Download", systemImage: "icloud.and.arrow.down")
+                    }
+                }
+            } else {
+                Button { router.open(book, library: library) } label: {
+                    Label(book.isAudio ? "Play" : "Read", systemImage: book.isAudio ? "play.fill" : "book.fill")
+                }
+            }
+            if (book.progression ?? 0) < 0.995 {
+                Button { router.markFinished(book, library: library) } label: {
+                    Label(book.isAudio ? "Mark as Listened" : "Mark as Finished", systemImage: "checkmark.circle")
+                }
+            }
+            if (book.progression ?? 0) > 0 {
+                Button { restarting = book } label: {
+                    Label(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning", systemImage: "arrow.counterclockwise")
+                }
+            }
+            if BookMaster.shared.isLinked {
+                if book.bmStatus != BMShelfStatus.wantToRead.rawValue {
+                    Button {
+                        if (book.progression ?? 0) > 0.001 { wantToRead = book }
+                        else { BookMaster.shared.moveToShelf(.wantToRead, bookID: book.id, library: library) }
+                    } label: {
+                        Label("Move to Want to Read", systemImage: "bookmark")
+                    }
+                }
+                if book.bmStatus != BMShelfStatus.abandoned.rawValue {
+                    Button { BookMaster.shared.moveToShelf(.abandoned, bookID: book.id, library: library) } label: {
+                        Label("Mark as Abandoned", systemImage: "pause.circle")
+                    }
+                }
+            }
+            Divider()
+            Button { router.detail = book } label: {
+                Label("Book Info", systemImage: "info.circle")
+            }
+            Button { router.openShelves([book.id]) } label: {
+                Label("Shelves…", systemImage: "books.vertical")
+            }
+            Button { router.editing = book } label: {
+                Label("Edit Details", systemImage: "pencil")
+            }
+            Divider()
+            if book.drive != nil, !library.inCloud.contains(book.id) {
+                Button { router.removeDownload(book, library: library) } label: {
+                    Label("Remove Download", systemImage: "icloud.and.arrow.up")
+                }
+            }
+            if book.drive == nil, (book.progression ?? 0) >= 0.995, !library.missing.contains(book.id) {
+                Button { clearing = book } label: {
+                    Label("Remove File", systemImage: "doc.badge.minus")
+                }
+            }
+            Button(role: .destructive) { router.askDelete([book]) } label: {
+                Label("Remove from Library", systemImage: "trash")
+            }
         }
     }
 

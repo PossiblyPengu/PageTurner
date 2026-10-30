@@ -5,34 +5,71 @@ struct ReaderSettingsView: View {
     /// False for PDFs and comics, whose pages are fixed: font, spacing and margins are hidden.
     var adjustsType = true
 
+    /// The sheet is long enough to scroll: three pages under a picker instead.
+    private enum Page: String, CaseIterable, Identifiable {
+        case looks, page, aloud
+        var id: Self { self }
+        var label: String {
+            switch self {
+            case .looks: "Looks"
+            case .page: "Page"
+            case .aloud: "Aloud"
+            }
+        }
+    }
+
+    @State private var page: Page = .looks
+
     var body: some View {
-        Form {
-            Section("Theme") {
-                ThemePicker(theme: $settings.theme)
-                Toggle("Night theme after dark", isOn: $settings.autoNight)
+        VStack(spacing: 0) {
+            Picker("Settings", selection: $page) {
+                ForEach(Page.allCases) { Text($0.label).tag($0) }
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
 
-            Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Dim").font(.subheadline)
-                    Slider(value: $settings.dim, in: 0 ... 0.6)
-                        .accessibilityLabel("Dim the page")
-                        .accessibilityValue("\(Int(settings.dim / 0.6 * 100)) percent")
+            Form {
+                switch page {
+                case .looks: looksSections
+                case .page: pageSections
+                case .aloud: aloudSections
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Warmth").font(.subheadline)
-                    Slider(value: $settings.warmth, in: 0 ... 1)
-                        .accessibilityLabel("Warm the page")
-                        .accessibilityValue("\(Int(settings.warmth * 100)) percent")
-                }
-                Toggle("Reading ruler", isOn: $settings.ruler)
-            } header: {
-                Text("Light")
-            } footer: {
-                Text("Dimming and warmth are for this app only; the ruler shades everything but a few lines, and its handle moves it.")
             }
+        }
+    }
 
-            if adjustsType {
+    @ViewBuilder
+    private var looksSections: some View {
+        Section("Theme") {
+            ThemePicker(theme: $settings.theme)
+            Toggle("Night theme after dark", isOn: $settings.autoNight)
+        }
+
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Dim").font(.subheadline)
+                Slider(value: $settings.dim, in: 0 ... 0.6)
+                    .accessibilityLabel("Dim the page")
+                    .accessibilityValue("\(Int(settings.dim / 0.6 * 100)) percent")
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Warmth").font(.subheadline)
+                Slider(value: $settings.warmth, in: 0 ... 1)
+                    .accessibilityLabel("Warm the page")
+                    .accessibilityValue("\(Int(settings.warmth * 100)) percent")
+            }
+            Toggle("Reading ruler", isOn: $settings.ruler)
+        } header: {
+            Text("Light")
+        } footer: {
+            Text("Dimming and warmth are for this app only; the ruler shades everything but a few lines, and its handle moves it.")
+        }
+    }
+
+    @ViewBuilder
+    private var pageSections: some View {
+        if adjustsType {
             Section("Type") {
                 Picker("Font", selection: $settings.font) {
                     ForEach(ReaderSettings.FontChoice.allCases) {
@@ -72,53 +109,55 @@ struct ReaderSettingsView: View {
                         .accessibilityValue(settings.paragraphSpacing == 0 ? "the book's own" : String(format: "%.2g", settings.paragraphSpacing))
                 }
             }
-            }
+        }
 
-            Section("Layout") {
-                if adjustsType {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Margins")
-                            .font(.subheadline)
-                        Slider(value: $settings.margins, in: 0.5 ... 2, step: 0.25)
-                            .accessibilityLabel("Page margins")
-                            .accessibilityValue("\(Int(settings.margins * 100)) percent")
+        Section("Layout") {
+            if adjustsType {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Margins")
+                        .font(.subheadline)
+                    Slider(value: $settings.margins, in: 0.5 ... 2, step: 0.25)
+                        .accessibilityLabel("Page margins")
+                        .accessibilityValue("\(Int(settings.margins * 100)) percent")
+                }
+            }
+            Toggle("Scroll instead of pages", isOn: $settings.scroll)
+            if !settings.scroll, adjustsType {
+                Picker("Page layout", selection: $settings.columns) {
+                    ForEach(ReaderSettings.Columns.allCases) {
+                        Text($0.label).tag($0)
                     }
                 }
-                Toggle("Scroll instead of pages", isOn: $settings.scroll)
-                if !settings.scroll, adjustsType {
-                    Picker("Page layout", selection: $settings.columns) {
-                        ForEach(ReaderSettings.Columns.allCases) {
-                            Text($0.label).tag($0)
-                        }
-                    }
-                    Picker("Page turn", selection: $settings.pageTurn) {
-                        ForEach(PageTurnStyle.allCases) { Text($0.label).tag($0) }
-                    }
+                Picker("Page turn", selection: $settings.pageTurn) {
+                    ForEach(PageTurnStyle.allCases) { Text($0.label).tag($0) }
                 }
-                Picker("Tap to turn", selection: $settings.tapZone) {
-                    ForEach(ReaderSettings.TapZone.allCases) { Text($0.label).tag($0) }
-                }
-                Toggle("Tap in the fingers on a turn", isOn: $settings.turnHaptic)
-                Toggle("Rustle of the page on a turn", isOn: $settings.turnSound)
-                Toggle("Keep the screen on", isOn: $settings.keepAwake)
             }
+            Picker("Tap to turn", selection: $settings.tapZone) {
+                ForEach(ReaderSettings.TapZone.allCases) { Text($0.label).tag($0) }
+            }
+            Toggle("Tap in the fingers on a turn", isOn: $settings.turnHaptic)
+            Toggle("Rustle of the page on a turn", isOn: $settings.turnSound)
+            Toggle("Keep the screen on", isOn: $settings.keepAwake)
+        }
+    }
 
-            Section {
-                ReadAloudControls(rate: $settings.speechRate, voice: $settings.voiceIdentifier)
-                Toggle("Dim the screen while it reads", isOn: $settings.dimWhileNarrating)
-            } header: {
-                Text("Read aloud")
-            } footer: {
-                Text("The screen dims a few seconds after the controls are put away. A tap brings it back; the voice carries on.")
-            }
+    @ViewBuilder
+    private var aloudSections: some View {
+        Section {
+            ReadAloudControls(rate: $settings.speechRate, voice: $settings.voiceIdentifier)
+            Toggle("Dim the screen while it reads", isOn: $settings.dimWhileNarrating)
+        } header: {
+            Text("Read aloud")
+        } footer: {
+            Text("The screen dims a few seconds after the controls are put away. A tap brings it back; the voice carries on.")
+        }
 
-            Section {
-                ReadAloudHighlightRows(highlights: $settings.highlights)
-            } header: {
-                Text("Highlight as it reads")
-            } footer: {
-                Text(ReadAloudHighlightRows.footnote)
-            }
+        Section {
+            ReadAloudHighlightRows(highlights: $settings.highlights)
+        } header: {
+            Text("Highlight as it reads")
+        } footer: {
+            Text(ReadAloudHighlightRows.footnote)
         }
     }
 }

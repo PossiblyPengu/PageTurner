@@ -18,11 +18,29 @@ struct NarrationMiniPlayer: View {
     /// controls don't fit: the skip buttons and the subtitle step aside, play/pause stays.
     private static let compactBelow: CGFloat = 340
 
+    /// How far through the book the voice is — the narrated spot when it is known,
+    /// else the saved place.
+    private var fraction: Double {
+        let at = model.currentLocator?.locations.totalProgression ?? model.book.progression ?? 0
+        return min(max(at, 0), 1)
+    }
+
     var body: some View {
         GeometryReader { proxy in
             row(compact: proxy.size.width < Self.compactBelow)
         }
         .frame(height: 44)
+        .overlay(alignment: .top) {
+            // a hairline of how far through the book the voice has read
+            GeometryReader { geo in
+                Capsule()
+                    .fill(Color.ptAccent)
+                    .frame(width: geo.size.width * fraction, height: 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 2)
+            .accessibilityHidden(true)
+        }
     }
 
     private func row(compact: Bool) -> some View {
