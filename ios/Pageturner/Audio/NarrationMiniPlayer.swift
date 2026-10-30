@@ -18,11 +18,10 @@ struct NarrationMiniPlayer: View {
     /// controls don't fit: the skip buttons and the subtitle step aside, play/pause stays.
     private static let compactBelow: CGFloat = 340
 
-    /// How far through the book the voice is — the narrated spot when it is known,
-    /// else the saved place.
+    /// How far through the book the voice is — the narrated spot is written to
+    /// `book.progression` as it moves.
     private var fraction: Double {
-        let at = model.currentLocator?.locations.totalProgression ?? model.book.progression ?? 0
-        return min(max(at, 0), 1)
+        min(max(model.book.progression ?? 0, 0), 1)
     }
 
     var body: some View {
