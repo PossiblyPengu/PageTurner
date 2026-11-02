@@ -26,7 +26,7 @@ extension NeuralVoice {
 /// so the word being spoken is worked out from how far the audio has played (`SpokenWords`).
 /// The engine is handed the page's own text and cleans it itself right before the voice, putting
 /// each word range back onto the original, so the ranges index the same string the locator holds.
-final class NeuralTTSEngine: TTSEngine {
+final class NeuralTTSEngine {
     enum Failure: Error, LocalizedError {
         case notInstalled
         case playback
@@ -76,14 +76,6 @@ final class NeuralTTSEngine: TTSEngine {
 
     func voiceWithIdentifier(_ identifier: String) -> TTSVoice? {
         index.entry(forID: identifier)?.voice.ttsVoice
-    }
-
-    @MainActor
-    func speak(
-        _ utterance: TTSUtterance,
-        onSpeakRange: @escaping (Range<String.Index>) -> Void
-    ) async -> Result<Void, TTSError> {
-        await speak(text: utterance.text, voiceOrLanguage: utterance.voiceOrLanguage, onSpeakRange: onSpeakRange)
     }
 
     @MainActor
@@ -298,7 +290,7 @@ final class NeuralTTSEngine: TTSEngine {
 
 /// Speaks with whichever engine owns the voice: the neural voices that were downloaded, or the
 /// ones iOS ships with. Anything without a chosen neural voice goes to the system.
-final class CompositeTTSEngine: TTSEngine {
+final class CompositeTTSEngine {
     enum Failure: Error, LocalizedError {
         case silent
 
@@ -339,14 +331,6 @@ final class CompositeTTSEngine: TTSEngine {
               let entry = neural.preferredEntry(forBaseLanguage: base)
         else { return }
         neural.warm(entry.voice.id)
-    }
-
-    @MainActor
-    func speak(
-        _ utterance: TTSUtterance,
-        onSpeakRange: @escaping (Range<String.Index>) -> Void
-    ) async -> Result<Void, TTSError> {
-        await speak(text: utterance.text, voiceOrLanguage: utterance.voiceOrLanguage, onSpeakRange: onSpeakRange)
     }
 
     /// A sentence from its parts — what `SpeechSynthesizer` speaks with.

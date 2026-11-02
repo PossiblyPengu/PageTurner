@@ -150,6 +150,13 @@ final class GoogleAuth {
         if refused == nil || held?.token == refused { held = nil }
     }
 
+    /// The token a request was sent with — what to name when Drive refuses it, so parts refused together throw away
+    /// the old token once, not each the fresh one the part before them just fetched.
+    nonisolated static func bearer(in request: URLRequest?) -> String? {
+        guard let value = request?.value(forHTTPHeaderField: "Authorization"), value.hasPrefix("Bearer ") else { return nil }
+        return String(value.dropFirst("Bearer ".count))
+    }
+
     /// Bumped by a sign-out: a refresh that set out before it finds a different number and keeps nothing.
     private var generation = 0
 

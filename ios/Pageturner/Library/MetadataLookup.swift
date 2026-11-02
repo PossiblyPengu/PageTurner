@@ -243,14 +243,21 @@ enum MetadataLookup {
         let hardcoverSlots = hardcover ? asks.count + extraSlots / 2 : 0
         var slots: [[MetadataCandidate]] = Array(repeating: [], count: hardcoverBase + hardcoverSlots)
         var stopped = false
-        var hardcoverFailed = false
+        // a source that didn't answer (Hardcover, or a catalogue timing out) leaves a list not to be remembered
+        var sourceFailed = false
         await withTaskGroup(of: (Int, [MetadataCandidate], Bool).self) { group in
             for (n, ask) in asks.enumerated() {
-                group.addTask { (n * 2, await catalogue(ask.title, author: ask.author, interactive: interactive), false) }
+                group.addTask {
+                    let (list, failed) = await catalogue(ask.title, author: ask.author, interactive: interactive)
+                    return (n * 2, list, failed)
+                }
                 group.addTask { (n * 2 + 1, await googleBooks(title: ask.title, author: ask.author), false) }
             }
             if let extra {
-                group.addTask { (asks.count * 2, await catalogue(extra, interactive: interactive), false) }
+                group.addTask {
+                    let (list, failed) = await catalogue(extra, interactive: interactive)
+                    return (asks.count * 2, list, failed)
+                }
                 group.addTask { (asks.count * 2 + 1, await googleBooks(query: "isbn:\(extra)"), false) }
             }
             for (n, ask) in asks.enumerated() where audio {
@@ -275,7 +282,7 @@ enum MetadataLookup {
             }
             for await (index, list, failed) in group {
                 slots[index] = list
-                hardcoverFailed = hardcoverFailed || failed
+                sourceFailed = sourceFailed || failed
                 let deduped = dedupe(slots.flatMap { $0 })
                 let merged = await MainActor.run { pinToShelf(deduped) }
                 await progress?(merged)
@@ -302,7 +309,7 @@ enum MetadataLookup {
         }
         // a search cut short, or one where nothing came back (the network, not the book), is not worth remembering
         // (kept without the shelf pins, which are worked out when the list is handed out)
-        if !stopped, !Task.isCancelled, !deduped.isEmpty, !hardcoverFailed {
+        if !stopped, !Task.isCancelled, !deduped.isEmpty, !sourceFailed {
             await MainActor.run { remember(key, deduped) }
         }
         return await MainActor.run { pinToShelf(deduped) }
@@ -311,11 +318,12 @@ enum MetadataLookup {
     // MARK: - The catalogues
 
     /// Open Library and Apple Books through `CatalogueSearch`, as candidates.
-    private static func catalogue(_ title: String, author: String = "", interactive: Bool) async -> [MetadataCandidate] {
+    /// The catalogues' matches, and whether one of them didn't answer.
+    private static func catalogue(_ title: String, author: String = "", interactive: Bool) async -> ([MetadataCandidate], Bool) {
         let query = [title, author].filter { !$0.isEmpty }.joined(separator: " ")
-        guard !query.isEmpty else { return [] }
+        guard !query.isEmpty else { return ([], false) }
         let reply = await CatalogueSearch.search(query, limit: 12, interactive: interactive)
-        return reply.books.map { hit in
+        let list = reply.books.map { hit in
             MetadataCandidate(
                 title: hit.title,
                 authors: hit.author == "Unknown" ? "" : hit.author,
@@ -327,6 +335,7 @@ enum MetadataLookup {
                 source: hit.source,
                 pages: hit.totalPages)
         }
+        return (list, reply.partial)
     }
 
     /// A candidate that names a book already on the reader's shelf is pinned
@@ -507,6 +516,21 @@ enum MetadataLookup {
     /// Fill in what a book is missing from the first online match that really is
     /// the same book — used by bulk "Find details". Never overwrites something
     /// already there. Returns whether anything changed.
+    /// What `book` lacks, from `match` — nothing already there is overwritten. A Drive book (or one with no real title)
+    /// is called by its file or folder name until something better is known, so that title is replaced. One rule for
+    /// the automatic fill and the Review step (whose own copy had drifted and skipped the series and page count).
+    static func fillMissing(_ book: inout Book, from match: MetadataCandidate) {
+        let nameless = book.title.trimmingCharacters(in: .whitespaces).isEmpty || book.title == book.drive?.guessedTitle
+        if nameless, !match.title.isEmpty { book.title = match.title }
+        if book.author.isEmpty, !match.authors.isEmpty { book.author = match.authors }
+        if book.year == nil, !match.year.isEmpty { book.year = match.year }
+        if book.bookDescription == nil, !match.summary.isEmpty { book.bookDescription = match.summary }
+        if book.isbn == nil { book.isbn = match.isbn }
+        if book.openLibraryId == nil { book.openLibraryId = match.openLibraryId }
+        if book.series == nil { book.series = match.series; book.seriesIndex = match.seriesIndex }
+        if book.pages == nil { book.pages = match.pages }
+    }
+
     @MainActor
     static func autoApply(to id: UUID, library: LibraryStore, title: String? = nil, author: String? = nil) async -> Bool {
         guard let book = library.books.first(where: { $0.id == id }) else { return false }
@@ -539,15 +563,7 @@ enum MetadataLookup {
         var changed = false
         library.mutate(id) { current in
             let before = current
-            // a Drive book is called by its file or folder name until something better is known
-            if let guess = current.drive?.guessedTitle, current.title == guess, !match.title.isEmpty { current.title = match.title }
-            if current.author.isEmpty, !match.authors.isEmpty { current.author = match.authors }
-            if current.year == nil, !match.year.isEmpty { current.year = match.year }
-            if current.bookDescription == nil, !match.summary.isEmpty { current.bookDescription = match.summary }
-            if current.isbn == nil { current.isbn = match.isbn }
-            if current.openLibraryId == nil { current.openLibraryId = match.openLibraryId }
-            if current.series == nil { current.series = match.series; current.seriesIndex = match.seriesIndex }
-            if current.pages == nil { current.pages = match.pages }
+            fillMissing(&current, from: match)
             changed = current != before
         }
         if let pin = match.bookmasterId, book.bookmasterId == nil {
@@ -579,10 +595,10 @@ extension MetadataLookup {
                 let id = ids[next]
                 next += 1
                 group.addTask { @MainActor in
-                    guard let book = library.books.first(where: { $0.id == id }) else { return }
-                    if await autoApply(to: id, library: library) { return }
-                    let (title, author) = splitName(book.title)
-                    if title != book.title || !author.isEmpty { _ = await autoApply(to: id, library: library, title: title, author: author) }
+                    // one ask: autoApply already splits a name like "Title - Author" and asks it both ways round
+                    // (a second ask with the split name doubled the calls on the slow, rate-limited lane)
+                    guard library.books.contains(where: { $0.id == id }) else { return }
+                    _ = await autoApply(to: id, library: library)
                 }
             }
             for _ in 0 ..< 3 { start() }

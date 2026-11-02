@@ -1325,11 +1325,16 @@ final class LibraryStore: ObservableObject {
         save()
     }
 
-    /// Inserts a book brought back by backup restore (files already copied).
+    /// Inserts a book brought back by backup restore (files already copied). Written down by `restoreFinished`, once
+    /// for the whole backup: saving and re-checking every file in the library per book made a big restore slower with
+    /// every book it brought back.
     func addRestored(_ book: Book) {
         for name in book.collections where !shelves.contains(name) { shelves.append(name) }
-        saveShelves()
         books.insert(book, at: 0)
+    }
+
+    func restoreFinished() {
+        saveShelves()
         save()
         refreshMissing()   // a Drive book restored without its files is waiting to be downloaded
     }

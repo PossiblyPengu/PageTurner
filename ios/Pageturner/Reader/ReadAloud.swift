@@ -8,17 +8,12 @@ import UIKit
 /// Tunes every utterance a system voice is asked to say (the engines have no rate
 /// setting, and asking iOS for "a voice for this language" answers with the compact
 /// default even when a better one is installed).
-final class SpeechTuning: AVTTSEngineDelegate {
+final class SpeechTuning {
     /// 1 = the voice's normal pace.
     var multiplier: Double = 1.0
     /// The voice the reader picked, if any: the one thing never to second-guess.
     var chosenVoiceID: String?
     private lazy var installed = SystemVoices.installed()
-
-    /// Readium's own engine handed its utterances here; `SystemTTSEngine` calls `tune` directly.
-    func avTTSEngine(_ engine: AVTTSEngine, didCreateUtterance utterance: AVSpeechUtterance) {
-        tune(utterance)
-    }
 
     func tune(_ utterance: AVSpeechUtterance) {
         utterance.rate = SpeechRateMap.avRate(forMultiplier: multiplier)

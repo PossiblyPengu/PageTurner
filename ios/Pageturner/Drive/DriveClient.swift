@@ -158,7 +158,7 @@ final class DriveClient {
                 try? FileManager.default.removeItem(at: temp)
                 if status == 401, !renewed {
                     renewed = true
-                    auth.discardAccessToken()
+                    auth.discardAccessToken(GoogleAuth.bearer(in: request))
                     continue
                 }
                 throw DriveError(message: "\(file.name): " + GoogleDrive.explain(status: status, body: body))
@@ -281,7 +281,7 @@ final class DriveClient {
                     failures = 0
                     continue
                 }
-                if status == 401 { auth.discardAccessToken() }
+                if status == 401 { auth.discardAccessToken(GoogleAuth.bearer(in: request)) }
                 guard status == 401 || GoogleDrive.shouldRetry(status: status), failures < 5 else {
                     throw DriveError(message: GoogleDrive.explain(status: status, body: data))
                 }

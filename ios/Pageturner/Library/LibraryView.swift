@@ -597,18 +597,7 @@ struct LibraryView: View {
     private func applyReview(_ candidate: MetadataCandidate, to id: UUID, coverOnly: Bool) {
         guard let book = library.books.first(where: { $0.id == id }) else { return }
         if !coverOnly {
-            library.mutate(id) { current in
-                // a Drive book is called by its file or folder name until
-                // something better is known — as is one with no real title
-                let nameless = current.title.trimmingCharacters(in: .whitespaces).isEmpty
-                    || current.title == current.drive?.guessedTitle
-                if nameless, !candidate.title.isEmpty { current.title = candidate.title }
-                if current.author.isEmpty, !candidate.authors.isEmpty { current.author = candidate.authors }
-                if current.year == nil, !candidate.year.isEmpty { current.year = candidate.year }
-                if current.bookDescription == nil, !candidate.summary.isEmpty { current.bookDescription = candidate.summary }
-                if current.isbn == nil { current.isbn = candidate.isbn }
-                if current.openLibraryId == nil { current.openLibraryId = candidate.openLibraryId }
-            }
+            library.mutate(id) { MetadataLookup.fillMissing(&$0, from: candidate) }
             if let pin = candidate.bookmasterId, book.bookmasterId == nil {
                 library.updateBookMaster(id) { $0.bookmasterId = pin }
             }

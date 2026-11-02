@@ -14,10 +14,11 @@ final class DriveStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @uncheck
     private var token: String
     private var work: [ObjectIdentifier: Task<Void, Never>] = [:]
     private let session: URLSession
-    private let refresh: @Sendable () async -> String?
+    /// A fresh token, given the one Drive refused.
+    private let refresh: @Sendable (String) async -> String?
     private static let chunk: Int64 = 1_048_576
 
-    init(token: String, refresh: @escaping @Sendable () async -> String?) {
+    init(token: String, refresh: @escaping @Sendable (String) async -> String?) {
         self.token = token
         self.refresh = refresh
         let config = URLSessionConfiguration.ephemeral
@@ -131,12 +132,13 @@ final class DriveStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @uncheck
         var renewed = false
         while true {
             var request = URLRequest(url: url)
-            request.setValue("Bearer \(currentToken())", forHTTPHeaderField: "Authorization")
+            let sent = currentToken()
+            request.setValue("Bearer \(sent)", forHTTPHeaderField: "Authorization")
             request.setValue("bytes=\(from)-\(to)", forHTTPHeaderField: "Range")
             guard let (data, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return nil }
             if http.statusCode == 401, !renewed {
                 renewed = true
-                if let fresh = await refresh() { setToken(fresh); continue }
+                if let fresh = await refresh(sent) { setToken(fresh); continue }
                 return nil
             }
             guard http.statusCode == 206 || http.statusCode == 200,

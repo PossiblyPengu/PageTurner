@@ -2,21 +2,19 @@ import AVFoundation
 import ReadiumNavigator
 import ReadiumShared
 
-/// iOS's own voices, through Readium's TTSEngine. Readium's AVTTSEngine speaks exactly the text it
-/// is handed, and TTSUtterance can't be rebuilt (no public init) — so this engine exists to speak
+/// iOS's own voices, for `SpeechSynthesizer`. Readium's AVTTSEngine speaks exactly the text it
+/// is handed — so this engine exists to speak
 /// the cleaned text (`SpeechText.spoken`) while reporting word ranges in the page's own, which is
 /// what the locator carries. iOS 17 has none of the iOS 15 queueing deadlock Readium's state machine
 /// guards against, so one utterance at a time through one synthesizer is enough.
 ///
 /// The synthesizer is one long-lived object: a synthesizer freed while iOS is still calling back
 /// into it crashes inside TextToSpeech (the `SpeechPreview.shared` note in AGENTS.md).
-final class SystemTTSEngine: NSObject, TTSEngine, AVSpeechSynthesizerDelegate {
+final class SystemTTSEngine: NSObject, AVSpeechSynthesizerDelegate {
     /// Tunes each utterance before it is spoken — rate, and the automatic-voice upgrade.
     let tuning: SpeechTuning
 
     private static let synthesizer = AVSpeechSynthesizer()
-    /// The engine the shared synthesizer's callbacks belong to — weak, like `delegate` itself.
-    @MainActor private static weak var current: SystemTTSEngine?
 
     /// One utterance through the shared synthesizer: the text iOS says (`spoken`), the page's own
     /// text the locator carries (`original`), where a reported word range goes, and the
@@ -72,17 +70,7 @@ final class SystemTTSEngine: NSObject, TTSEngine, AVSpeechSynthesizerDelegate {
         AVSpeechSynthesisVoice(identifier: identifier).map(TTSVoice.init(system:))
     }
 
-    @MainActor
-    func speak(
-        _ utterance: TTSUtterance,
-        onSpeakRange: @escaping (Range<String.Index>) -> Void
-    ) async -> Result<Void, TTSError> {
-        await speak(text: utterance.text, voiceOrLanguage: utterance.voiceOrLanguage, delay: utterance.delay,
-                    onSpeakRange: onSpeakRange)
-    }
-
-    /// The same, from the parts of an utterance — what `SpeechSynthesizer` has (Readium's `TTSUtterance` can't be
-    /// made outside it).
+    /// One sentence: the page's own text, the voice or the language to find one for.
     @MainActor
     func speak(
         text original: String, voiceOrLanguage: Either<TTSVoice, Language>, delay: TimeInterval = 0,
@@ -110,7 +98,6 @@ final class SystemTTSEngine: NSObject, TTSEngine, AVSpeechSynthesizerDelegate {
         }
         let flight = Flight(utterance: av, original: original, spoken: spoken, onSpeakRange: onSpeakRange)
         self.flight = flight
-        Self.current = self
         Self.synthesizer.delegate = self
 
         return await withTaskCancellationHandler {
@@ -137,7 +124,6 @@ final class SystemTTSEngine: NSObject, TTSEngine, AVSpeechSynthesizerDelegate {
     private func end(_ utterance: AVSpeechUtterance) {
         guard let flight, utterance === flight.utterance else { return }
         self.flight = nil
-        if Self.current === self { Self.current = nil }
         flight.finish()
     }
 

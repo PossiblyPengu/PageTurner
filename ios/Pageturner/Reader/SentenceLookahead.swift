@@ -32,12 +32,6 @@ final class SentenceLookahead {
         tokenizer = makeReadingTokenizer(publication.metadata.language)
     }
 
-    /// The sentence that follows `current`, or nil at the end of the book (or when this is busy answering
-    /// another question — the caller just goes without).
-    func sentence(after current: SpeechSynthesizer.Utterance) async -> Sentence? {
-        await sentences(after: current, count: 1).first
-    }
-
     /// The `count` sentences that follow `current`, in order — fewer at the book's end, none
     /// there (or while this is busy answering another question).
     func sentences(after current: SpeechSynthesizer.Utterance, count: Int) async -> [Sentence] {

@@ -135,8 +135,8 @@ final class AudioPlayer: ObservableObject {
         guard let token = try? await GoogleAuth.shared.accessToken() else { return }
         if let streamLoader { streamLoader.setToken(token) }
         else {
-            streamLoader = DriveStreamLoader(token: token, refresh: {
-                await MainActor.run { GoogleAuth.shared.discardAccessToken() }
+            streamLoader = DriveStreamLoader(token: token, refresh: { refused in
+                await MainActor.run { GoogleAuth.shared.discardAccessToken(refused) }
                 return try? await GoogleAuth.shared.accessToken()
             })
         }

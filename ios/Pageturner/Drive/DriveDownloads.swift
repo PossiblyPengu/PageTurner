@@ -231,7 +231,8 @@ final class DriveDownloads {
 
     /// A part did not come: asked for again a few times, then the book says why.
     func failed(
-        _ ticket: DriveDownloadDelegate.Ticket, status: Int, body: Data?, message: String? = nil, resume: Data? = nil
+        _ ticket: DriveDownloadDelegate.Ticket, status: Int, body: Data?, message: String? = nil, resume: Data? = nil,
+        refused: String? = nil
     ) {
         whenReady { [self] in
             guard !cancelled.contains(ticket.book) else { return }
@@ -243,7 +244,7 @@ final class DriveDownloads {
             let again = status == 0 || status == 401 || GoogleDrive.shouldRetry(status: status)
             if again, tried < Self.maxAttempts {
                 attempts[ticket.description] = tried + 1
-                if status == 401 { GoogleAuth.shared.discardAccessToken() }
+                if status == 401 { GoogleAuth.shared.discardAccessToken(refused) }
                 let keep = status == 401 ? nil : resume
                 Task {
                     try? await Task.sleep(nanoseconds: UInt64(GoogleDrive.retryDelay(attempt: tried + 1) * 1_000_000_000))
@@ -385,7 +386,8 @@ final class DriveDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchec
             // what came is Drive's error message, not the file
             let body = try? Data(contentsOf: location)
             try? fm.removeItem(at: location)
-            Task { @MainActor in DriveDownloads.shared.failed(ticket, status: status, body: body) }
+            let refused = GoogleAuth.bearer(in: downloadTask.originalRequest)
+            Task { @MainActor in DriveDownloads.shared.failed(ticket, status: status, body: body, refused: refused) }
             return
         }
         // a virus-scan or quota page answers 200 with HTML: saving it makes the book "Cannot Open"

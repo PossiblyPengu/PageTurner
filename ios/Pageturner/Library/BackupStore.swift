@@ -164,6 +164,7 @@ final class BackupStore {
                 skipped += 1
             }
         }
+        if restored > 0 { library.restoreFinished() }
         return (restored, skipped)
     }
 
