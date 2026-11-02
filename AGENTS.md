@@ -279,11 +279,15 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   ranges the engine reports, so the two must be one string. Device voices: `SystemVoices.swift`; the shared list
   and the Settings/Reading-sheet rows: `VoiceListView.swift`; **always use `SpeechPreview.shared`** — an
   `AVSpeechSynthesizer` freed while iOS is still calling back into it crashes inside TextToSpeech.
-  `VoiceListView` pauses every `AudioFocus` owner on appear so a sample never overlaps narration, and
-  `ReadAloud.heldForFocus` keeps a claimed pause from being undone: Readium's `pause`/`stop` cancel the
-  play task, but a task parked *between* sentences still runs `play` and reports `.playing` — the flag
-  squashes that ghost and `CompositeTTSEngine` refuses `speak` on an already-cancelled task, so the
-  engine never says the sentence.
+  `VoiceListView` pauses every `AudioFocus` owner on appear so a sample never overlaps narration. The play loop is
+  ours (`Reader/SpeechSynthesizer.swift`, Readium's `PublicationSpeechSynthesizer` kept to the main actor — Readium's
+  wrote its state on a background executor while read-aloud read it per word, the SIGBUS after long sessions): one
+  `while` loop per play task (not a call chain — that held every sentence's frames until a pause), nothing set after a
+  cancel (so no "ghost" `.playing` after a pause; read-aloud drops any report that doesn't match the current state),
+  and one content-iterator call at a time (`loading`: a skip waits for the call a cancelled task left running and
+  takes its paragraph — two calls at once raced the iterator and lost a paragraph). A `.stopped` the synthesizer
+  reports by itself (the book's end, unreadable text) ends the session like Stop. Automatic (no voice chosen) speaks a
+  sentence with an installed neural voice for its language (`CompositeTTSEngine`, the `.right(language)` case).
   Neural voices (Piper on sherpa-onnx, the official SwiftPM package `k2-fsa/sherpa-onnx`):
   `NeuralVoiceCatalog.swift` (the bundled `NeuralVoices.json`, made by `scripts/make-neural-catalog.py`, pinned to a
   commit of rhasspy/piper-voices so URLs and MD5s stay true), `NeuralVoiceFormat.swift` (turns a Piper download

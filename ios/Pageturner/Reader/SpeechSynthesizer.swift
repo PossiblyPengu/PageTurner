@@ -82,10 +82,24 @@ final class SpeechSynthesizer {
     nonisolated(unsafe) private let audioSessionUser = SessionUser()
     private var currentTask: Task<Void, Never>?
     private var iterator: ContentIterator? {
-        didSet { utterances = Cursor() }
+        didSet {
+            utterances = Cursor()
+            iteration += 1
+            loading = nil
+        }
     }
+    /// Which iterator `utterances` and `loading` belong to: counted up each time it is replaced.
+    private var iteration = 0
     /// The sentences of the content element being read.
     private var utterances = Cursor()
+    /// The one call to the content iterator under way. The iterator's `next` runs off the main actor and is not
+    /// safe to step from two places at once, and a pause or a skip cancels the task that asked while the call
+    /// goes on: whoever asks next waits for that call and takes what it found, rather than stepping again
+    /// (which raced the iterator, and lost the paragraph it had found).
+    private var loading: Task<Bool, Never>?
+    /// A `start` still finding its first sentence: Play pressed meanwhile carries on with that, not with the
+    /// sentence paused before it.
+    private var starting = false
     private var lastUsedVoice: TTSVoice?
 
     init(publication: Publication, config: Configuration, engine: CompositeTTSEngine,
@@ -118,11 +132,13 @@ final class SpeechSynthesizer {
         audioSession.start(with: audioSessionUser, isPlaying: false)
         currentTask?.cancel()
         iterator = publication.content(from: locator)?.iterator()
-        currentTask = Task { await playNext(.forward) }
+        starting = true
+        currentTask = Task { await run(.forward) }
     }
 
     func stop() {
         currentTask?.cancel()
+        starting = false
         state = .stopped
         iterator = nil
     }
@@ -135,9 +151,12 @@ final class SpeechSynthesizer {
     }
 
     func resume() {
-        currentTask?.cancel()
-        if case let .paused(utterance) = state {
-            currentTask = Task { await play(utterance) }
+        if starting {
+            currentTask?.cancel()
+            currentTask = Task { await run(.forward) }
+        } else if case let .paused(utterance) = state {
+            currentTask?.cancel()
+            currentTask = Task { await run(.forward, from: utterance) }
         }
     }
 
@@ -150,50 +169,75 @@ final class SpeechSynthesizer {
     }
 
     func previous() {
+        // nothing started (or stopped): a skip has no book to move in, and must not report `.stopped`
+        guard iterator != nil else { return }
+        // at the book's first sentence there is none before it: that one is said again, not the end
+        let current: Utterance?
+        switch state {
+        case let .playing(utterance, range: _), let .paused(utterance): current = utterance
+        case .stopped: current = nil
+        }
         currentTask?.cancel()
-        currentTask = Task { await playNext(.backward) }
+        currentTask = Task { await run(.backward, orElse: current) }
     }
 
     func next() {
+        guard iterator != nil else { return }
         currentTask?.cancel()
-        currentTask = Task { await playNext(.forward) }
+        currentTask = Task { await run(.forward) }
     }
 
     // MARK: The play loop
 
     private enum Direction { case forward, backward }
 
-    private func playNext(_ direction: Direction) async {
-        let utterance = await nextUtterance(direction)
-        // a newer pause, skip or stop owns the state now
-        guard !Task.isCancelled else { return }
-        guard let utterance else {
-            state = .stopped
-            return
-        }
-        await play(utterance)
-    }
-
-    private func play(_ utterance: Utterance) async {
-        guard !Task.isCancelled else { return }
-        state = .playing(utterance, range: nil)
-        let result = await engine.speak(text: utterance.text, voiceOrLanguage: voiceOrLanguage(for: utterance)) { [weak self] range in
-            // a word of a sentence that is no longer the one being said (its report was on its way) is dropped
-            guard let self, case let .playing(current, range: _) = self.state, current == utterance else { return }
-            self.state = .playing(utterance, range: utterance.locator.copy(text: { text in
-                guard let highlight = text.highlight,
-                      highlight.startIndex <= range.lowerBound, highlight.endIndex >= range.upperBound
-                else { return }
-                text = text[range]
-            }))
-        }
-        guard !Task.isCancelled else { return }
-        switch result {
-        case .success:
-            await playNext(.forward)
-        case let .failure(error):
-            state = .paused(utterance)
-            delegate?.publicationSpeechSynthesizer(self, utterance: utterance, didFailWithError: .engine(error))
+    /// Says sentence after sentence — `first`, if given, then the next one `direction` finds, then on forward —
+    /// until the book ends, a sentence fails, or the task is cancelled. One loop, not a chain of calls: each
+    /// sentence used to await the next one's call, and a night's listening held every one of them until a pause.
+    private func run(_ direction: Direction, from first: Utterance? = nil, orElse fallback: Utterance? = nil) async {
+        var direction = direction
+        var pending = first
+        var fallback = fallback
+        while true {
+            let utterance: Utterance
+            if let given = pending {
+                utterance = given
+                pending = nil
+            } else {
+                let found = await nextUtterance(direction)
+                // a newer pause, skip or stop owns the state now
+                guard !Task.isCancelled else { return }
+                guard let found = found ?? fallback else {
+                    starting = false
+                    state = .stopped
+                    return
+                }
+                fallback = nil
+                utterance = found
+            }
+            guard !Task.isCancelled else { return }
+            direction = .forward
+            starting = false
+            state = .playing(utterance, range: nil)
+            let result = await engine.speak(text: utterance.text, voiceOrLanguage: voiceOrLanguage(for: utterance)) { [weak self] range in
+                // a word of a sentence that is no longer the one being said (its report was on its way) is dropped
+                guard let self, case let .playing(current, range: _) = self.state, current == utterance else { return }
+                self.state = .playing(utterance, range: utterance.locator.copy(text: { text in
+                    guard let highlight = text.highlight,
+                          highlight.startIndex <= range.lowerBound, highlight.endIndex >= range.upperBound
+                    else { return }
+                    text = text[range]
+                }))
+            }
+            guard !Task.isCancelled else { return }
+            if case let .failure(error) = result {
+                // told first: the delegate mostly carries on (a skip, a retry with another voice) or stops, and a
+                // pause shown for the moment before that only flickered the controls
+                let task = currentTask
+                delegate?.publicationSpeechSynthesizer(self, utterance: utterance, didFailWithError: .engine(error))
+                if currentTask == task, case .playing = state { state = .paused(utterance) }
+                return
+            }
         }
     }
 
@@ -207,6 +251,8 @@ final class SpeechSynthesizer {
         return .right(utterance.language ?? config.defaultLanguage ?? publication.metadata.language ?? Language.current)
     }
 
+    /// The next sentence that way, or nil at the book's end, on a read error, or when the task was cancelled —
+    /// in which case the cursor is left where it was, so the next ask gets the sentence this one would have.
     private func nextUtterance(_ direction: Direction) async -> Utterance? {
         while true {
             if let utterance = utterances.step(forward: direction == .forward) { return utterance }
@@ -214,20 +260,39 @@ final class SpeechSynthesizer {
         }
     }
 
-    /// The sentences of the next content element that has any, the cursor at its first (or, going back, its last).
+    /// Moves `utterances` to the next content element that has sentences (going back, the one before), the cursor
+    /// before its first (going back, after its last). False at the end of the book, or on a read error.
     private func loadNextUtterances(_ direction: Direction) async -> Bool {
+        // a call a pause or a skip left running is stepping the iterator: what it finds is what comes next
+        if let loading { return await loading.value }
+        guard let iterator else { return false }
+        let iteration = self.iteration
+        let task = Task { @MainActor [weak self] () -> Bool in
+            guard let self else { return false }
+            let found = await self.load(direction, from: iterator, iteration: iteration)
+            // cleared before anyone waiting on it runs, so they never wait on a finished call again
+            if self.iteration == iteration { self.loading = nil }
+            return found
+        }
+        loading = task
+        return await task.value
+    }
+
+    private func load(_ direction: Direction, from iterator: ContentIterator, iteration: Int) async -> Bool {
         do {
             var found: [Utterance] = []
             while found.isEmpty {
                 let element: ContentElement?
                 switch direction {
-                case .forward: element = try await iterator?.next()
-                case .backward: element = try await iterator?.previous()
+                case .forward: element = try await iterator.next()
+                case .backward: element = try await iterator.previous()
                 }
-                guard let element, !Task.isCancelled else { return false }
+                guard let element else { return false }
                 found = try tokenizerFactory(config.defaultLanguage ?? publication.metadata.language)(element)
                     .flatMap { utterances(for: $0) }
             }
+            // the iterator was replaced (a new start, a stop) while this one read: its sentences are not wanted
+            guard self.iteration == iteration else { return false }
             utterances = Cursor(list: found, startIndex: direction == .forward ? 0 : found.count - 1)
             return true
         } catch {

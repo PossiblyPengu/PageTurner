@@ -355,18 +355,21 @@ final class CompositeTTSEngine: TTSEngine {
         text: String, voiceOrLanguage: Either<TTSVoice, Language>,
         onSpeakRange: @escaping (Range<String.Index>) -> Void
     ) async -> Result<Void, TTSError> {
-        // a play task parked between sentences outlives the cancel pause/stop sent it — without
-        // this it would still start the engine below: a sentence nobody can stop any more
+        // a task already cancelled starts nothing: a sentence begun now could not be stopped any more
         guard !Task.isCancelled else { return .success(()) }
         let spoken = SpeechText.spoken(text)
         // a segment the voice would say nothing for (a running page number) is dropped
         guard !spoken.isEmpty else { return .success(()) }
-        if case let .left(voice) = voiceOrLanguage {
+        switch voiceOrLanguage {
+        case let .left(voice):
             if NeuralVoice.key(fromID: voice.identifier) != nil {
                 return await neural.speak(text: text, voiceOrLanguage: voiceOrLanguage, onSpeakRange: onSpeakRange)
             }
-            // Automatic with a neural voice installed for this language: it reads instead
-            if preferNeural, let entry = neural.preferredEntry(forBaseLanguage: SpeechVoices.baseLanguage(voice.language.code.bcp47)) {
+        case let .right(language):
+            // Automatic — no voice chosen, so the sentence comes with its language alone — and a neural voice is
+            // installed for that language: it reads. (This was asked of a chosen system voice, which Automatic
+            // never has, so the neural voice it warmed at every start was never heard.)
+            if preferNeural, let entry = neural.preferredEntry(forBaseLanguage: SpeechVoices.baseLanguage(language.code.bcp47)) {
                 return await neural.speakText(text, entry: entry, onSpeakRange: onSpeakRange)
             }
         }
