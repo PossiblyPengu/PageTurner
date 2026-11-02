@@ -160,9 +160,16 @@ struct ReaderView: View {
                 // the place from being lost whether this or the app's own .background flush runs
                 // first, and whether a .background ever arrives at all
                 case .inactive: model.sleepCover(true); model.flushSave(); library.flushSaves()
-                case .background: model.flushSave(); library.flushSaves(); model.endSession(); keepAwake(false)
+                case .background:
+                    model.flushSave(); library.flushSaves(); model.endSession(); keepAwake(false)
+                    // a locked screen is nobody looking, the same as the reader left for another tab: the voice
+                    // keeps the place without turning the page. A chapter loaded into a web view while the app is
+                    // in the background is often never painted — the blank page on unlocking with read-aloud on.
+                    if visible { model.readerHidden() }
                 case .active:
                     guard visible else { break }
+                    // in front again: the marks and the page catch up to the voice, now that they will paint
+                    model.readerShown()
                     model.beginSession(); model.wakeFromSleep(); keepAwake(true); applyDim(wantsDim)
                 default: break
                 }

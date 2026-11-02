@@ -38,8 +38,14 @@ final class ReaderModel: ObservableObject {
                 // the voice has ended: bring the page to where it stopped. A page still
                 // behind — one that could not be driven while the screen was locked —
                 // agrees before the next place it reports can take the save
-                if let ahead = narrationAhead, let navigator {
-                    Task { _ = await navigator.go(to: ahead.anchorable, options: NavigatorGoOptions(animated: false)) }
+                // — done in front: a chapter loaded into a web view in the background is often never painted,
+                // so a voice that ended with the phone locked (the sleep timer, the book's end) leaves it for the wake
+                if let ahead = narrationAhead {
+                    if UIApplication.shared.applicationState == .active, let navigator {
+                        Task { _ = await navigator.go(to: ahead.anchorable, options: NavigatorGoOptions(animated: false)) }
+                    } else {
+                        catchUpOnWake = ahead
+                    }
                 }
             }
         }
@@ -1093,8 +1099,15 @@ final class ReaderModel: ObservableObject {
     /// (its strip on another tab), so its webview may have gone stale while nobody looked at it.
     func readerShown() {
         readAloud?.setOnScreen(true)
+        if let place = catchUpOnWake, readAloud == nil, let navigator {
+            catchUpOnWake = nil
+            Task { _ = await navigator.go(to: place.anchorable, options: NavigatorGoOptions(animated: false)) }
+        }
         refreshAwake()
     }
+
+    /// Where a voice that ended in the background stopped: the page goes there once the app is in front.
+    private var catchUpOnWake: Locator?
 
     /// The reader was left with the voice still going: nothing is chased or painted until it is back.
     func readerHidden() { readAloud?.setOnScreen(false) }
