@@ -153,6 +153,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   stays flat until a small photograph of the navigator (`fingerprint`) differs from the cover's (`waitForNewPage`) — lifted earlier it
   peeled off a copy of itself — a flick that ends first waits for that (`armTask`), and a cancel keeps the cover until the original page is
   painted again. `-PTDebugTurn curl [-PTDebugTurnBack YES]` poses a tap-turn; the log's `PTCurlReveal` lines say how long the paint took.
+  The reader saves only what it changed (`LibraryStore.saveReading(_:since:)`, a three-way merge against `ReaderModel.stored`,
+  lists merged by id) and takes in changes made elsewhere (`libraryChanged`, from `library.$books` after the write lands): a
+  reader lives for hours, and writing its whole copy back undid Mark as Finished, Start Over and deleted words. A place moved
+  elsewhere wins: narration stops and a book started over goes to its start. A sitting idle for over five minutes ends there
+  (`closeIdleSitting`). The sleep cover goes up only on active → inactive, the reader is hidden from the voice at `.inactive`
+  (a locked screen may never reach `.background`), and the cover always comes off at `.active`.
   highlights live on the `Book` (colour, note, chapter, progression) and are painted as decorations;
   `HighlightExport` writes them as Markdown. PDFs are searched by Readium itself (its PDF parser
   registers a content search service).

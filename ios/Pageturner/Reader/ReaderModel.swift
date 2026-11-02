@@ -31,6 +31,7 @@ final class ReaderModel: ObservableObject {
     @Published var isSearchable = false
     @Published private(set) var readAloud: ReadAloud? {
         didSet {
+            guard readAloud !== oldValue else { return }
             playingSink = readAloud?.$isPlaying
                 .sink { [weak self] playing in self?.readAloudPlaying = playing }
             if readAloud == nil {
@@ -41,10 +42,15 @@ final class ReaderModel: ObservableObject {
                 // — done in front: a chapter loaded into a web view in the background is often never painted,
                 // so a voice that ended with the phone locked (the sleep timer, the book's end) leaves it for the wake
                 if let ahead = narrationAhead {
-                    if UIApplication.shared.applicationState == .active, let navigator {
-                        Task { _ = await navigator.go(to: ahead.anchorable, options: NavigatorGoOptions(animated: false)) }
+                    if UIApplication.shared.applicationState == .active {
+                        catchUp(to: ahead)
                     } else {
                         catchUpOnWake = ahead
+                        // nothing in front will save it: a voice that ended behind a locked screen writes its place now
+                        saveTask?.cancel()
+                        saveTask = nil
+                        writeReading()
+                        library.flushSaves()
                     }
                 }
             }
@@ -128,14 +134,96 @@ final class ReaderModel: ObservableObject {
     static let searchHitGroup = "search-hit"
     private var searchHitGeneration = 0
 
+    /// The book's record as the library last had it, as far as this reader knows. A save writes only what the
+    /// reader changed since (`LibraryStore.saveReading(_:since:)`), and a change made elsewhere is taken in
+    /// (`libraryChanged`): a reader holds its copy for hours — a book left open, narration behind a locked
+    /// screen — and writing the whole of it back undid Mark as Finished, Start Over, a saved word deleted from
+    /// the list, a highlight merged in.
+    private var stored: Book
+    private var libraryChanges: AnyCancellable?
+    /// `open()` is under way: the Reading tab starts it again on every return, and two at once built two navigators.
+    private var opening = false
+
     init(book: Book, library: LibraryStore) {
         self.book = book
+        self.stored = book
         self.library = library
+        // after the change has landed (a sink runs inside the library's own write), and read from the library
+        // then — a queued value can be older than a save this reader made meanwhile
+        libraryChanges = library.$books
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.libraryChanged() }
+    }
+
+    /// Writes what this reader changed to the library, and takes in whatever changed there meanwhile.
+    private func writeReading() {
+        library.saveReading(book, since: stored)
+        libraryChanged()
+    }
+
+    /// The library's record of the book changed: take in what changed there and not here. A place changed there on
+    /// purpose (Start Over, Mark as Finished, Want to Read on the shelf, BookMaster's place taken) wins over this
+    /// reader's: the voice stops — reading on, it would carry the old place straight back — and a book started
+    /// over (or sent to a new place) goes there.
+    private func libraryChanged() {
+        guard let latest = library.books.first(where: { $0.id == book.id }), latest != stored else { return }
+        let base = stored
+        stored = latest
+        var merged = latest
+        let there = (latest.locatorJSON, latest.progression)
+        let movedThere = there != (base.locatorJSON, base.progression) && there != (book.locatorJSON, book.progression)
+        if !movedThere, (book.locatorJSON, book.progression) != (base.locatorJSON, base.progression) {
+            // this reader's own move, not written yet
+            merged.locatorJSON = book.locatorJSON
+            merged.progression = book.progression
+        }
+        merged.bookmarks = LibraryStore.merge(book.bookmarks, since: base.bookmarks, onto: latest.bookmarks)
+        merged.highlights = LibraryStore.merge(book.highlights, since: base.highlights, onto: latest.highlights)
+        merged.words = LibraryStore.merge(book.words, since: base.words, onto: latest.words)
+        if book.pages != base.pages { merged.pages = book.pages }
+        if book.lastOpenedAt != base.lastOpenedAt { merged.lastOpenedAt = book.lastOpenedAt }
+        if book.resumeDismissedAt != base.resumeDismissedAt { merged.resumeDismissedAt = book.resumeDismissedAt }
+        let highlightsChanged = merged.highlights != book.highlights
+        let bookmarksChanged = merged.bookmarks != book.bookmarks
+        if merged != book { book = merged }
+        if highlightsChanged { applyHighlights() }
+        if bookmarksChanged, let currentLocator { isCurrentLocationBookmarked = bookmark(matching: currentLocator) != nil }
+        guard movedThere else { return }
+        narrationAhead = nil
+        catchUpOnWake = nil
+        if readAloud != nil { stopReadAloud() }
+        // a place given only as how far in (Start Over is 0) is found in the book; one with a locator — Mark as
+        // Finished leaves it — is where the page already is
+        guard book.locatorJSON == nil, let publication else { return }
+        let progression = min(max(book.progression ?? 0, 0), 0.999)
+        Task { @MainActor [weak self] in
+            guard let place = await publication.locate(progression: progression), let self else { return }
+            if UIApplication.shared.applicationState == .active {
+                self.catchUp(to: place)
+            } else {
+                self.catchUpOnWake = place
+            }
+        }
+    }
+
+    /// The page taken where the reader's place is now (the voice ended ahead of it, or the place was moved
+    /// elsewhere). Once there it no longer trails the voice: the next report is the reader's own again.
+    private func catchUp(to place: Locator) {
+        guard let navigator else { return }
+        Task { @MainActor [weak self] in
+            _ = await navigator.go(to: place.anchorable, options: NavigatorGoOptions(animated: false))
+            // a page reports where it starts — at or before the sentence, rarely past it — so waiting for a report
+            // "caught up" kept the lead (and skipped every save) long after the voice had ended
+            if self?.readAloud == nil { self?.narrationAhead = nil }
+        }
     }
 
     func open() async {
         // the Reading tab restarts this task on every return — open once
-        guard publication == nil, phase == .loading else { return }
+        guard publication == nil, phase == .loading, !opening else { return }
+        opening = true
+        defer { opening = false }
         do {
             let publication = try await Readium.shared.open(url: library.fileURL(for: book))
             self.publication = publication
@@ -216,7 +304,7 @@ final class ReaderModel: ObservableObject {
             }
 
             book.lastOpenedAt = Date()
-            library.saveReading(book)
+            writeReading()
             canReadAloud = ReadAloud.canSpeak(publication)
             isSearchable = publication.isSearchable
             toc = (try? await publication.tableOfContents().get()) ?? []
@@ -566,7 +654,7 @@ final class ReaderModel: ObservableObject {
             }
             guard let count, count > 0, book.pages == nil else { return }
             book.pages = count
-            library.saveReading(book)
+            writeReading()
         }
     }
 
@@ -1087,9 +1175,11 @@ final class ReaderModel: ObservableObject {
         }
     }
 
+    /// The voice's own `stop` ends the session (`onStopped` clears `readAloud` and lets the host go).
     func stopReadAloud() {
-        readAloud?.stop()
-        readAloud = nil
+        guard let readAloud else { return }
+        readAloud.stop()
+        if self.readAloud === readAloud { self.readAloud = nil }   // a stop that reported nothing back
     }
 
     // MARK: - Read aloud with the reader away (`ReadAloudHost`)
@@ -1099,9 +1189,18 @@ final class ReaderModel: ObservableObject {
     /// (its strip on another tab), so its webview may have gone stale while nobody looked at it.
     func readerShown() {
         readAloud?.setOnScreen(true)
-        if let place = catchUpOnWake, readAloud == nil, let navigator {
+        if let place = catchUpOnWake, readAloud == nil {
             catchUpOnWake = nil
-            Task { _ = await navigator.go(to: place.anchorable, options: NavigatorGoOptions(animated: false)) }
+            catchUp(to: place)
+        }
+        // opened again at a place (a highlight in the hub, the other version's page) while already open: `open()`
+        // only takes a request once, so an open reader takes it here
+        if phase == .ready, let publication, let requested = OpenAt.take(for: book.id) {
+            Task { @MainActor [weak self] in
+                guard let place = await Self.resolve(requested, in: publication), let self else { return }
+                if self.readAloud != nil { self.stopReadAloud() }
+                self.go(to: place)
+            }
         }
         refreshAwake()
     }
@@ -1119,7 +1218,7 @@ final class ReaderModel: ObservableObject {
     func readerLetGo() {
         saveTask?.cancel()
         saveTask = nil
-        library.saveReading(book)
+        writeReading()
         if UIApplication.shared.applicationState != .active { library.flushSaves() }
         endSession()
     }
@@ -1130,6 +1229,7 @@ final class ReaderModel: ObservableObject {
         // a report that outlived its own session (a delegate call queued before the stop)
         // must not take the place back — the catch-up page has it
         guard readAloud != nil else { return }
+        closeIdleSitting()
         currentLocator = locator
         narrationAhead = locator
         lastActivityAt = Date()
@@ -1167,7 +1267,7 @@ final class ReaderModel: ObservableObject {
         saveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
-            library.saveReading(book)
+            writeReading()
         }
     }
 
@@ -1177,7 +1277,9 @@ final class ReaderModel: ObservableObject {
     func flushSave() {
         saveTask?.cancel()
         saveTask = nil
-        if !curling, narrationAhead == nil, let locator = navigator?.currentLocation {
+        // only a place the navigator never reported: one it did is in `book` already, or was overruled on purpose
+        // (Mark as Finished elsewhere keeps the page but not its progression)
+        if !curling, narrationAhead == nil, let locator = navigator?.currentLocation, locator != currentLocator {
             // a locator that won't encode (a non-finite progression from a
             // half-reloaded page) keeps the last good place rather than
             // wiping it — and NaN in progression would fail the whole
@@ -1187,7 +1289,7 @@ final class ReaderModel: ObservableObject {
                 book.progression = prog
             }
         }
-        library.saveReading(book)
+        writeReading()
     }
 
     /// Locking the screen can leave the page's webview holding a stale
@@ -1220,11 +1322,10 @@ final class ReaderModel: ObservableObject {
         }
     }
 
-    /// `.active`: repaint whatever survived, and hold the cover a beat for the page
-    /// to report a place — a reloaded one does, a merely-stale one does not and just
-    /// needed the repaint. The cover always comes off.
+    /// `.active`: hold the cover a beat for the page to report a place — a reloaded one does, a merely-stale one
+    /// does not and only needed the repaint `readerShown` gives it. The cover always comes off.
     func wakeFromSleep() {
-        refreshAwake()
+        coverHold?.cancel()
         coverHold = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard !Task.isCancelled else { return }
@@ -1249,6 +1350,7 @@ final class ReaderModel: ObservableObject {
 
     /// A new sitting begins now, from wherever the book is open.
     func beginSession() {
+        closeIdleSitting()
         if sessionStart == nil, let p = book.progression {
             sessionStart = (Date(), p)
             lastActivityAt = Date()
@@ -1294,6 +1396,14 @@ final class ReaderModel: ObservableObject {
         }
     }
 
+    /// More than five minutes since the last page turn or sentence: the sitting ended then (a book left open on a
+    /// table, narration paused and come back to), and what comes next is a new one. Called before anything counts as
+    /// activity — a sitting kept open across the gap counted all of it once the next page was turned.
+    private func closeIdleSitting() {
+        guard sessionStart != nil, Date().timeIntervalSince(lastActivityAt) > 300 else { return }
+        endSession()
+    }
+
     private func pin(_ id: String) {
         guard book.bookmasterId != id else { return }
         book.bookmasterId = id
@@ -1328,10 +1438,13 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
-        sleepCover(false)   // the page painted — a wake's cover has done its job
         guard !curling else { return }   // the curl replays it on commit
         // the reader is away with the voice going on: the page behind it is stale, whatever it reports
         guard readAloud?.onScreen != false else { return }
+        // the page painted in front — a wake's cover has done its job (a report from behind the lock screen is not
+        // a painted page, and took the cover off before the unlock)
+        if UIApplication.shared.applicationState == .active { sleepCover(false) }
+        closeIdleSitting()
         previousLocator = currentLocator
         currentLocator = locator
         lastActivityAt = Date()

@@ -142,6 +142,7 @@ struct ReaderView: View {
             }
             .onDisappear {
                 visible = false
+                model.sleepCover(false)   // a cover put up as the app went inactive must not outlive the reader
                 keepAwake(false)
                 applyDim(false)
                 model.flushSave()
@@ -154,23 +155,29 @@ struct ReaderView: View {
             // .inactive is its own case: locking the screen can park the app there without a
             // .background ever arriving (keep-awake or a live read-aloud session), so the
             // position lands on disk there too — only the session end waits for .background.
-            .onChange(of: scenePhase) { _, phase in
+            .onChange(of: scenePhase) { old, phase in
                 switch phase {
                 // the catalogue write is queued behind the main thread: draining it here keeps
                 // the place from being lost whether this or the app's own .background flush runs
                 // first, and whether a .background ever arrives at all
-                case .inactive: model.sleepCover(true); model.flushSave(); library.flushSaves()
-                case .background:
-                    model.flushSave(); library.flushSaves(); model.endSession(); keepAwake(false)
-                    // a locked screen is nobody looking, the same as the reader left for another tab: the voice
-                    // keeps the place without turning the page. A chapter loaded into a web view while the app is
-                    // in the background is often never painted — the blank page on unlocking with read-aloud on.
+                case .inactive:
+                    // the cover is a photograph of the page as it leaves the screen — on the way back in
+                    // (background → inactive) the page may be the blank one it hides
+                    if old == .active, visible { model.sleepCover(true) }
+                    model.flushSave(); library.flushSaves()
+                    // locked with the voice going on, iOS can keep the app here without a .background: the page is
+                    // nobody's to follow either way (following it behind the lock was the blank page on unlocking)
                     if visible { model.readerHidden() }
+                case .background:
+                    // (the reader was hidden on the way, at .inactive)
+                    model.flushSave(); library.flushSaves(); model.endSession(); keepAwake(false)
                 case .active:
+                    // the cover always comes off, wherever the reader is now
+                    model.wakeFromSleep()
                     guard visible else { break }
                     // in front again: the marks and the page catch up to the voice, now that they will paint
                     model.readerShown()
-                    model.beginSession(); model.wakeFromSleep(); keepAwake(true); applyDim(wantsDim)
+                    model.beginSession(); keepAwake(true); applyDim(wantsDim)
                 default: break
                 }
             }
@@ -367,7 +374,7 @@ struct ReaderView: View {
                 .accessibilityElement(children: .combine)
 
                 HStack(spacing: 0) {
-                    if model.book.ext == "pdf" || model.book.textVersionOf != nil {
+                    if model.book.ext == "pdf" || hasOriginalPDF {
                         versionButton
                     }
                     if model.isSearchable {
@@ -598,12 +605,23 @@ struct ReaderView: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    /// A text version whose PDF is still in the library and on this iPhone — removed, there is nothing to switch to.
+    private var hasOriginalPDF: Bool {
+        guard let original = model.book.textVersionOf else { return false }
+        return library.books.contains { $0.id == original } && !library.missing.contains(original)
+            && !library.inCloud.contains(original)
+    }
+
     /// A PDF's text version (made the first time), or a text version's PDF — opened at the same place.
     @ViewBuilder
     private var versionButton: some View {
         let toText = model.book.ext == "pdf"
         if switchingVersion {
             ProgressView().frame(width: 42, height: 44)
+                // the switch failed (a scanned PDF, the original gone): the button is back at once, not in 20 s
+                .onReceive(library.$lastError.dropFirst()) { error in
+                    if error != nil { switchingVersion = false }
+                }
         } else {
             toolButton(toText ? "doc.plaintext" : "doc.richtext",
                        label: toText ? "Switch to the text version" : "Switch to the original PDF") {

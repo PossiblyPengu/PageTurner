@@ -941,20 +941,40 @@ final class LibraryStore: ObservableObject {
     /// Save what reading changed — the place, the marks the reader made, the sitting's time — onto the book as it is
     /// stored now. The reader holds its own copy of the whole `Book` from when it opened; writing that back with
     /// `update` would undo a title, shelf or note edited meanwhile.
-    func saveReading(_ book: Book) {
+    /// What a reader changed in its copy of a book since `base` — the record as that reader last had it — written
+    /// onto the record as it is now, and nothing else. A reader holds its copy for hours (a book left open,
+    /// narration behind a locked screen); writing all of it back undid what was done elsewhere meanwhile: Mark as
+    /// Finished, Start Over, a saved word deleted from the list. Bookmarks, highlights and words merge item by item.
+    func saveReading(_ book: Book, since base: Book) {
         mutate(book.id) {
-            $0.lastOpenedAt = book.lastOpenedAt
-            $0.locatorJSON = book.locatorJSON
+            if book.lastOpenedAt != base.lastOpenedAt { $0.lastOpenedAt = book.lastOpenedAt }
+            if book.locatorJSON != base.locatorJSON { $0.locatorJSON = book.locatorJSON }
             // a non-finite progression (a half-reloaded webview reports 0/0) thrown into the
             // catalogue makes the whole encode fail — the place, the highlights, all of it;
             // the stored place stands instead
-            if book.progression?.isFinite != false { $0.progression = book.progression }
-            $0.bookmarks = book.bookmarks
-            $0.highlights = book.highlights
-            $0.words = book.words
-            $0.pages = book.pages
-            $0.resumeDismissedAt = book.resumeDismissedAt
+            if book.progression != base.progression, book.progression?.isFinite != false { $0.progression = book.progression }
+            $0.bookmarks = Self.merge(book.bookmarks, since: base.bookmarks, onto: $0.bookmarks)
+            $0.highlights = Self.merge(book.highlights, since: base.highlights, onto: $0.highlights)
+            $0.words = Self.merge(book.words, since: base.words, onto: $0.words)
+            if book.pages != base.pages { $0.pages = book.pages }
+            if book.resumeDismissedAt != base.resumeDismissedAt { $0.resumeDismissedAt = book.resumeDismissedAt }
         }
+    }
+
+    /// `theirs` with what `mine` changed since `base`: items taken out, added and edited — each by its id.
+    static func merge<T: Identifiable & Equatable>(_ mine: [T], since base: [T], onto theirs: [T]) -> [T] {
+        guard mine != base else { return theirs }
+        let before = Dictionary(base.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let kept = Set(mine.map(\.id))
+        var out = theirs.filter { before[$0.id] == nil || kept.contains($0.id) }
+        for item in mine {
+            if let i = out.firstIndex(where: { $0.id == item.id }) {
+                if before[item.id] != item { out[i] = item }
+            } else if before[item.id] == nil {
+                out.append(item)
+            }
+        }
+        return out
     }
 
     /// The answer to "BookMaster has you at N% — jump there?": take its place

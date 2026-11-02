@@ -16,6 +16,10 @@ enum OpenAt {
     static func request(_ locatorJSON: String, for book: UUID) { pending[book] = .locator(locatorJSON) }
     static func request(_ place: Place, for book: UUID) { pending[book] = place }
     static func take(for book: UUID) -> Place? { pending.removeValue(forKey: book) }
+    /// A place is waiting for the book: opening it goes there, so "continue from BookMaster?" is not asked.
+    static func isPending(for book: UUID) -> Bool { pending[book] != nil }
+    /// The book couldn't open (still in the Drive, its file gone): the place is not kept for some later open.
+    static func cancel(for book: UUID) { pending[book] = nil }
 }
 
 /// Every highlight in every book, searchable by colour and text — and a random one to come back to.

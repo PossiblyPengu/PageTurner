@@ -109,14 +109,16 @@ final class AppRouter {
     func open(_ book: Book, library: LibraryStore) {
         // a book still in the Drive has nothing to open: its page is where it is downloaded
         if library.inCloud.contains(book.id) {
+            OpenAt.cancel(for: book.id)
             detail = book
             return
         }
         if library.missing.contains(book.id) {
+            OpenAt.cancel(for: book.id)
             library.lastError = "“\(book.title)” can’t be opened: its file is no longer on this device (it may have been deleted in the Files app). Remove it from the library to clear it."
             return
         }
-        if AppPrefs.resumeAsk, let fraction = ResumeOffer.target(for: book) {
+        if AppPrefs.resumeAsk, !OpenAt.isPending(for: book.id), let fraction = ResumeOffer.target(for: book) {
             resumePrompt = ResumePrompt(book: book, fraction: fraction)
             return
         }
