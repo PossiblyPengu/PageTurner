@@ -124,6 +124,10 @@ final class ReadAloud: NSObject, ObservableObject {
     /// silently through sentences nobody hears, and three of those read as failures that
     /// drop the chosen voice. The session's interruption notice is the real signal.
     private var interruptionObserver: NSObjectProtocol?
+    /// Headphones pulled out, a Bluetooth speaker gone: the voice pauses rather than carry on out of the phone's
+    /// speaker. The audiobook player and the neural voice's own player did; a device voice (AVSpeechSynthesizer) read
+    /// on out loud.
+    private var routeObserver: NSObjectProtocol?
     /// When an interruption that paused mid-sentence narration began: `.ended` resumes
     /// only a pause this made while speaking, and only if it wasn't an age ago.
     private var interruptedWhilePlaying: Date?
@@ -274,6 +278,19 @@ final class ReadAloud: NSObject, ObservableObject {
                     self.playPauseIfPaused()
                 @unknown default: break
                 }
+            }
+        }
+
+        routeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  AVAudioSession.RouteChangeReason(rawValue: raw) == .oldDeviceUnavailable
+            else { return }
+            MainActor.assumeIsolated {
+                guard let self, self.isActive, self.synthesizer.state.isPlaying else { return }
+                Log.event("readaloud", "paused: the headphones or speaker it was playing through went away")
+                self.pauseForOtherAudio()
             }
         }
 
@@ -516,6 +533,7 @@ final class ReadAloud: NSObject, ObservableObject {
         if let lowPowerObserver { NotificationCenter.default.removeObserver(lowPowerObserver) }
         if let memoryObserver { NotificationCenter.default.removeObserver(memoryObserver) }
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
     }
 
     func stop() {

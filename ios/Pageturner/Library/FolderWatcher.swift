@@ -108,8 +108,11 @@ final class FolderWatcher {
         guard !ready.isEmpty else { return }
 
         await library.importFiles(ready.map { $0.url })
-        // marked seen even when an import failed, so one bad file isn't retried forever
-        seen.append(contentsOf: ready.map { $0.key })
+        // marked seen even when an import failed, so one bad file isn't retried forever. Only files still in the
+        // folder are remembered: a list that kept every renamed or re-saved file's old key filled up, and past the
+        // cap the oldest keys — of files still there — fell off, came back as "new" and failed as duplicates
+        let present = Set(found.map(\.key))
+        seen = seen.filter { present.contains($0) } + ready.map(\.key)
         UserDefaults.standard.set(Array(seen.suffix(seenMax)), forKey: seenKey)
     }
 
