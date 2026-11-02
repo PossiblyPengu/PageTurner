@@ -28,6 +28,11 @@ final class NeuralSynth: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "io.github.possiblypengu.pageturner.neural", qos: .userInitiated)
     private var loaded: (key: String, tts: SherpaOnnxOfflineTtsWrapper)?
+    /// Sentences made with the model now loaded. ONNX Runtime keeps memory it grew for one length of sentence to
+    /// reuse for the next, and over hours of every length that only climbs; a fresh load every so often hands it
+    /// back (the lookahead makes the next sentence while one is said, so the reload is not heard).
+    private var madeWithModel = 0
+    private let reloadEvery = 150
     private var unloadWork: DispatchWorkItem?
 
     /// How long a model stays in memory after it was last used.
@@ -106,6 +111,7 @@ final class NeuralSynth: @unchecked Sendable {
             loaded = nil   // free the old one before the new one is made
             let tts = try load(directory: directory, info: info)
             loaded = (info.key, tts)
+            madeWithModel = 0
         }
         guard let tts = loaded?.tts else { throw Failure.loadFailed }
 
@@ -115,6 +121,13 @@ final class NeuralSynth: @unchecked Sendable {
         let speaker = max(0, min(sid, info.speakers - 1))
         let generated = tts.generate(text: text, sid: speaker, speed: Float(1 / max(info.lengthScale, 0.1)))
         let samples = generated.samples
+        madeWithModel += 1
+        if madeWithModel >= reloadEvery {
+            // dropped now (after this sentence is made); the next sentence loads it afresh
+            loaded = nil
+            madeWithModel = 0
+            Log.event("neural", "voice model reloaded after \(reloadEvery) sentences, to give its memory back")
+        }
         scheduleUnload()
         guard !samples.isEmpty, generated.sampleRate > 0 else { throw Failure.silent }
         return Audio(samples: samples, sampleRate: Double(generated.sampleRate))

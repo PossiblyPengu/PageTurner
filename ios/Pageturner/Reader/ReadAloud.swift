@@ -81,6 +81,8 @@ final class ReadAloud: NSObject, ObservableObject {
     }
 
     @Published private var spoken = Spoken()
+    /// Sentences said since the voice last started — for the memory line in the log.
+    private var sentencesSaid = 0
     /// The sentence a voice has named a word of, and the wait for it to: a voice that never does
     /// (some don't) would leave the first word lit for the whole sentence.
     private var namedAWordIn: Locator?
@@ -234,7 +236,10 @@ final class ReadAloud: NSObject, ObservableObject {
 
         memoryObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
-        ) { _ in NeuralSynth.shared.unload() }
+        ) { _ in
+            MainActor.assumeIsolated { MemoryProbe.log("memory warning during read-aloud") }
+            NeuralSynth.shared.unload()
+        }
 
         // a call or an alarm takes the audio session: iOS cancels the utterance, which
         // AVTTSEngine passes on as finished — hold a real pause instead, then resume
@@ -759,6 +764,9 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             guard case .stopped = synthesizer.state else { return }
             pauseFlash?.cancel()
             isPlaying = false
+            sentencesSaid = 0
+            // stopped behind a locked screen: the app may now be suspended, which is no crash
+            if UIApplication.shared.applicationState == .background { Log.markBackground() }
             lastTickAt = nil
             startProgression = nil
             playedSeconds = 0
@@ -781,6 +789,9 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             isActive = true
             let wasPlaying = isPlaying
             isPlaying = true
+            // narration keeps the app running behind a locked screen: an end there is a crash (or iOS taking the
+            // memory back), not the clean suspension that clears the marker
+            if !wasPlaying { Log.markForeground() }
             noteProgression(utterance.locator)
             // the chapter-end bell rings the first sentence in a different chapter;
             // one that names no chapter (a locator outside the contents) leaves it armed
@@ -808,6 +819,8 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             if utterance.locator != lastNarrated {
                 lastNarrated = utterance.locator
                 onNarrated?(utterance.locator)
+                sentencesSaid += 1
+                MemoryProbe.logIfDue("read-aloud, \(sentencesSaid) sentences this session")
             }
             if onScreen {
                 if scrolls {
@@ -828,6 +841,7 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
             // queued before a newer state — a resume, or a re-pause on another sentence
             guard case let .paused(current) = synthesizer.state, current == utterance else { return }
             pauseFlash?.cancel()
+            if UIApplication.shared.applicationState == .background { Log.markBackground() }
             pauseFlash = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 150_000_000)
                 guard !Task.isCancelled, let self else { return }

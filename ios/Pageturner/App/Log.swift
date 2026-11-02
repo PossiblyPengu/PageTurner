@@ -10,8 +10,9 @@ import OSLog
 /// its own .ips report.
 ///
 /// A `.running` marker names clean exits: it exists whenever the app is in
-/// front and is removed on `.background`. Present at launch means the last
-/// run never reached the background — a crash or a force-close in front.
+/// front, or reading aloud behind a locked screen, and is removed on `.background`
+/// (or when narration there stops). Present at launch means the last run ended
+/// without that — a crash, a force-close, or iOS ending it mid-narration.
 enum Log {
     /// True when the previous run ended in front — crash or force-close.
     private(set) static var lastRunEndedUncleanly = false
@@ -50,7 +51,7 @@ enum Log {
         // the marker is made when a scene comes to the front (markForeground): a
         // background launch for app refresh has no scene and never reaches .background
         if lastRunEndedUncleanly {
-            event("lifecycle", "previous run ended without a background transition — crash or force-close")
+            event("lifecycle", "previous run ended uncleanly — a crash, a force-close, or iOS ending it (often for memory) while reading aloud")
         }
         trapFaults()
         event("lifecycle", "launched \(version)")
