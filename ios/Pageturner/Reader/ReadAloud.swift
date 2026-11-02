@@ -258,15 +258,26 @@ final class ReadAloud: NSObject, ObservableObject {
                     let wasPlaying = self.isPlaying
                     self.pauseForOtherAudio()
                     self.interruptedWhilePlaying = wasPlaying ? Date() : nil
-                    Log.event("readaloud", "interrupted" + (wasPlaying ? " while speaking" : ""))
+                    Log.event("readaloud", "interrupted" + (wasPlaying ? " while speaking" : "") + Self.interruptionDetail(note))
                 case .ended:
                     // a call, Siri or an alarm that is over: carry on, unless it has been so
                     // long that the reader has surely moved on (or they paused meanwhile)
                     defer { self.interruptedWhilePlaying = nil }
-                    guard self.isActive, options.contains(.shouldResume),
-                          let at = self.interruptedWhilePlaying,
-                          Date().timeIntervalSince(at) < 300 else { return }
-                    Log.event("readaloud", "interruption over — resuming")
+                    guard self.isActive, let at = self.interruptedWhilePlaying else {
+                        Log.event("readaloud", "interruption over — not resuming: it wasn't speaking")
+                        return
+                    }
+                    let after = Int(Date().timeIntervalSince(at))
+                    guard options.contains(.shouldResume) else {
+                        // iOS's call (music started elsewhere, say): the reader resumes by hand
+                        Log.event("readaloud", "interruption over after \(after)s — not resuming: iOS didn't say to")
+                        return
+                    }
+                    guard after < 300 else {
+                        Log.event("readaloud", "interruption over after \(after)s — not resuming: too long")
+                        return
+                    }
+                    Log.event("readaloud", "interruption over after \(after)s — resuming")
                     self.playPause()
                 @unknown default: break
                 }
@@ -616,6 +627,26 @@ final class ReadAloud: NSObject, ObservableObject {
     }
 
     var availableVoices: [TTSVoice] { synthesizer.availableVoices }
+
+    /// What the log should say about an interruption's start: iOS's reason, and whether other audio is playing — the
+    /// difference between a call, a navigation prompt and another app taking over, when narration stops by itself.
+    private static func interruptionDetail(_ note: Notification) -> String {
+        var parts: [String] = []
+        if let raw = note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt,
+           let reason = AVAudioSession.InterruptionReason(rawValue: raw)
+        {
+            switch reason {
+            case .default: parts.append("reason: another app or a call")
+            case .builtInMicMuted: parts.append("reason: microphone muted")
+            case .routeDisconnected: parts.append("reason: audio route disconnected")
+            default: parts.append("reason \(raw)")
+            }
+        }
+        let session = AVAudioSession.sharedInstance()
+        if session.isOtherAudioPlaying { parts.append("other audio playing") }
+        if let output = session.currentRoute.outputs.first { parts.append("to \(output.portType.rawValue)") }
+        return parts.isEmpty ? "" : " (" + parts.joined(separator: ", ") + ")"
+    }
 
     func setVoice(_ identifier: String?) {
         synthesizer.config.voiceIdentifier = identifier

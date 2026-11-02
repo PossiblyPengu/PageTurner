@@ -52,6 +52,9 @@ enum Log {
         // background launch for app refresh has no scene and never reaches .background
         if lastRunEndedUncleanly {
             event("lifecycle", "previous run ended uncleanly — a crash, a force-close, or iOS ending it (often for memory) while reading aloud")
+            // read once: left in place, every background launch after it (which never reaches .background to clear
+            // it) reported the same end again
+            try? fm.removeItem(at: markerURL)
         }
         trapFaults()
         event("lifecycle", "launched \(version)")

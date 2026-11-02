@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 /// Downloading Drive files straight into the library — what cannot be a library entry before it is opened (a zip, a
 /// text file) is brought in this way. Each file is downloaded into a fresh temporary folder (mirroring the Drive's
@@ -102,7 +103,16 @@ final class DriveSync {
         guard isWatching, GoogleAuth.shared.signedIn, !LowPower.on,
               Date().timeIntervalSince1970 - defaults.double(forKey: lastKey) >= gap
         else { return }
-        await scan(library: library, viaChanges: true)
+        // run apart from the launch work that asked for it, which is cancelled the moment the app leaves the screen —
+        // so a check that has started finishes, with the half-minute iOS gives an app on its way out
+        let work = Task { await scan(library: library, viaChanges: true) }
+        let grant = BackgroundGrant()
+        grant.id = UIApplication.shared.beginBackgroundTask(withName: "drive-folder-check") {
+            work.cancel()
+            grant.end()
+        }
+        await work.value
+        grant.end()
     }
 
     /// Add anything new in the folder to the library. Nothing is downloaded: a book arrives as an entry that can be
@@ -157,6 +167,11 @@ final class DriveSync {
                 text += " \(left.count) zip or text file\(left.count == 1 ? " was" : "s were") left in Drive: add \(left.count == 1 ? "it" : "them") from Browse Google Drive."
             }
             report(text)
+        } catch is CancellationError {
+            // cut short (the app was left, or iOS took the time back): nothing failed, and the next look picks it up
+            Log.event("drive", "folder check cut short — it runs again next time")
+        } catch let error as URLError where error.code == .cancelled {
+            Log.event("drive", "folder check cut short — it runs again next time")
         } catch {
             report("Couldn’t check Google Drive: \((error as? DriveError)?.message ?? error.localizedDescription)")
             Log.error("drive", "sync failed: \(error.localizedDescription)")
@@ -184,5 +199,16 @@ enum DriveBackup {
         for old in sameDay { try? await client.delete(old.id) }
         let all = (try? await client.list(query: GoogleDrive.children(of: folder.id))) ?? []
         for stale in GoogleDrive.staleBackups(all, keep: keep) { try? await client.delete(stale.id) }
+    }
+}
+
+/// The time iOS lends an app finishing something as it leaves the screen — handed back once, whoever finishes first.
+private final class BackgroundGrant {
+    var id = UIBackgroundTaskIdentifier.invalid
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }
