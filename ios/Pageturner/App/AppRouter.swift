@@ -59,6 +59,12 @@ final class AppRouter {
     }
 
     /// Close whatever sheet is up, so a request from outside lands on screen.
+    /// Something is up over the tabs that a book opening by itself would close (an edit, Settings, the chat…).
+    var presenting: Bool {
+        detail != nil || editing != nil || shelfTarget != nil || showSettings || showLink || showImporter || showDrive
+            || showChat || resumePrompt != nil
+    }
+
     func dismissPresentations() {
         detail = nil
         editing = nil
@@ -147,6 +153,16 @@ final class AppRouter {
         ReadAloudHost.shared.stop(bookID: book.id)
         if reading?.id == book.id { reading = nil }
         library.removeDownload(book.id)
+    }
+
+    /// A book is about to leave the library (removed, or merged into another copy): what is playing, read aloud
+    /// or open from it is put away first.
+    func putAway(_ id: UUID) {
+        if PlaybackCoordinator.shared.bookID == id { PlaybackCoordinator.shared.stop() }
+        ReadAloudHost.shared.stop(bookID: id)
+        if reading?.id == id { reading = nil }
+        if detail?.id == id { detail = nil }
+        if editing?.id == id { editing = nil }
     }
 
     /// "Mark as Finished" — records it and tells BookMaster; when the "clear files of

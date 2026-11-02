@@ -371,7 +371,9 @@ enum TextBook {
         var text = normalize(raw)
         if text.hasPrefix("---\n"),
            let end = text.range(of: "\n---\n", range: text.index(text.startIndex, offsetBy: 3)..<text.endIndex) {
-            let front = String(text[text.index(text.startIndex, offsetBy: 4)..<end.lowerBound])
+            // "---\n---\n" (front matter with nothing in it) ends where the opening line does
+            let start = text.index(text.startIndex, offsetBy: 4)
+            let front = end.lowerBound > start ? String(text[start..<end.lowerBound]) : ""
             for line in front.split(separator: "\n") {
                 guard let colon = line.firstIndex(of: ":") else { continue }
                 let key = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
@@ -635,8 +637,9 @@ enum TextBook {
         // split at the h1/h2 markers the writer left
         let pieces = xhtml.components(separatedBy: XHTMLWriter.marker)
         var sections: [Section] = []
+        let blank = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: XHTMLWriter.blockEnd))
         for (n, piece) in pieces.enumerated() {
-            let body = piece.trimmingCharacters(in: .whitespacesAndNewlines)
+            let body = piece.trimmingCharacters(in: blank)
             guard !body.isEmpty else { continue }
             var title = ""
             if n > 0, let m = firstMatch(rx(#"^<h[12]>(.*?)</h[12]>"#, dotAll), in: body), let h = group(m, 1, in: body) {
@@ -645,17 +648,21 @@ enum TextBook {
             sections.append(Section(title: title.isEmpty ? (sections.isEmpty ? "Beginning" : "") : title, body: body))
         }
         if sections.count == 1 {
-            // no h1/h2 to cut at: keep it whole, or part-split when very long
-            let blocks = sections[0].body.components(separatedBy: "\n")
+            // no h1/h2 to cut at: keep it whole, or part-split when very long — between top-level blocks only (a
+            // cut at a line break could land inside a <pre>, and the writer puts no line breaks anywhere else)
+            let blocks = sections[0].body.components(separatedBy: XHTMLWriter.blockEnd)
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             return (chunk(blocks), meta)
         }
-        return (sections, meta)
+        return (sections.map { Section(title: $0.title, body: $0.body.replacingOccurrences(of: XHTMLWriter.blockEnd, with: "\n")) }, meta)
     }
 
     /// Rebuilds loose HTML as well-formed XHTML: only a whitelist of tags is kept,
     /// text is unescaped then re-escaped, and every tag it opens it closes.
     private struct XHTMLWriter {
         static let marker = "\u{E100}"
+        /// Written after each top-level block closes: where a long chapter may be cut into parts.
+        static let blockEnd = "\u{E103}"
 
         private var out = ""
         private var stack: [String] = []
@@ -687,6 +694,7 @@ enum TextBook {
             guard let top = stack.popLast() else { return }
             if !top.hasPrefix("~") { emit("</\(top)>") }
             if top == "pre" { inPre = false }
+            if stack.isEmpty { emit(Self.blockEnd) }
         }
 
         private mutating func closeUntil(_ tag: String) {

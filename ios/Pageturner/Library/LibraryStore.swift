@@ -519,6 +519,9 @@ final class LibraryStore: ObservableObject {
     /// access while the folder's own scope is held.
     private var scopedRoots: [URL] = []
 
+    /// Calls whose 800 ms wait a later call took over, each let go when the batch holding its files is done.
+    private var importWaiters: [(url: URL, done: CheckedContinuation<Void, Never>)] = []
+
     func importFiles(_ urls: [URL]) async {
         pendingURLs.append(contentsOf: urls)
         importing = true
@@ -526,7 +529,16 @@ final class LibraryStore: ObservableObject {
         let sleeper = Task<Void, Never> { _ = try? await Task.sleep(for: .milliseconds(800)) }
         debounce = sleeper
         await sleeper.value
-        guard !sleeper.isCancelled else { return }
+        guard !sleeper.isCancelled else {
+            // a later call took over the wait, and its batch takes these files too. Callers act on the return — a
+            // watched folder's access is closed and its files marked seen, a downloaded temp file is deleted — so
+            // this waits for that batch instead of returning before a single file is copied.
+            guard let first = urls.first else { return }
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                importWaiters.append((first, done))
+            }
+            return
+        }
 
         let previous = running
         activeBatches += 1
@@ -541,17 +553,22 @@ final class LibraryStore: ObservableObject {
             guard !batch.isEmpty else { return }
             var failures: [String] = []
             await importBatch(batch, failures: &failures, inArchive: false)
-            // files delivered to Documents/Inbox (AirDrop, Mail, "Open in") are copies the app made its own of
+            // files delivered to Documents/Inbox (AirDrop, Mail, "Open in") are copies the app made its own of. They
+            // go whether or not they imported: nothing ever tries one again (it is shared again from where it came),
+            // and keeping every copy of a batch with one failure in it — a book already in the library — kept them
+            // all, for good
             let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let inbox = docs.appendingPathComponent("Inbox").resolvingSymlinksInPath().path + "/"
-            // an inbox copy that failed to import stays, so it can be tried again
-            if failures.isEmpty {
-                for url in batch where url.resolvingSymlinksInPath().path.hasPrefix(inbox) {
-                    try? fm.removeItem(at: url)
-                }
+            for url in batch where url.resolvingSymlinksInPath().path.hasPrefix(inbox) {
+                try? fm.removeItem(at: url)
             }
             for root in scopedRoots { root.stopAccessingSecurityScopedResource() }
             scopedRoots = []
+            // the calls whose wait this batch took over are done too
+            let taken = Set(batch)
+            let finished = importWaiters.filter { taken.contains($0.url) }
+            importWaiters.removeAll { taken.contains($0.url) }
+            for waiter in finished { waiter.done.resume() }
             if !failures.isEmpty {
                 lastError = failures.joined(separator: "\n")
                 for failure in failures { Log.error("import", failure) }
@@ -1028,8 +1045,12 @@ final class LibraryStore: ObservableObject {
     func addFromDrive(_ plans: [DriveBooks.Plan]) -> [Book] {
         let now = Date()
         var added: [Book] = []
+        // what each book on the phone weighs, read off the disk once — not once per Drive book
+        let sizes = Dictionary(books.filter { !inCloud.contains($0.id) }.map { book in
+            (book.id, fileURLs(for: book).reduce(Int64(0)) { $0 + (Self.fileSize($1).map(Int64.init) ?? 0) })
+        }, uniquingKeysWith: { first, _ in first })
         for (n, plan) in plans.enumerated() where !plan.source.parts.isEmpty {
-            if let have = existing(for: plan) {
+            if let have = existing(for: plan, sizes: sizes) {
                 if have.exact { link(have.book.id, to: plan.source) }
                 continue
             }
@@ -1052,26 +1073,30 @@ final class LibraryStore: ObservableObject {
     }
 
     /// The book the library already has for this one, however it got here (the Files app, an earlier Drive download): the
-    /// same size of file, or the same title — taking a name like "David Wong - John Dies at the End" as the title alone,
-    /// too. `exact`: the files are the very same size, so the copy on the phone *is* the Drive file.
-    func existing(for plan: DriveBooks.Plan) -> (book: Book, exact: Bool)? {
+    /// same size of file, or the same name — a name like "David Wong - John Dies at the End" matching that title by that
+    /// author. `exact`: the files are the very same size, so the copy on the phone *is* the Drive file. `sizes`: what each
+    /// book on the phone weighs (`addFromDrive` reads them once).
+    func existing(for plan: DriveBooks.Plan, sizes: [UUID: Int64]) -> (book: Book, exact: Bool)? {
         let size = plan.source.bytes
-        var titles: Set<String> = [Self.fold(plan.title)]
+        let whole = Self.fold(plan.title)
         let (left, right) = MetadataLookup.splitName(plan.title)
-        if !right.isEmpty { titles.insert(Self.fold(left)); titles.insert(Self.fold(right)) }
-        titles.remove("")
+        // the same name; or "Title - Author" either way round, with that author. A part of a name alone is not the
+        // book: "Mistborn - The Well of Ascension" was taken for a "Mistborn" already there, and silently not added
+        func sameName(_ book: Book) -> Bool {
+            let title = Self.fold(book.title)
+            guard !title.isEmpty else { return false }
+            if title == whole { return true }
+            guard !right.isEmpty, !book.author.isEmpty else { return false }
+            return (title == Self.fold(left) && BMShelf.authorsAgree(right, book.author))
+                || (title == Self.fold(right) && BMShelf.authorsAgree(left, book.author))
+        }
         var byTitle: Book?
         for book in books where book.isAudio == plan.isAudio {
-            if size > 0, !inCloud.contains(book.id) {
-                let have = fileURLs(for: book).reduce(Int64(0)) { $0 + (Self.fileSize($1).map(Int64.init) ?? 0) }
-                if have == size { return (book, true) }
-            }
-            if byTitle == nil, titles.contains(Self.fold(book.title)) { byTitle = book }
+            if size > 0, let have = sizes[book.id], have == size { return (book, true) }
+            if byTitle == nil, sameName(book) { byTitle = book }
         }
         return byTitle.map { ($0, false) }
     }
-
-    func holds(_ plan: DriveBooks.Plan) -> Bool { existing(for: plan) != nil }
 
     /// A book already in the library turns out to be this Drive file: it keeps its place and notes, and learns where it
     /// came from — so "Remove Download" can free its space and the Drive can give it back.
@@ -1092,6 +1117,9 @@ final class LibraryStore: ObservableObject {
         guard fileURLs(for: book).allSatisfy({ fm.fileExists(atPath: $0.path) }) else { return }
         inCloud.remove(id)
         missing.remove(id)
+        // downloaded again after "Remove Download": the details were read the first time, and the cover may be one
+        // the reader has picked since — the file's own would be written over it
+        guard !source.finished else { return }
         var fresh = book
         if book.isAudio {
             let tags = await audioTags(at: fileURL(for: book))
@@ -1334,7 +1362,9 @@ final class LibraryStore: ObservableObject {
     /// twice. The one to keep comes first: the furthest along, then the most marked up.
     func duplicateGroups() -> [[Book]] {
         var groups: [String: [Book]] = [:]
-        for book in books {
+        // a PDF's text version shares its title and author on purpose: it is not a second copy (merging the two
+        // deleted one, and put the PDF's highlights where the text version can't place them)
+        for book in books where book.textVersionOf == nil {
             let title = Self.fold(book.title)
             guard !title.isEmpty else { continue }
             groups["\(title)|\(Self.fold(book.author))|\(book.isAudio ? "a" : "b")", default: []].append(book)

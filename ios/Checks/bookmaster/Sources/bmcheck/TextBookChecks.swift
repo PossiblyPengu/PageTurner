@@ -213,6 +213,23 @@ func runTextBook() {
         check("HTML: entities become characters", raw.contains("—") && raw.contains("©"))
     } else { check("HTML converts", false) }
 
+    // a long page with no h1/h2 is cut into parts between its blocks — never inside a <pre>'s own line breaks
+    let longHTML = "<html><body>" + (0..<500).map { n in
+        n % 50 == 0 ? "<pre>line one \(n)\nline two\nline three</pre>"
+                    : "<p>Paragraph \(n) of a long page with no headings at all, long enough that the whole book is many parts in the end. \(String(repeating: "word ", count: 30))</p>"
+    }.joined() + "</body></html>"
+    if let c = convert(longHTML, .html) {
+        let raw = String(decoding: c.epub, as: UTF8.self)
+        check("HTML without headings, very long: cut into parts", c.chapterCount >= 3, "\(c.chapterCount)")
+        let bodies = raw.components(separatedBy: "<body>").dropFirst().compactMap { $0.components(separatedBy: "</body>").first }
+        check("HTML parts are each well-formed (no cut inside <pre>)", !bodies.isEmpty && bodies.allSatisfy { wellFormed($0) }, "\(bodies.count) bodies")
+        check("HTML parts carry no block marks", !raw.contains("\u{E103}"))
+    } else { check("long HTML converts", false) }
+
+    // front matter with nothing in it used to cut a range backwards and crash
+    let emptyFront = "---\n---\n# Title\n\nSome text here, enough to be a book of its own.\n"
+    check("Markdown with empty front matter converts", convert(emptyFront, .markdown) != nil)
+
     section("Text books: the EPUB itself")
     var samples: [(String, TextBook.Converted)] = []
     for (name, text, f) in [("plain", alice, TextBook.Format.plain), ("gutenberg", gutenberg, .plain), ("markdown", md, .markdown), ("html", html, .html)] {

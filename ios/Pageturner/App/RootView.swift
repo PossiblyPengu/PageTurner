@@ -85,8 +85,11 @@ struct RootView: View {
 
     private func handle(_ request: IntentRouter.Request) {
         if case let .openDownloaded(id) = request {
-            // a book being read is never swapped out for one that has just come down
-            guard !router.readerOpen, let book = library.books.first(where: { $0.id == id }) else { return }
+            // a book open in the Reading tab (on screen or not) is never swapped out for one that has just come down,
+            // and nothing the reader is in the middle of is closed for it — an edit, Settings, the chat, the Drive
+            // browser; only the book's own page, waiting on the download, gives way
+            guard router.reading == nil, router.detail?.id == id || !router.presenting,
+                  let book = library.books.first(where: { $0.id == id }) else { return }
             router.dismissPresentations()
             router.open(book, library: library)
             return
@@ -173,7 +176,9 @@ struct RootView: View {
         let book = library.books.first { $0.id == shown.id } ?? shown
         let cloud = downloads.badge(for: book.id, inCloud: library.inCloud.contains(book.id))
         return BookDetailSheet(
-            book: book, cover: library.cover(for: book),
+            // the cached image, not a fresh decode of the full-size file on every library change and download tick —
+            // each a new image, which re-ran the page's colour sampling and cover animation
+            book: book, cover: library.coverThumbnail(for: book, maxPixels: 1200),
             onOpen: {
                 router.detail = nil
                 // "Read again" starts from the beginning, not the last page
@@ -273,9 +278,20 @@ struct RootView: View {
     private func editSheet(_ book: Book) -> some View {
         BookEditSheet(book: book) { updated in
             library.update(updated)
-            // a lookup that named a BookMaster shelf row pins the book to it
-            if let pin = updated.bookmasterId, pin != book.bookmasterId {
-                library.updateBookMaster(book.id) { $0.bookmasterId = pin }
+            // a lookup that named a BookMaster shelf row pins the book to it; a match for a different book unpins it —
+            // `update` keeps the stored link, so the edit is applied here, against what the sheet opened with (a pin
+            // a push reply made while the sheet was open is not undone by a sheet that never touched it)
+            if updated.bookmasterId != book.bookmasterId {
+                library.updateBookMaster(book.id) {
+                    $0.bookmasterId = updated.bookmasterId
+                    if updated.bookmasterId == nil {
+                        // the shelf row's status, rating and place were the other book's
+                        $0.bmStatus = nil
+                        $0.bmRating = nil
+                        $0.bmRemotePercent = nil
+                        $0.bmUpNext = nil
+                    }
+                }
             }
             router.editing = nil
         }
@@ -321,11 +337,7 @@ struct RootView: View {
             ) { books in
                 Button(books.count == 1 ? "Remove from Library" : "Remove \(books.count) Books", role: .destructive) {
                     for book in books {
-                        if playback.bookID == book.id { playback.stop() }
-                        ReadAloudHost.shared.stop(bookID: book.id)
-                        if router.reading?.id == book.id { router.reading = nil }
-                        if router.detail?.id == book.id { router.detail = nil }
-                        if router.editing?.id == book.id { router.editing = nil }
+                        router.putAway(book.id)
                         library.delete(book)
                     }
                 }

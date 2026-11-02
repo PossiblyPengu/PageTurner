@@ -4,6 +4,7 @@ import SwiftUI
 struct DuplicatesSheet: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppRouter.self) private var router
     @State private var groups: [[Book]] = []
     @State private var confirming: [Book]?
 
@@ -49,6 +50,8 @@ struct DuplicatesSheet: View {
                 titleVisibility: .visible, presenting: confirming
             ) { group in
                 Button("Merge, keep the first", role: .destructive) {
+                    // the copies merged away are put away like any removed book (a voice, the player, an open reader)
+                    for other in group.dropFirst() { router.putAway(other.id) }
                     library.merge(keep: group[0].id, removing: group.dropFirst().map(\.id))
                     groups = library.duplicateGroups()
                 }

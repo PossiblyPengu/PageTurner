@@ -187,13 +187,24 @@ enum SpeechText {
 
     /// A word as it compares: lower case, ligatures opened, soft hyphens and apostrophes gone.
     private static func folded(_ word: Substring) -> String {
-        word.lowercased()
+        let plain = word.lowercased()
             .replacingOccurrences(of: "\u{00AD}", with: "")
             .replacingOccurrences(of: "ﬀ", with: "ff").replacingOccurrences(of: "ﬁ", with: "fi")
             .replacingOccurrences(of: "ﬂ", with: "fl").replacingOccurrences(of: "ﬃ", with: "ffi")
             .replacingOccurrences(of: "ﬄ", with: "ffl")
             .replacingOccurrences(of: "'", with: "").replacingOccurrences(of: "’", with: "")
+        // a title said in full is the same word as the page's short one: "Mister" marks the "Mr."
+        return titleWords[plain] ?? plain
     }
+
+    /// Spoken title → its short form, for matching words back to the page (both sides fold the same way, so a
+    /// "doctor" written out still matches a "doctor" said).
+    private static let titleWords: [String: String] = [
+        "mister": "mr", "missus": "mrs", "miz": "ms", "doctor": "dr", "professor": "prof",
+        "captain": "capt", "lieutenant": "lt", "colonel": "col", "general": "gen", "sergeant": "sgt",
+        "reverend": "rev", "honorable": "hon", "governor": "gov", "senator": "sen", "president": "pres",
+        "father": "fr", "junior": "jr", "senior": "sr", "number": "no", "numbers": "nos",
+    ]
 
     // MARK: Rules
 
@@ -231,6 +242,32 @@ enum SpeechText {
         (rx(#"\b[vV][sS]\.(?=\s|$)"#), "versus"),
         (rx(#"\b[eE][tT][cC]\.(?=\s*$|\s+\p{Lu})"#), "et cetera."),
         (rx(#"\b[eE][tT][cC]\.(?=\s)"#), "et cetera"),
+        // a title's full stop is not a sentence's: said whole, the voice doesn't stop after "Mr." as if the
+        // sentence had ended (a neural voice pauses for every full stop it is given). Only before a name, where
+        // the short form could be something else ("Dr." a drive, "Gen." a genus).
+        (rx(#"\b(?i:mr)\.(?=\s)"#), "Mister"),
+        (rx(#"\b(?i:mrs)\.(?=\s)"#), "Missus"),
+        (rx(#"\b(?i:ms)\.(?=\s+\p{Lu})"#), "Miz"),
+        (rx(#"\b(?:Dr|DR)\.(?=\s+\p{Lu})"#), "Doctor"),
+        (rx(#"\bProf\.(?=\s+\p{Lu})"#), "Professor"),
+        (rx(#"\bCapt\.(?=\s+\p{Lu})"#), "Captain"),
+        (rx(#"\bLt\.(?=\s+\p{Lu})"#), "Lieutenant"),
+        (rx(#"\bCol\.(?=\s+\p{Lu})"#), "Colonel"),
+        (rx(#"\bGen\.(?=\s+\p{Lu})"#), "General"),
+        (rx(#"\bSgt\.(?=\s+\p{Lu})"#), "Sergeant"),
+        (rx(#"\bRev\.(?=\s+\p{Lu})"#), "Reverend"),
+        (rx(#"\bHon\.(?=\s+\p{Lu})"#), "Honorable"),
+        (rx(#"\bGov\.(?=\s+\p{Lu})"#), "Governor"),
+        (rx(#"\bSen\.(?=\s+\p{Lu})"#), "Senator"),
+        (rx(#"\bPres\.(?=\s+\p{Lu})"#), "President"),
+        (rx(#"\bFr\.(?=\s+\p{Lu})"#), "Father"),
+        // after a name: the full stop stays where it also ends the sentence
+        (rx(#"\bJr\.(?=\s*$)"#), "Junior."),
+        (rx(#"\bJr\.(?=[\s,;:)])"#), "Junior"),
+        (rx(#"\bSr\.(?=\s*$)"#), "Senior."),
+        (rx(#"\bSr\.(?=[\s,;:)])"#), "Senior"),
+        (rx(#"\b(?i:no)\.(?=\s*\d)"#), "number"),
+        (rx(#"\b(?i:nos)\.(?=\s*\d)"#), "numbers"),
         (rx(#"(?<=\d)\s*–\s*(?=\d)"#), " to "),
         // the debris rules above leave their spaces behind — one space again
         (rx(#"[\t\n\v\f ]+"#), " "),

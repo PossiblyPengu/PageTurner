@@ -522,6 +522,10 @@ enum MetadataLookup {
                 return (BMShelf.titlesAgree(left, c.title) && !c.authors.isEmpty && BMShelf.authorsAgree(right, c.authors))
                     || (BMShelf.titlesAgree(right, c.title) && !c.authors.isEmpty && BMShelf.authorsAgree(left, c.authors))
             }
+            // no author to hold a match to (and none in the name): only the ISBN says it is this book — any author
+            // "agrees" with none, so "Notes.pdf" or "It.epub" took the first book of that title's details, unattended
+            // on every Drive add. Those are left for Review.
+            guard !askAuthor.isEmpty else { return false }
             return BMShelf.titlesAgree(askTitle, c.title) && !c.authors.isEmpty && BMShelf.authorsAgree(askAuthor, c.authors)
         }
         // the first source to name the book is enough: the others need not be waited for
