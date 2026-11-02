@@ -417,6 +417,14 @@ final class ReaderModel: ObservableObject {
     /// Readium's slide, the page as it is now leaves over what comes next.
     private func pageIsTurning(frozenAt: Double? = nil) {
         defer { tapOnLeft = false }
+        // a finger's curl still lifting when a tap (or a key) turns the page: its gesture is cut short and never says
+        // whether it landed, and the hold it put on saves would stay — every page after went unsaved. The tap's turn
+        // is where the reader is now.
+        if curling {
+            curling = false
+            curlBefore = nil
+            curlMoved = false
+        }
         if settings.turnHaptic { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         if settings.turnSound { PageTurnSound.shared.play() }
         guard settings.pageTurn != .slide, !(navigator?.presentation.scroll ?? false),

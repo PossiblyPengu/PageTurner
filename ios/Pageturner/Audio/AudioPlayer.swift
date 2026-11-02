@@ -716,7 +716,11 @@ final class AudioPlayer: ObservableObject {
         interruptionObserver = nil
         if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
         routeObserver = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // the session is shared: read-aloud may be speaking through it (the audiobook closed from its strip, or
+        // removed, while the voice goes on) — only an app with nothing else making sound hands it back
+        if AudioFocus.shared.isIdle {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 
     private func savePosition(force: Bool = false) {

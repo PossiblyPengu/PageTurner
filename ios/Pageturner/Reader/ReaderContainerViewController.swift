@@ -359,7 +359,14 @@ final class ReaderContainerViewController: UIViewController {
             if !arming { curlOverlay?.update(origin: grab.origin, touch: moved) }
         case .ended, .cancelled, .failed:
             curlRefused = false
-            guard let overlay = curlOverlay, let grab = curlGrab else { removeCurl(); return }
+            guard let overlay = curlOverlay, let grab = curlGrab else {
+                // a curl that had started moving the navigator (its cover since taken down by a tap's turn) is settled,
+                // or the reader would hold its saves for a turn that never ends
+                let started = curlGrab != nil || armTask != nil
+                removeCurl()
+                if started { Task { await onCurlCancel?() } }
+                return
+            }
             let v = pan.velocity(in: view)
             let touch = curlPendingTouch ?? grab.origin
             let g = PageCurl.Grab(
