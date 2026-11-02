@@ -85,6 +85,19 @@ func runSpeechTextChecks() {
     check("a double hyphen between words goes",
           SpeechText.spoken("it was--she said--true") == "it was she said true")
 
+    section("Read-aloud titles")
+    check("Mr. and Mrs. are said whole, so the voice doesn't stop after them",
+          SpeechText.spoken("Mr. and Mrs. Bennet came.") == "Mister and Missus Bennet came.",
+          SpeechText.spoken("Mr. and Mrs. Bennet came."))
+    check("Dr. before a name is Doctor", SpeechText.spoken("Ask Dr. Morgan.") == "Ask Doctor Morgan.")
+    check("Dr. that is not before a name is left", SpeechText.spoken("He lived on Elm Dr. and paid.") == "He lived on Elm Dr. and paid.")
+    check("ranks before a name", SpeechText.spoken("Capt. Hook met Col. Brandon.") == "Captain Hook met Colonel Brandon.")
+    check("Jr. ending a sentence keeps its full stop", SpeechText.spoken("That was John Smith Jr.") == "That was John Smith Junior.")
+    check("Jr. mid-sentence", SpeechText.spoken("John Smith Jr. arrived.") == "John Smith Junior arrived.")
+    check("No. before a number", SpeechText.spoken("Room No. 9 was empty.") == "Room number 9 was empty.")
+    check("no. that is not a number is left", SpeechText.spoken("He said no. Then left.") == "He said no. Then left.")
+    check("MR. in capitals", SpeechText.spoken("MR. JONES") == "Mister JONES")
+
     section("Read-aloud word ranges back onto the page")
     /// The word `word` as the voice reports it in the cleaned text, found again in `original`.
     func backOnPage(_ original: String, _ word: String) -> String? {
@@ -92,6 +105,10 @@ func runSpeechTextChecks() {
         guard let r = spoken.range(of: word) else { return "<\(word) not in spoken: \(spoken)>" }
         return SpeechText.originalRange(of: r, spoken: spoken, original: original).map { String(original[$0]) }
     }
+    check("a title said in full is marked on its short form",
+          backOnPage("Then Mr. Darcy bowed.", "Mister") == "Mr", backOnPage("Then Mr. Darcy bowed.", "Mister") ?? "nil")
+    check("the name after a spelled-out title is still found",
+          backOnPage("Then Mrs. Bennet sighed.", "Bennet") == "Bennet")
     check("unchanged text maps onto itself",
           backOnPage("Hello there, friend.", "there") == "there")
     check("after a soft hyphen the word is still found",
