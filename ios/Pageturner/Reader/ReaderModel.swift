@@ -1385,7 +1385,9 @@ final class ReaderModel: ObservableObject {
         let moved = span * 100 >= 0.5
         // the local log keeps any real sitting — time spent, even where it hardly moved the page
         if moved || minutes >= 2 {
-            ReadingLog.shared.record(book: book, minutes: minutes, from: max(end - span, 0), to: end, audio: false)
+            // stamped when the reading stopped, not now: a sitting closed by the next morning's page turn
+            // (`closeIdleSitting`) belongs to the night it was read
+            ReadingLog.shared.record(book: book, minutes: minutes, from: max(end - span, 0), to: end, audio: false, at: endedAt)
         }
         let ref = book.bookMasterRef
         Task {
@@ -1400,7 +1402,7 @@ final class ReaderModel: ObservableObject {
         Task {
             await BookMaster.shared.syncSession(
                 ref: ref, percentStart: max(reported - span, 0), percentEnd: reported,
-                minutes: minutes, at: Date())
+                minutes: minutes, at: endedAt)
         }
     }
 

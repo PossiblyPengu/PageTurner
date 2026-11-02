@@ -143,7 +143,6 @@ final class GoogleAuth {
         return try await task.value
     }
 
-    /// The token was refused: ask for a new one next time.
     /// A token Drive refused. Only that one is dropped: several calls refused together must not throw away the fresh
     /// token the first of them has already fetched.
     func discardAccessToken(_ refused: String? = nil) {

@@ -142,8 +142,11 @@ struct PageturnerApp: App {
                     await Notifier.shared.refresh(notify: false)
                     SpotlightIndexer.shared.libraryChanged(library)
                     QuickActions.update(library)
-                    // last: a backup of a big library takes a while, and nothing above waits on it
-                    await AutoBackup.shared.runIfDue(library: library)
+                    // last: a backup of a big library takes a while, and nothing above waits on it. Its own task, not
+                    // this one: this one is cancelled the moment the app leaves the screen, which cut every backup to
+                    // Drive off mid-upload; on its own it carries on with the time iOS lends it (`BackupTimeGrant`),
+                    // and `running` keeps a second one from starting on the next return
+                    Task { await AutoBackup.shared.runIfDue(library: library) }
                 }
         }
         // iOS's own background refresh (a scene modifier): look for new
