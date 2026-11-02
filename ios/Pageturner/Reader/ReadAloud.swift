@@ -36,7 +36,7 @@ final class SpeechTuning: AVTTSEngineDelegate {
     }
 }
 
-/// Read-aloud on Readium's PublicationSpeechSynthesizer and the system voices.
+/// Read-aloud on `SpeechSynthesizer` (Readium's play loop, kept to the main thread) and the system or neural voices.
 /// Speech runs through AVSpeechSynthesizer on a .playback audio session, so it
 /// keeps going with the screen locked and shows on the lock screen.
 @MainActor
@@ -52,7 +52,7 @@ final class ReadAloud: NSObject, ObservableObject {
 
     private let publication: Publication
     private weak var navigator: VisualNavigator?
-    private let synthesizer: PublicationSpeechSynthesizer
+    private let synthesizer: SpeechSynthesizer
     private let tuning: SpeechTuning
     private let neural: NeuralTTSEngine
     private let composite: CompositeTTSEngine
@@ -165,7 +165,7 @@ final class ReadAloud: NSObject, ObservableObject {
     private var lastNarrated: Locator?
 
     static func canSpeak(_ publication: Publication) -> Bool {
-        PublicationSpeechSynthesizer.canSpeak(publication: publication)
+        SpeechSynthesizer.canSpeak(publication: publication)
     }
 
     init?(publication: Publication, navigator: VisualNavigator, settings: ReaderSettings,
@@ -180,15 +180,14 @@ final class ReadAloud: NSObject, ObservableObject {
         // Low Power Mode drops the per-word work entirely: no word schedule,
         // no 30Hz playhead report, no mark repainted for every word
         neural.reportsWords = settings.highlights.needsWords && !LowPower.on
-        // Readium's `engine` is a lazy var — the factory only runs at the first sentence,
-        // so the engine is made up front and the factory hands the same one back
         let composite = CompositeTTSEngine(system: SystemTTSEngine(tuning: tuning), neural: neural)
-        guard let synthesizer = PublicationSpeechSynthesizer(
+        // the play loop on the main thread: Readium's ran it on a background one, racing read-aloud's reads of its state
+        guard SpeechSynthesizer.canSpeak(publication: publication) else { return nil }
+        let synthesizer = SpeechSynthesizer(
             publication: publication,
             config: .init(voiceIdentifier: settings.voiceIdentifier),
-            engineFactory: { composite },
-            tokenizerFactory: makeReadingTokenizer
-        ) else { return nil }
+            engine: composite,
+            tokenizerFactory: makeReadingTokenizer)
 
         self.publication = publication
         self.navigator = navigator
@@ -686,7 +685,7 @@ final class ReadAloud: NSObject, ObservableObject {
     }
 
     /// Where the first word of a sentence is on the page: what is lit until the voice names a word.
-    private func firstWord(of utterance: PublicationSpeechSynthesizer.Utterance) -> Locator? {
+    private func firstWord(of utterance: SpeechSynthesizer.Utterance) -> Locator? {
         guard let range = SpokenWords.words(in: utterance.text).first?.range else { return nil }
         return utterance.locator.copy(text: { text in
             guard let highlight = text.highlight, highlight.startIndex <= range.lowerBound, highlight.endIndex >= range.upperBound else { return }
@@ -750,10 +749,10 @@ final class ReadAloud: NSObject, ObservableObject {
     }
 }
 
-extension ReadAloud: PublicationSpeechSynthesizerDelegate {
+extension ReadAloud: SpeechSynthesizerDelegate {
     func publicationSpeechSynthesizer(
-        _ synthesizer: PublicationSpeechSynthesizer,
-        stateDidChange state: PublicationSpeechSynthesizer.State
+        _ synthesizer: SpeechSynthesizer,
+        stateDidChange state: SpeechSynthesizer.State
     ) {
         // Readium hands each state change out on a task of its own: one queued before a
         // pause's cancel can surface after a newer state — a ghost report for a sentence
@@ -858,9 +857,9 @@ extension ReadAloud: PublicationSpeechSynthesizerDelegate {
     }
 
     func publicationSpeechSynthesizer(
-        _ synthesizer: PublicationSpeechSynthesizer,
-        utterance: PublicationSpeechSynthesizer.Utterance,
-        didFailWithError error: PublicationSpeechSynthesizer.Error
+        _ synthesizer: SpeechSynthesizer,
+        utterance: SpeechSynthesizer.Utterance,
+        didFailWithError error: SpeechSynthesizer.Error
     ) {
         // A sentence the engine couldn't speak (e.g. no voice for its
         // language). Carry on — but if everything fails (a missing/broken

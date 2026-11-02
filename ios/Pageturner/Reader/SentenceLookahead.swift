@@ -34,13 +34,13 @@ final class SentenceLookahead {
 
     /// The sentence that follows `current`, or nil at the end of the book (or when this is busy answering
     /// another question — the caller just goes without).
-    func sentence(after current: PublicationSpeechSynthesizer.Utterance) async -> Sentence? {
+    func sentence(after current: SpeechSynthesizer.Utterance) async -> Sentence? {
         await sentences(after: current, count: 1).first
     }
 
     /// The `count` sentences that follow `current`, in order — fewer at the book's end, none
     /// there (or while this is busy answering another question).
-    func sentences(after current: PublicationSpeechSynthesizer.Utterance, count: Int) async -> [Sentence] {
+    func sentences(after current: SpeechSynthesizer.Utterance, count: Int) async -> [Sentence] {
         guard !busy, count > 0 else { return [] }
         busy = true
         defer { busy = false }
@@ -86,7 +86,7 @@ final class SentenceLookahead {
 
     // MARK: Walking the book
 
-    private func restart(at current: PublicationSpeechSynthesizer.Utterance) async -> Bool {
+    private func restart(at current: SpeechSynthesizer.Utterance) async -> Bool {
         paragraph = []
         following = nil
         iterator = publication.content(from: current.locator)?.iterator()
@@ -136,14 +136,14 @@ final class SentenceLookahead {
     }
 
     /// Where `utterance` is among `sentences`: the same place in the book (`exact`), or the same words.
-    private static func index(of utterance: PublicationSpeechSynthesizer.Utterance, in sentences: [Sentence], exact: Bool) -> Int? {
+    private static func index(of utterance: SpeechSynthesizer.Utterance, in sentences: [Sentence], exact: Bool) -> Int? {
         exact
             ? sentences.firstIndex { $0.locator == utterance.locator }
             : sentences.firstIndex { $0.text == utterance.text }
     }
 
     /// The same place in the book, else the same words.
-    private static func index(of utterance: PublicationSpeechSynthesizer.Utterance, in sentences: [Sentence]) -> Int? {
+    private static func index(of utterance: SpeechSynthesizer.Utterance, in sentences: [Sentence]) -> Int? {
         index(of: utterance, in: sentences, exact: true) ?? index(of: utterance, in: sentences, exact: false)
     }
 }

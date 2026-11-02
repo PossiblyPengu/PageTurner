@@ -77,15 +77,25 @@ final class SystemTTSEngine: NSObject, TTSEngine, AVSpeechSynthesizerDelegate {
         _ utterance: TTSUtterance,
         onSpeakRange: @escaping (Range<String.Index>) -> Void
     ) async -> Result<Void, TTSError> {
+        await speak(text: utterance.text, voiceOrLanguage: utterance.voiceOrLanguage, delay: utterance.delay,
+                    onSpeakRange: onSpeakRange)
+    }
+
+    /// The same, from the parts of an utterance — what `SpeechSynthesizer` has (Readium's `TTSUtterance` can't be
+    /// made outside it).
+    @MainActor
+    func speak(
+        text original: String, voiceOrLanguage: Either<TTSVoice, Language>, delay: TimeInterval = 0,
+        onSpeakRange: @escaping (Range<String.Index>) -> Void
+    ) async -> Result<Void, TTSError> {
         guard !Task.isCancelled else { return .success(()) }
-        let original = utterance.text
         let spoken = SpeechText.spoken(original)
         // a segment the voice would say nothing for (a running page number) is dropped
         guard !spoken.isEmpty else { return .success(()) }
 
         let av = AVSpeechUtterance(string: spoken)
-        av.preUtteranceDelay = utterance.delay
-        switch utterance.voiceOrLanguage {
+        av.preUtteranceDelay = delay
+        switch voiceOrLanguage {
         case let .left(voice):
             av.voice = AVSpeechSynthesisVoice(identifier: voice.identifier)
         case let .right(language):

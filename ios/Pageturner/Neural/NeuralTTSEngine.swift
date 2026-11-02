@@ -83,10 +83,18 @@ final class NeuralTTSEngine: TTSEngine {
         _ utterance: TTSUtterance,
         onSpeakRange: @escaping (Range<String.Index>) -> Void
     ) async -> Result<Void, TTSError> {
-        guard case let .left(chosen) = utterance.voiceOrLanguage, let entry = index.entry(forID: chosen.identifier) else {
+        await speak(text: utterance.text, voiceOrLanguage: utterance.voiceOrLanguage, onSpeakRange: onSpeakRange)
+    }
+
+    @MainActor
+    func speak(
+        text: String, voiceOrLanguage: Either<TTSVoice, Language>,
+        onSpeakRange: @escaping (Range<String.Index>) -> Void
+    ) async -> Result<Void, TTSError> {
+        guard case let .left(chosen) = voiceOrLanguage, let entry = index.entry(forID: chosen.identifier) else {
             return .failure(.other(Failure.notInstalled))
         }
-        return await speakText(utterance.text, entry: entry, onSpeakRange: onSpeakRange)
+        return await speakText(text, entry: entry, onSpeakRange: onSpeakRange)
     }
 
     /// Speak `text` in `entry`'s voice — the way a sentence the book resolved to a lesser
@@ -338,19 +346,28 @@ final class CompositeTTSEngine: TTSEngine {
         _ utterance: TTSUtterance,
         onSpeakRange: @escaping (Range<String.Index>) -> Void
     ) async -> Result<Void, TTSError> {
+        await speak(text: utterance.text, voiceOrLanguage: utterance.voiceOrLanguage, onSpeakRange: onSpeakRange)
+    }
+
+    /// A sentence from its parts — what `SpeechSynthesizer` speaks with.
+    @MainActor
+    func speak(
+        text: String, voiceOrLanguage: Either<TTSVoice, Language>,
+        onSpeakRange: @escaping (Range<String.Index>) -> Void
+    ) async -> Result<Void, TTSError> {
         // a play task parked between sentences outlives the cancel pause/stop sent it — without
         // this it would still start the engine below: a sentence nobody can stop any more
         guard !Task.isCancelled else { return .success(()) }
-        let spoken = SpeechText.spoken(utterance.text)
+        let spoken = SpeechText.spoken(text)
         // a segment the voice would say nothing for (a running page number) is dropped
         guard !spoken.isEmpty else { return .success(()) }
-        if case let .left(voice) = utterance.voiceOrLanguage {
+        if case let .left(voice) = voiceOrLanguage {
             if NeuralVoice.key(fromID: voice.identifier) != nil {
-                return await neural.speak(utterance, onSpeakRange: onSpeakRange)
+                return await neural.speak(text: text, voiceOrLanguage: voiceOrLanguage, onSpeakRange: onSpeakRange)
             }
             // Automatic with a neural voice installed for this language: it reads instead
             if preferNeural, let entry = neural.preferredEntry(forBaseLanguage: SpeechVoices.baseLanguage(voice.language.code.bcp47)) {
-                return await neural.speakText(utterance.text, entry: entry, onSpeakRange: onSpeakRange)
+                return await neural.speakText(text, entry: entry, onSpeakRange: onSpeakRange)
             }
         }
         // iOS can "finish" a sentence at once without a sound (a voice that is listed but not
@@ -361,7 +378,7 @@ final class CompositeTTSEngine: TTSEngine {
         var spoke = false
         // the original text goes in unchanged — SystemTTSEngine cleans it for the voice and
         // puts each reported range back onto it
-        let result = await system.speak(utterance) { range in
+        let result = await system.speak(text: text, voiceOrLanguage: voiceOrLanguage) { range in
             spoke = true
             onSpeakRange(range)
         }
