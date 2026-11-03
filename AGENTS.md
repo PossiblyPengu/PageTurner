@@ -320,7 +320,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 - Page curl (`Reader/PageCurl*.swift`, `ReaderContainerViewController`): the container's pan must beat Readium's paging
   scroll views, which are deeper in the hierarchy and win by default — `shouldBeRequiredToFailBy` makes them wait for
   it. The leaf's edge is the page's own edge at the finger's height; the finger's travel moves it, wherever on the
-  page the drag began. It stands aside while text is selected.
+  page the drag began. It stands aside while text is selected. The page is bound at its spine: the finger's place is held
+  to where the paper can go (`PageCurl.constrained`, Linux-checked — both spine corners stay on the flat side of the
+  crease; a pull up or down flipped the sheet top over bottom, and one past the spine lifted it), and a committed
+  release swings the pull round to straight across as it finishes, so the leaf settles flat beyond the spine.
 - Audiobook sound (`Audio/VoiceDSP.swift`, `VoiceTap.swift`): voice boost and trimmed silence are an
   `MTAudioProcessingTap` on the playing item. `VoiceDSP` is pure (Linux-checked); trimming works by the player running
   faster than the chosen speed while the tap reports quiet, never by cutting audio.

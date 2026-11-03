@@ -343,7 +343,7 @@ final class ReaderContainerViewController: UIViewController {
                 // finger's travel moves that edge, wherever on the page the finger began
                 let edge = CGPoint(x: towardLeft ? view.bounds.width : 0, y: start.y)
                 curlGrab = (origin: edge, forward: forward)
-                curlPendingTouch = CGPoint(x: edge.x + t.x, y: edge.y + t.y)
+                curlPendingTouch = reachable(CGPoint(x: edge.x + t.x, y: edge.y + t.y), from: edge)
                 arming = true
                 releasing = false
                 curlSession += 1
@@ -353,7 +353,7 @@ final class ReaderContainerViewController: UIViewController {
             }
             guard let grab = curlGrab else { return }
             let t = pan.translation(in: view)
-            let moved = CGPoint(x: grab.origin.x + t.x, y: grab.origin.y + t.y)
+            let moved = reachable(CGPoint(x: grab.origin.x + t.x, y: grab.origin.y + t.y), from: grab.origin)
             curlPendingTouch = moved
             // until the page beneath is in place the leaf lies flat: lifted now, it would peel off a copy of itself
             if !arming { curlOverlay?.update(origin: grab.origin, touch: moved) }
@@ -409,6 +409,15 @@ final class ReaderContainerViewController: UIViewController {
             }
         default: break
         }
+    }
+
+    /// The finger's place, held to where a page bound at its spine can go (`PageCurl.constrained`): pulled up or down,
+    /// or on past the spine, the leaf stays where the paper could be instead of flipping over.
+    private func reachable(_ point: CGPoint, from origin: CGPoint) -> CGPoint {
+        let p = PageCurl.constrained(
+            .init(x: Double(point.x), y: Double(point.y)), origin: .init(x: Double(origin.x), y: Double(origin.y)),
+            width: Double(view.bounds.width), height: Double(view.bounds.height))
+        return CGPoint(x: p.x, y: p.y)
     }
 
     /// Photograph the page, park the navigator on the page the turn lands on (the next one, or the one before —

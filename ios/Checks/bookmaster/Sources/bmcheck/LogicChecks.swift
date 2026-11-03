@@ -622,6 +622,55 @@ func runCurlChecks() {
         .allSatisfy { $0.x.isFinite && $0.y.isFinite })
     check("a corner pull has a crease", PageCurl.foldLine(width: w, height: h, grab: corner) != nil)
 
+    // a page is bound at its spine: the crease never crosses it, however the finger moves
+    func spineFlat(_ g: PageCurl.Grab, spineX: Double) -> Bool {
+        let delta = g.touch - g.origin
+        guard delta.length > 1 else { return true }
+        let dir = delta.normalized
+        let f = PageCurl.foldDepth(touchDistance: delta.length)
+        return [PageCurl.Point(x: spineX, y: 0), PageCurl.Point(x: spineX, y: h)]
+            .allSatisfy { ($0 - g.origin).dot(dir) >= f - 1e-6 }
+    }
+    let mid = PageCurl.Point(x: w, y: h / 2)
+    let across = PageCurl.Point(x: w * 0.4, y: h / 2)
+    check("a straight pull is left as it is", PageCurl.constrained(across, origin: mid, width: w, height: h) == across)
+    let up = PageCurl.constrained(.init(x: w - 10, y: 100), origin: mid, width: w, height: h)
+    check("a pull straight up is held where the paper can go (no top-over-bottom flip)",
+          up != PageCurl.Point(x: w - 10, y: 100) && spineFlat(.init(origin: mid, touch: up), spineX: 0)
+              && abs(up.y - mid.y) < abs(up.x - mid.x) * 1.5, "\(up)")
+    let down = PageCurl.constrained(.init(x: w - 10, y: h - 40), origin: mid, width: w, height: h)
+    check("a pull straight down is held too", spineFlat(.init(origin: mid, touch: down), spineX: 0), "\(down)")
+    let past = PageCurl.constrained(.init(x: -w * 1.3, y: h / 2), origin: mid, width: w, height: h)
+    check("a pull on past the spine stops with the crease at the spine",
+          spineFlat(.init(origin: mid, touch: past), spineX: 0) && past.x > -w * 1.3 && abs(past.y - h / 2) < 0.5,
+          "\(past)")
+    let backUp = PageCurl.constrained(.init(x: w * 0.7, y: 60), origin: .init(x: 0, y: h / 2), width: w, height: h)
+    check("a backward pull keeps its spine (the right edge) flat", spineFlat(.init(origin: .init(x: 0, y: h / 2), touch: backUp), spineX: w),
+          "\(backUp)")
+    // fuzz: wherever the finger goes, the spine stays flat and the point is a number — and a finger moving a little
+    // moves a held leaf a little
+    var seed: UInt64 = 0x9E3779B97F4A7C15
+    func rand() -> Double {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Double(seed >> 11) / Double(1 << 53)
+    }
+    var flips = 0
+    for _ in 0 ..< 20_000 {
+        let o = PageCurl.Point(x: rand() < 0.5 ? 0 : w, y: rand() * h)
+        let t = PageCurl.Point(x: -2 * w + rand() * 5 * w, y: -h + rand() * 3 * h)
+        let c = PageCurl.constrained(t, origin: o, width: w, height: h)
+        if !(c.x.isFinite && c.y.isFinite) || !spineFlat(.init(origin: o, touch: c), spineX: o.x > w / 2 ? 0 : w) { flips += 1 }
+    }
+    check("20k random pulls: the spine always stays flat", flips == 0, "\(flips) broke it")
+    var jump = 0.0
+    var last: PageCurl.Point?
+    for i in 0 ..< 400 {
+        let c = PageCurl.constrained(.init(x: w - 10 - Double(i) * 0.5, y: 100), origin: mid, width: w, height: h)
+        if let last { jump = max(jump, (c - last).length) }
+        last = c
+    }
+    check("a held leaf glides with the finger", jump < 2, "largest step \(jump)")
+
     // the leaf's two layers: neither folds back over itself, so the back can be drawn whole over the front
     let fineCols = 22, fineRows = 28
     let fine = PageCurl.source(columns: fineCols, rows: fineRows, width: w, height: h)

@@ -169,15 +169,20 @@ final class PageCurlOverlay: UIView {
         let grabbed = PageCurl.Grab(
             origin: .init(x: Double(origin.x), y: Double(origin.y)),
             touch: .init(x: Double(touch.x), y: Double(touch.y)))
-        let delta = grabbed.touch - grabbed.origin
-        let dir = delta.normalized
-        let from = delta.length
-        // past the far edge + the roll — the leaf is wholly turned
-        let travel = PageCurl.travel(width: w, height: h, grab: grabbed)
-        let target = commit ? travel * 1.6 : 0.0
+        let target: PageCurl.Point
+        if commit {
+            // the leaf settles flat beyond the spine, straight across, whichever way the finger last pulled: carried
+            // on along a slanted pull, it folded the sheet over its own corner on the way out
+            let across = PageCurl.Point(x: grabbed.origin.x > w / 2 ? -1 : 1, y: 0)
+            let straight = PageCurl.Grab(origin: grabbed.origin, touch: grabbed.origin + across * 10)
+            // past the far edge + the roll — the leaf is wholly turned
+            target = grabbed.origin + across * (PageCurl.travel(width: w, height: h, grab: straight) * 1.6)
+        } else {
+            target = grabbed.origin
+        }
         let speed = max(600, abs(Double(velocity.x)) * 0.8 + abs(Double(velocity.y)) * 0.4)
-        let duration = min(max(abs(target - from) / speed, 0.18), 0.5)
-        animate(origin: grabbed.origin, dir: dir, from: from, to: target,
+        let duration = min(max((target - grabbed.touch).length / speed, 0.18), 0.5)
+        animate(origin: grabbed.origin, from: grabbed.touch, to: target,
                 duration: duration, completion: completion)
     }
 
@@ -185,8 +190,8 @@ final class PageCurlOverlay: UIView {
     func animateScripted(towardLeft: Bool, completion: @escaping () -> Void) {
         let w = Double(bounds.width), h = Double(bounds.height)
         let origin = PageCurl.Point(x: towardLeft ? w - 2 : 2, y: h * 0.58)
-        animate(origin: origin, dir: PageCurl.Point(x: towardLeft ? -1 : 1, y: 0),
-                from: 0, to: w * 1.9 + .pi * PageCurl.rollRadius,
+        let across = PageCurl.Point(x: towardLeft ? -1 : 1, y: 0)
+        animate(origin: origin, from: origin, to: origin + across * (w * 1.9 + .pi * PageCurl.rollRadius),
                 duration: 0.55, completion: completion)
     }
 
@@ -198,9 +203,11 @@ final class PageCurlOverlay: UIView {
         if UserDefaults.standard.bool(forKey: "PTDebugCorner") {
             let origin = PageCurl.Point(x: towardLeft ? w - 2 : 2, y: h - 2)
             let d = progress * (w + h * 0.3)
-            update(
-                origin: CGPoint(x: origin.x, y: origin.y),
-                touch: CGPoint(x: towardLeft ? origin.x - d * 0.9 : origin.x + d * 0.9, y: origin.y - d * 0.85))
+            // held where the paper could be, as a finger's would be
+            let touch = PageCurl.constrained(
+                .init(x: towardLeft ? origin.x - d * 0.9 : origin.x + d * 0.9, y: origin.y - d * 0.85),
+                origin: origin, width: w, height: h)
+            update(origin: CGPoint(x: origin.x, y: origin.y), touch: CGPoint(x: touch.x, y: touch.y))
             return
         }
         let origin = PageCurl.Point(x: towardLeft ? w - 2 : 2, y: h * 0.58)
@@ -213,11 +220,12 @@ final class PageCurlOverlay: UIView {
             touch: CGPoint(x: tx, y: origin.y + d * 0.1))
     }
 
-    /// Drive `touch` along a straight pull: `distance` along the drag axis.
+    /// Drive `touch` from `from` to `to` in a straight line — a release swings a slanted pull round to straight
+    /// across as it goes.
     private var displayLink: CADisplayLink?
     private func animate(
-        origin: PageCurl.Point, dir: PageCurl.Point,
-        from: Double, to: Double,
+        origin: PageCurl.Point,
+        from: PageCurl.Point, to: PageCurl.Point,
         duration: Double, completion: @escaping () -> Void
     ) {
         displayLink?.invalidate()
@@ -227,15 +235,14 @@ final class PageCurlOverlay: UIView {
         if LowPower.on {
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 15, preferred: 15)
         }
-        animState = Anim(origin: origin, dir: dir, from: from, to: to, start: start,
+        animState = Anim(origin: origin, from: from, to: to, start: start,
                          duration: duration, completion: completion)
         link.add(to: .main, forMode: .common)
         displayLink = link
     }
 
     private struct Anim {
-        var origin, dir: PageCurl.Point
-        var from, to: Double
+        var origin, from, to: PageCurl.Point
         var start: Date
         var duration: Double
         var completion: () -> Void
@@ -246,10 +253,11 @@ final class PageCurlOverlay: UIView {
         guard let a = animState else { link.invalidate(); return }
         let t = min(1, Date().timeIntervalSince(a.start) / a.duration)
         let eased = 1 - pow(1 - t, 3)     // ease-out cubic
-        let d = a.from + (a.to - a.from) * eased
-        let touch = a.origin + a.dir * d
+        let touch = a.from + (a.to - a.from) * eased
+        // a little sag as it goes, the farther from the edge the more — the soft arc of a page let go
+        let sag = (touch - a.origin).length * 0.08 * eased
         update(origin: CGPoint(x: a.origin.x, y: a.origin.y),
-               touch: CGPoint(x: touch.x, y: touch.y + d * 0.08))
+               touch: CGPoint(x: touch.x, y: touch.y + sag))
         if t >= 1 {
             link.invalidate()
             displayLink = nil

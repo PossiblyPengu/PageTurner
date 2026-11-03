@@ -154,6 +154,63 @@ enum PageCurl {
         return (hits[0], hits[1])
     }
 
+    /// Where the finger may hold the leaf. A page is bound at its spine — the edge across from the one caught — so
+    /// the crease can never cross it: a pull mostly up or down folded the sheet top over bottom (the text upside
+    /// down), and one dragged on past the spine lifted the spine itself. A touch beyond what the sheet can do is held
+    /// at the nearest place it can reach: both of the spine's corners stay on the flat side of the crease.
+    static func constrained(_ touch: Point, origin: Point, width: Double, height: Double) -> Point {
+        allows(touch, origin: origin, width: width, height: height)
+            ? touch : nearestAllowed(to: touch, origin: origin, width: width, height: height)
+    }
+
+    /// Whether the sheet can be held with the finger at `touch`.
+    static func allows(_ touch: Point, origin: Point, width: Double, height: Double) -> Bool {
+        let delta = touch - origin
+        let d = delta.length
+        guard d > 1 else { return true }   // nothing lifted yet (`axis(of:)` takes it as the flat page)
+        return d <= longestPull(origin: origin, dir: delta * (1 / d), width: width, height: height) + 1e-6
+    }
+
+    /// The spine: the edge across the page from the one the leaf was caught by.
+    private static func spineX(origin: Point, width: Double) -> Double {
+        origin.x > width / 2 ? 0 : width
+    }
+
+    /// The longest pull along `dir` that keeps the crease off the spine. The crease sits `foldDepth(d)` along the
+    /// pull, and must not pass the nearer of the spine's corners: d/2 + πr/2 ≤ reach, so d ≤ 2·reach − πr.
+    private static func longestPull(origin: Point, dir: Point, width: Double, height: Double) -> Double {
+        let x = spineX(origin: origin, width: width)
+        let reach = min((Point(x: x, y: 0) - origin).dot(dir), (Point(x: x, y: height) - origin).dot(dir))
+        return max(0, 2 * reach - .pi * rollRadius)
+    }
+
+    /// The reachable place nearest `touch`: each way toward the spine, a degree apart, pulled as far along it as the
+    /// finger is (and the sheet allows) — then a fiftieth of a degree apart around the best, so a leaf held at the
+    /// limit glides with the finger instead of stepping.
+    private static func nearestAllowed(to touch: Point, origin: Point, width: Double, height: Double) -> Point {
+        let toward = spineX(origin: origin, width: width) < origin.x ? -1.0 : 1.0
+        let delta = touch - origin
+        var best = origin
+        var bestDistance = delta.length
+        var bestAngle = 0.0
+        func consider(_ degrees: Double) {
+            let angle = degrees * .pi / 180
+            let dir = Point(x: toward * cos(angle), y: sin(angle))
+            let along = min(max(delta.dot(dir), 0), longestPull(origin: origin, dir: dir, width: width, height: height))
+            let candidate = origin + dir * along
+            let distance = (candidate - touch).length
+            if distance < bestDistance {
+                best = candidate
+                bestDistance = distance
+                bestAngle = degrees
+            }
+        }
+        for step in -89 ... 89 { consider(Double(step)) }
+        let coarse = bestAngle
+        for step in -50 ... 50 { consider(min(max(coarse + Double(step) / 50, -89.9), 89.9)) }
+        return best
+    }
+
     /// The flat grid the leaf starts as.
     static func source(columns: Int, rows: Int, width: Double, height: Double) -> [Point] {
         (0 ... rows).flatMap { row in

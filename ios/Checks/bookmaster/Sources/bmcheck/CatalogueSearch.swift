@@ -57,6 +57,9 @@ struct CatalogueReply {
     /// True when no catalogue could be reached at all — "couldn't search",
     /// not "no matches".
     var failed: Bool
+    /// One of the catalogues didn't answer (a timeout, a throttle): the list is what the other had, worth showing
+    /// but not worth remembering for two weeks.
+    var partial = false
 }
 
 /// Finding a book, the way BookMaster's own page does it.
@@ -100,11 +103,17 @@ enum CatalogueSearch {
     private static let appleBulk = Lane()
     private static let appleInteractive = Lane()
 
-    /// Answers already given this session, so a repeat costs nothing.
+    /// Answers already given this session, so a repeat costs nothing — the latest few hundred: a bulk "Find details"
+    /// over a whole library kept every reply in memory for as long as the app ran.
     private actor SearchCache {
         private var table: [String: Data] = [:]
+        private var order: [String] = []
+        private let limit = 300
         func get(_ key: String) -> Data? { table[key] }
-        func set(_ key: String, _ data: Data) { table[key] = data }
+        func set(_ key: String, _ data: Data) {
+            if table.updateValue(data, forKey: key) == nil { order.append(key) }
+            while order.count > limit { table[order.removeFirst()] = nil }
+        }
     }
     private static let searchCache = SearchCache()
 
@@ -180,7 +189,8 @@ enum CatalogueSearch {
             correctedTo: correctedTo,
             // BookMaster's page throws here: nothing to show and the one
             // catalogue that could still answer had nothing either.
-            failed: olHits == nil && (appleHits?.isEmpty ?? true))
+            failed: olHits == nil && (appleHits?.isEmpty ?? true),
+            partial: olHits == nil || appleHits == nil)
     }
 
     /// Flag the hits that are already shelved — the pin a later write
