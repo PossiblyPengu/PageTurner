@@ -24,6 +24,8 @@ final class IntentRouter {
         /// From a PDF to its text version (made first if need be), or back: at the page (0-based) or the chapter
         /// and how far into it that the reader was on.
         case switchVersion(from: UUID, page: Int?, chapter: Int?, progression: Double?)
+        /// A book has just been finished (the reader left at its end, an audiobook played out): ask about it once.
+        case bookFinished(UUID)
     }
 
     var request: Request?

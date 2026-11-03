@@ -374,6 +374,14 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   follows the ringer switch and never touches the audio session an audiobook is using.
 - Trends (`ReadingTrends` in `Library/ReadingStats.swift`, Linux-checked): weekly totals and the finish-date forecast, which
   spreads what a book gained over the days since its first sitting in the last three weeks (days off count against the pace).
+- Finishing a book (`App/FinishedBook.swift`): `FinishedBookSheet` asks once per finish (`FinishedAsk`, forgotten by
+  `LibraryStore.restart` and an audiobook played again from its end) for a BookMaster rating and what to do with the file —
+  Remove Download for a Drive book (it stays, to come down again), Remove Book and File for one whose file is its only copy,
+  or Keep It. It comes on leaving a reader in which the book was finished (`ReaderModel.finishedHere`, `ReaderView.onDisappear`),
+  when an audiobook plays out (`AudioPlayer.advance`), both through `IntentRouter.Request.bookFinished`, and after Mark as
+  Finished (`AppRouter.markFinished`); `AppRouter.offerFinished` waits for a sheet that is up and skips a book with nothing
+  to ask. Settings' "Clear files without asking" (`auto-clear-finished`) clears on leaving instead — reading the library's
+  record, not the reader's opening copy, which never looked finished.
 - Saved words (`SavedWord` in the Book model region, `Library/SavedWordsView.swift`): "Save Word" in the selection menu keeps
   the word and a line of context on the book; the list opens iOS's dictionary. `Highlight.quoted` stops "Send new highlights
   as quotes" (off by default) from posting one twice.

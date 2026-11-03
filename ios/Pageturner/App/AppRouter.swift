@@ -38,6 +38,8 @@ final class AppRouter {
     var pendingDelete: [Book] = []
     var shelfTarget: ShelfTarget?
     var resumePrompt: ResumePrompt?
+    /// A book just finished: the sheet that asks for a rating and what to do with its file (`FinishedBookSheet`).
+    var finished: Book?
     /// Where the Together tab should go next — the chat, or a page of one of the web apps — set by
     /// a tapped notification and cleared by the tab once it has gone there.
     var suiteTarget: BMDeepLink.Target?
@@ -62,7 +64,27 @@ final class AppRouter {
     /// Something is up over the tabs that a book opening by itself would close (an edit, Settings, the chat…).
     var presenting: Bool {
         detail != nil || editing != nil || shelfTarget != nil || showSettings || showLink || showImporter || showDrive
-            || showChat || resumePrompt != nil
+            || showChat || resumePrompt != nil || finished != nil
+    }
+
+    /// A book has just been finished (the reader left at its end, an audiobook played out, Mark as Finished): ask
+    /// once for a rating and what to do with its file. Not when it isn't finished, was asked already, or there is
+    /// nothing to ask (no BookMaster to rate for, no file left). A sheet that is up (the book's page, after Mark as
+    /// Finished there) is let go first — two at once can't be shown.
+    func offerFinished(_ id: UUID, library: LibraryStore) {
+        guard let book = library.books.first(where: { $0.id == id }), (book.progression ?? 0) >= 0.995,
+              !FinishedAsk.asked(id), FinishedBookSheet.worthAsking(book, library: library)
+        else { return }
+        FinishedAsk.mark(id)
+        let wait = presenting ? 0.45 : 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [self] in
+            // something else came up meanwhile: not over it — the book can be asked about another time
+            guard !presenting, let latest = library.books.first(where: { $0.id == id }) else {
+                FinishedAsk.forget(id)
+                return
+            }
+            finished = latest
+        }
     }
 
     func dismissPresentations() {
@@ -75,6 +97,7 @@ final class AppRouter {
         showDrive = false
         showChat = false
         resumePrompt = nil
+        finished = nil
     }
 
     /// Go where a notification leads — from its banner, or from the list. It is read by then.
@@ -170,6 +193,7 @@ final class AppRouter {
     func markFinished(_ book: Book, library: LibraryStore) {
         library.markFinished(book.id)
         if AppPrefs.autoClearFinished { clearFinished(book, library: library) }
+        offerFinished(book.id, library: library)
     }
 
     /// Clear a finished book's files: a Drive copy goes back to the Drive (the book stays),
@@ -210,7 +234,10 @@ final class AppRouter {
     /// from under audio still playing (a re-listen).
     func leaveReading(library: LibraryStore) {
         let playback = PlaybackCoordinator.shared
-        let leaving = reading ?? playback.bookID.flatMap { id in library.books.first { $0.id == id } }
+        // the library's record, not the copy the reader was opened with: that still has the place it was opened at, so
+        // a book finished in this sitting never counted as finished here
+        let leaving = (reading ?? playback.bookID.flatMap { id in library.books.first { $0.id == id } })
+            .flatMap { left in library.books.first { $0.id == left.id } }
         reading = nil
         tab = .library
         if AppPrefs.autoClearFinished, let book = leaving,

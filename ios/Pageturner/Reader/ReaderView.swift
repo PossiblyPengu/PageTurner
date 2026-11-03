@@ -149,6 +149,8 @@ struct ReaderView: View {
                 model.endSession()
                 // narration under way goes on, with the now-playing strip to control it; anything else stops
                 ReadAloudHost.shared.leave(model)
+                // finished in this sitting: a rating, and what to do with the file (asked once — `FinishedAsk`)
+                if model.finishedHere { IntentRouter.shared.request = .bookFinished(model.book.id) }
                 BookMaster.shared.place = "library"
             }
             // a sitting ends when the app leaves the screen — not whenever it is next opened.

@@ -426,10 +426,11 @@ final class AudioPlayer: ObservableObject {
     private func advance() {
         let next = trackIndex + 1
         guard next < urls.count else {
-            // finished: clamp at the end, persist, stop
+            // finished: clamp at the end, persist, stop — and ask about it (a rating, the files), once
             pause()
             position = duration
             savePosition(force: true)
+            IntentRouter.shared.request = .bookFinished(book.id)
             return
         }
         load(track: next)
@@ -450,8 +451,11 @@ final class AudioPlayer: ObservableObject {
             seek(to: keep, resume: false)
         }
         player?.volume = 1
-        // pressing play on a book that has finished starts it again
-        if duration > 0, position >= duration - 0.5 { seek(to: 0, resume: false) }
+        // pressing play on a book that has finished starts it again — and finished again, it may be asked about again
+        if duration > 0, position >= duration - 0.5 {
+            seek(to: 0, resume: false)
+            FinishedAsk.forget(book.id)
+        }
         // after a break, a little back from where it stopped (never before the start of the chapter)
         if let at = pausedAt {
             pausedAt = nil

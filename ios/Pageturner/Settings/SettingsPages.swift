@@ -142,15 +142,16 @@ struct LibrarySettingsPage: View {
     private var finishedBooks: some View {
         let c = clearable
         return Section {
-            Toggle("Clear files when a book is finished", isOn: $autoClearFinished)
+            Toggle("Clear files without asking", isOn: $autoClearFinished)
             Button("Clear Finished Books’ Files…", role: .destructive) { confirmClearFinished = true }
                 .disabled(c.count == 0)
         } header: {
             Text("Finished books")
         } footer: {
-            Text(c.count == 0
+            Text("When you finish a book, Pageturner asks for a rating and whether to remove its file — or, with this on, clears it without asking. "
+                 + (c.count == 0
                  ? "Free the space of books you have finished: a Google Drive copy goes back to the Drive (the book stays and can come down again), a book whose file is its only copy leaves the library with it."
-                 : "Finished books hold \(GoogleDrive.sizeText(c.freed)) across \(c.count) \(c.count == 1 ? "book" : "books"). A Google Drive copy goes back to the Drive; a book whose file is its only copy leaves the library with it.")
+                 : "Finished books hold \(GoogleDrive.sizeText(c.freed)) across \(c.count) \(c.count == 1 ? "book" : "books"). A Google Drive copy goes back to the Drive; a book whose file is its only copy leaves the library with it."))
         }
     }
 

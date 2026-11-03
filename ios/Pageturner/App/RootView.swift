@@ -84,6 +84,11 @@ struct RootView: View {
     }
 
     private func handle(_ request: IntentRouter.Request) {
+        if case let .bookFinished(id) = request {
+            // nothing is closed for it: it waits for what is up to go (`offerFinished`)
+            router.offerFinished(id, library: library)
+            return
+        }
         if case let .openDownloaded(id) = request {
             // a book open in the Reading tab (on screen or not) is never swapped out for one that has just come down,
             // and nothing the reader is in the middle of is closed for it — an edit, Settings, the chat, the Drive
@@ -121,7 +126,7 @@ struct RootView: View {
         case .importBooks:
             router.tab = .library
             router.showImporter = true
-        case .openDownloaded:
+        case .openDownloaded, .bookFinished:
             break   // handled above
         case let .switchVersion(id, page, chapter, progression):
             guard let book = library.books.first(where: { $0.id == id }) else { return }
@@ -142,6 +147,7 @@ struct RootView: View {
             .fullScreenCover(isPresented: $r.showChat) { BMChatScreen() }
             .sheet(isPresented: $r.showLink) { linkSheet }
             .sheet(isPresented: $r.showDrive) { DriveBrowserView(purpose: .importBooks) }
+            .sheet(item: $r.finished) { FinishedBookSheet(book: $0) }
             .fileImporter(
                 isPresented: $r.showImporter,
                 allowedContentTypes: LibraryView.pickerTypes,

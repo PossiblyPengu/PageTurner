@@ -144,10 +144,20 @@ final class ReaderModel: ObservableObject {
     /// `open()` is under way: the Reading tab starts it again on every return, and two at once built two navigators.
     private var opening = false
 
+    /// The book was not finished when this reader took it (or was started over since): reaching its end here is
+    /// finishing it, which `ReaderView` asks about when the reader is left (`finishedHere`).
+    private var openedUnfinished: Bool
+
+    /// The book was finished in this reader — it was not when it opened, and the library has it at its end now.
+    var finishedHere: Bool {
+        openedUnfinished && (library.books.first { $0.id == book.id }?.progression ?? 0) >= 0.995
+    }
+
     init(book: Book, library: LibraryStore) {
         self.book = book
         self.stored = book
         self.library = library
+        openedUnfinished = (book.progression ?? 0) < 0.995
         // after the change has landed (a sink runs inside the library's own write), and read from the library
         // then — a queued value can be older than a save this reader made meanwhile
         libraryChanges = library.$books
@@ -190,6 +200,8 @@ final class ReaderModel: ObservableObject {
         if highlightsChanged { applyHighlights() }
         if bookmarksChanged, let currentLocator { isCurrentLocationBookmarked = bookmark(matching: currentLocator) != nil }
         guard movedThere else { return }
+        // started over elsewhere: its end, reached again here, is finishing it again
+        if (book.progression ?? 0) < 0.995 { openedUnfinished = true }
         narrationAhead = nil
         catchUpOnWake = nil
         if readAloud != nil { stopReadAloud() }

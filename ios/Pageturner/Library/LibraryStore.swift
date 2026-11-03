@@ -1176,11 +1176,14 @@ final class LibraryStore: ObservableObject {
     /// Finished books whose files are on this device, with the bytes each would free — what the
     /// settings sweep counts and clears.
     func clearableFinished() -> [(book: Book, bytes: Int64)] {
-        books.compactMap { book in
-            guard (book.progression ?? 0) >= 0.995, !inCloud.contains(book.id) else { return nil }
-            let bytes = fileURLs(for: book).reduce(Int64(0)) { $0 + (Self.fileSize($1).map(Int64.init) ?? 0) }
-            return bytes > 0 ? (book, bytes) : nil
-        }
+        books.compactMap { book in finishedBytes(of: book).map { (book, $0) } }
+    }
+
+    /// What clearing one finished book's files would free, or nil when it is not finished or has none on this iPhone.
+    func finishedBytes(of book: Book) -> Int64? {
+        guard (book.progression ?? 0) >= 0.995, !inCloud.contains(book.id) else { return nil }
+        let bytes = fileURLs(for: book).reduce(Int64(0)) { $0 + (Self.fileSize($1).map(Int64.init) ?? 0) }
+        return bytes > 0 ? bytes : nil
     }
 
     // MARK: - Shelves
@@ -1298,6 +1301,7 @@ final class LibraryStore: ObservableObject {
         books[i].audioPosition = nil
         books[i].lastOpenedAt = nil
         ResumeOffer.decline(&books[i])   // starting over on purpose is not a question to ask again on the next open
+        FinishedAsk.forget(id)            // finished again, it may be asked about again
         save()
     }
 
