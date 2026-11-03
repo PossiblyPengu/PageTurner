@@ -727,6 +727,15 @@ final class LibraryStore: ObservableObject {
 
     /// The text version of a PDF — its words laid out again to flow like a book's (`PDFText`), with the PDF's
     /// details, cover and shelves — made once and kept as a book of its own; asked again, the one there is returned.
+    /// A PDF and its text version are one book read two ways: in a list of what is being read, only the one opened
+    /// last stands for it. True for the other one of such a pair.
+    func isOlderVersion(_ book: Book) -> Bool {
+        let other = book.textVersionOf.flatMap { id in books.first { $0.id == id } }
+            ?? books.first { $0.textVersionOf == book.id }
+        guard let other else { return false }
+        return (other.lastOpenedAt ?? .distantPast) > (book.lastOpenedAt ?? .distantPast)
+    }
+
     func makeTextVersion(of pdf: Book) async throws -> Book {
         if let made = textVersion(of: pdf) { return made }
         guard textVersionProgress[pdf.id] == nil else { throw CancellationError() }

@@ -15,6 +15,8 @@ struct ReadingNowView: View {
     private var alsoReading: [Book] {
         library.books
             .filter { $0.id != current?.id && ($0.progression ?? 0) > 0.001 && ($0.progression ?? 0) < 0.995 }
+            // a PDF and its text version are one book: the one opened last stands for both
+            .filter { !library.isOlderVersion($0) }
             .sorted { ($0.lastOpenedAt ?? .distantPast) > ($1.lastOpenedAt ?? .distantPast) }
             .prefix(9).map { $0 }
     }
