@@ -160,14 +160,6 @@ final class SpeechSynthesizer {
         }
     }
 
-    func pauseOrResume() {
-        switch state {
-        case .stopped: return
-        case .playing: pause()
-        case .paused: resume()
-        }
-    }
-
     func previous() {
         // nothing started (or stopped): a skip has no book to move in, and must not report `.stopped`
         guard iterator != nil else { return }

@@ -146,6 +146,12 @@ jobs:
           cd ios/build/Build/Products/Release-iphoneos
           mkdir -p Payload
           cp -r Pageturner.app Payload/
+          # The build's debug map (stabs: the object-file paths dsymutil reads) was 20 MB of the 78 MB binary and is
+          # never used on a phone. -S drops only that: every function name stays, so the app's own crash log
+          # (Log.swift's backtraces) still says where it died.
+          before=$(stat -f%z Payload/Pageturner.app/Pageturner)
+          xcrun strip -S Payload/Pageturner.app/Pageturner
+          echo "binary: $before -> $(stat -f%z Payload/Pageturner.app/Pageturner) bytes (debug map stripped)"
           zip -qr Pageturner.ipa Payload
           ls -lh Pageturner.ipa
 
