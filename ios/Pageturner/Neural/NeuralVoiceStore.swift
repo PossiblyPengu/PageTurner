@@ -206,8 +206,27 @@ final class NeuralVoiceStore {
         // the small settings file first: a voice that can't be spoken is found out before 60 MB is spent
         let configData = try await fetchConfig(voice, from: configURL)
         let part = Self.partURL(for: voice.key)
-        try await downloader.download(modelURL, key: voice.key, to: part)
+        do {
+            try await downloader.download(modelURL, key: voice.key, to: part)
+        } catch let error as URLError where error.code == .unknown {
+            // iOS's background transfer service would not take it ("remote session is unavailable" — the Simulator's
+            // never can be reached, and every voice failed with "unknown error"): fetched in front instead, which wants
+            // the app open while it comes down, but comes
+            Log.event("neural", "background download unavailable for \(voice.key) — downloading in front")
+            try await downloadInFront(modelURL, to: part)
+        }
         try await finish(voice, at: part, config: configData)
+    }
+
+    /// The model fetched by an ordinary session, for when the background one can't be had.
+    private func downloadInFront(_ url: URL, to destination: URL) async throws {
+        let (temporary, response) = try await URLSession.shared.download(from: url)
+        if let code = (response as? HTTPURLResponse)?.statusCode, code != 200 {
+            try? FileManager.default.removeItem(at: temporary)
+            throw Failure.server(code)
+        }
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: temporary, to: destination)
     }
 
     /// The small settings file, checked before the model is trusted.

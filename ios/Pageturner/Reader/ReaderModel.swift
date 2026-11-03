@@ -1241,6 +1241,8 @@ final class ReaderModel: ObservableObject {
         writeReading()
         if UIApplication.shared.applicationState != .active { library.flushSaves() }
         endSession()
+        // the voice read the book to its end with the reader away: there is no leaving of the reader to ask on
+        if finishedHere { IntentRouter.shared.request = .bookFinished(book.id) }
     }
 
     /// Read-aloud's place: where the voice is, is where the reader is — saved, and told to
