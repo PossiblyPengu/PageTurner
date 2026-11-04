@@ -143,7 +143,9 @@ final class DriveBrowserModel {
             return failures.isEmpty
         }
         guard !added.isEmpty else {
-            error = result.known > 0 ? "That is already in your library." : "There is nothing there Pageturner can add."
+            // books matched to ones already here (the same name, or the very same file) were found, just not added again
+            error = result.known > 0 || !result.books.isEmpty
+                ? "That is already in your library." : "There is nothing there Pageturner can add."
             return false
         }
         clear()
