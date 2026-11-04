@@ -42,6 +42,22 @@ final class ReadingLog: ObservableObject {
         save()
     }
 
+    /// Sittings from a backup: the ones this phone doesn't have yet join the log (by id, so a backup restored
+    /// onto the phone it came from adds nothing twice).
+    func merge(_ data: Data) {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        guard let incoming = try? decoder.decode([ReadingSession].self, from: data) else { return }
+        let have = Set(sessions.map(\.id))
+        let new = incoming.filter {
+            !have.contains($0.id) && $0.minutes.isFinite && $0.progressStart.isFinite && $0.progressEnd.isFinite
+        }
+        guard !new.isEmpty else { return }
+        sessions.append(contentsOf: new)
+        sessions.sort { $0.end < $1.end }
+        save()
+    }
+
     func clear() {
         sessions = []
         save()

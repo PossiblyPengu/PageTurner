@@ -84,6 +84,11 @@ final class BackupStore {
             ]
             return o
         }
+        // the sittings behind the stats, streaks and pace — on a new phone they would otherwise start again at nothing
+        let logEncoder = JSONEncoder()
+        logEncoder.dateEncodingStrategy = .secondsSince1970
+        let readingLog: Any = (try? logEncoder.encode(ReadingLog.shared.sessions))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? []
         let stamp = ISO8601DateFormatter.string(
             from: Date(), timeZone: .current, formatOptions: [.withFullDate])
         let dest = fm.temporaryDirectory.appendingPathComponent("pageturner-backup-\(stamp).zip")
@@ -113,6 +118,7 @@ final class BackupStore {
                 "exportedAt": Int(Date().timeIntervalSince1970 * 1000),
                 "books": bookData,
                 "fileMeta": fileMeta,
+                "readingLog": readingLog,
             ]
             let indexData = try JSONSerialization.data(withJSONObject: index, options: .prettyPrinted)
             try await archive.addEntry(
@@ -165,6 +171,8 @@ final class BackupStore {
             }
         }
         if restored > 0 { library.restoreFinished() }
+        // the sittings come back too — merged, so restoring onto the same phone counts none twice
+        if let log = staged.readingLog { ReadingLog.shared.merge(log) }
         return (restored, skipped)
     }
 
@@ -174,6 +182,8 @@ final class BackupStore {
         var fileMeta: [String: [String: Any]]
         var files: [String: URL]    // entry name → extracted file
         var covers: [String: URL]
+        /// The reading log's sittings, as JSON (a backup from before it was kept, or from the web, has none).
+        var readingLog: Data?
     }
 
     /// Reads `data.json` and extracts every `files/`/`covers/` payload into
@@ -198,7 +208,8 @@ final class BackupStore {
             platform: index["platform"] as? String,
             books: rawBooks,
             fileMeta: index["fileMeta"] as? [String: [String: Any]] ?? [:],
-            files: [:], covers: [:]
+            files: [:], covers: [:],
+            readingLog: (index["readingLog"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         )
         for entry in try await archive.entries() where entry.type == .file {
             if entry.path.hasPrefix("files/") {
