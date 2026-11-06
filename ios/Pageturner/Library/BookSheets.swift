@@ -359,7 +359,9 @@ struct BookDetailSheet: View {
                         LabeledContent("Bookmarks", value: "\(book.bookmarks.count)")
                     }
                 }
-                Section {
+                // the actions, grouped by what they are about: where the book sits
+                // on the shelf, the book's record, and what happens to its files
+                Section("Shelf") {
                     if !isFinished {
                         Button(book.isAudio ? "Mark as Listened" : "Mark as Finished", action: onFinish)
                     }
@@ -389,6 +391,8 @@ struct BookDetailSheet: View {
                         }
                     }
                     Button(book.collections.isEmpty ? "Add to a Shelf…" : "Shelves: \(book.collections.joined(separator: ", "))", action: onShelves)
+                }
+                Section("Manage") {
                     Button("Edit Details", action: onEdit)
                     if let onTextVersion, book.ext == "pdf", cloud == nil {
                         textVersionRow(onTextVersion)
@@ -396,6 +400,11 @@ struct BookDetailSheet: View {
                     if let onOriginalPDF {
                         Button("Open the Original PDF", action: onOriginalPDF)
                     }
+                    if BookMaster.shared.isLinked {
+                        Button("Comments & Suggestions") { showNotes = true }
+                    }
+                }
+                Section {
                     if book.drive != nil, cloud == nil {
                         Button("Remove Download", action: onRemoveDownload)
                     }
@@ -408,9 +417,6 @@ struct BookDetailSheet: View {
                             } message: {
                                 Text("The file is the book’s only copy — the book is removed from the library with it. Your BookMaster shelf isn’t touched.")
                             }
-                    }
-                    if BookMaster.shared.isLinked {
-                        Button("Comments & Suggestions") { showNotes = true }
                     }
                     Button("Remove from Library", role: .destructive, action: onDelete)
                 }
