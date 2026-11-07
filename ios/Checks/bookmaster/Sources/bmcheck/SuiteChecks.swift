@@ -66,7 +66,9 @@ func runSuiteChecks() {
     let weekAgo = {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return f.string(from: now.addingTimeInterval(-4 * 86_400))
+        // one second deeper than 4d: whether the formatter truncates or rounds
+        // the sub-second part, the parsed date still reads as four days back
+        return f.string(from: now.addingTimeInterval(-4 * 86_400 - 1))
     }()
     check("four days back says 4d ago", BMSuite.timeAgo(weekAgo, now: now) == "4d ago")
     let plainDay = {
