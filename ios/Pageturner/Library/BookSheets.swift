@@ -326,6 +326,7 @@ struct BookDetailSheet: View {
                     LabeledContent("Format", value: book.ext.uppercased())
                     if let year = book.year { LabeledContent("Year", value: year) }
                     if let isbn = book.isbn { LabeledContent("ISBN", value: isbn) }
+                    if let pages = book.pages { LabeledContent("Pages", value: "\(pages)") }
                     LabeledContent("Added", value: book.addedAt.formatted(date: .abbreviated, time: .omitted))
                     if let opened = book.lastOpenedAt {
                         LabeledContent("Last opened", value: opened.formatted(date: .abbreviated, time: .shortened))
@@ -511,6 +512,7 @@ struct BookEditSheet: View {
     @State private var author: String
     @State private var year: String
     @State private var isbn: String
+    @State private var pages: String
     @State private var summary: String
     @State private var pin: String?
     @State private var openLibraryId: String?
@@ -537,6 +539,7 @@ struct BookEditSheet: View {
         _author = State(initialValue: book.author)
         _year = State(initialValue: book.year ?? "")
         _isbn = State(initialValue: book.isbn ?? "")
+        _pages = State(initialValue: book.pages.map(String.init) ?? "")
         _summary = State(initialValue: book.bookDescription ?? "")
         _pin = State(initialValue: book.bookmasterId)
         _openLibraryId = State(initialValue: book.openLibraryId)
@@ -554,6 +557,8 @@ struct BookEditSheet: View {
                     TextField("Title", text: $title)
                     TextField("Author", text: $author)
                     TextField("Year", text: $year)
+                        .keyboardType(.numberPad)
+                    TextField("Pages", text: $pages)
                         .keyboardType(.numberPad)
                     TextField("ISBN", text: $isbn)
                         .keyboardType(.numbersAndPunctuation)
@@ -686,6 +691,7 @@ struct BookEditSheet: View {
         if !candidate.year.isEmpty { year = candidate.year }
         if !candidate.summary.isEmpty { summary = candidate.summary }
         if let isbn = candidate.isbn { self.isbn = isbn }
+        if let count = candidate.pages { pages = String(count) }
         if let olid = candidate.openLibraryId { openLibraryId = olid }
         if let named = candidate.series { series = named; seriesIndex = candidate.seriesIndex }
         // a shelf row the match names is the one to push to — never a guess
@@ -711,6 +717,8 @@ struct BookEditSheet: View {
         book.bookDescription = trimmedSummary.isEmpty ? nil : trimmedSummary
         // an ISBN that doesn't check out is kept out of BookMaster matching
         book.isbn = ISBN.normalize(isbn)
+        // only a whole number counts as a page count; anything else leaves it unset
+        book.pages = Int(pages.trimmingCharacters(in: .whitespaces)).flatMap { $0 > 0 ? $0 : nil }
         book.openLibraryId = openLibraryId
         book.bookmasterId = pin
         book.series = series
@@ -956,7 +964,7 @@ struct BookLookupSheet: View {
                     .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
                 Text(c.title).font(.caption.weight(.medium)).lineLimit(2)
                 Text(c.authors).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                Text([c.year, sourceKeys(c).joined(separator: " · ")].filter { !$0.isEmpty }.joined(separator: " · "))
+                Text([c.year, c.pages.map { "\($0) pages" } ?? "", sourceKeys(c).joined(separator: " · ")].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .top)
