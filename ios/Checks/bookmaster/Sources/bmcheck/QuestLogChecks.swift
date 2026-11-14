@@ -73,26 +73,45 @@ func runQuestLogChecks() {
 
     // ---- how far each has read: Quest Log's own receipts
     check("the presence endpoint is beside the chat one", BMQuestLog.heartbeatPath == "/quest-log/api/heartbeat")
-    let beats = Data(#"{"now":1700000009000,"giver":{"lastActive":1700000008000,"lastRead":1700000005000},"adventurer":{"lastActive":1700000001000}}"#.utf8)
-    let read = BMQuestLog.readUpTo(beats)
+    let beats = Data(#"{"now":1700000009000,"giver":{"lastActive":1700000008000,"lastRead":1700000005000,"typing":1700000007000},"adventurer":{"lastActive":1700000001000,"typing":1700000001000}}"#.utf8)
+    let presence = BMQuestLog.presence(beats)
     check("how far each has read comes out of the heartbeat, 0 for one who has not",
-          read?[.giver] == 1_700_000_005_000 && read?[.adventurer] == 0, "\(String(describing: read))")
-    check("an answer that is not the heartbeat says nothing", BMQuestLog.readUpTo(Data("[]".utf8)) == nil)
-    check("an old heartbeat, a bare number, has read nothing",
-          BMQuestLog.readUpTo(Data(#"{"now":5,"giver":1700000000000}"#.utf8))?[.giver] == 0)
+          presence?.readUpTo[.giver] == 1_700_000_005_000 && presence?.readUpTo[.adventurer] == 0, "\(String(describing: presence))")
+    check("typing is timed by Quest Log's clock: what is left of its six seconds, and none once they are up",
+          presence?.typingFor[.giver] == 4000 && presence?.typingFor[.adventurer] == 0, "\(String(describing: presence))")
+    check("an answer that is not the heartbeat says nothing", BMQuestLog.presence(Data("[]".utf8)) == nil)
+    check("an old heartbeat, a bare number, has read nothing and is not typing",
+          BMQuestLog.presence(Data(#"{"now":5,"giver":1700000000000}"#.utf8)).map { $0.readUpTo[.giver] == 0 && $0.typingFor[.giver] == 0 } == true)
+    check("with no clock to time it by, typing is not claimed",
+          BMQuestLog.presence(Data(#"{"giver":{"typing":1700000000000}}"#.utf8))?.typingFor[.giver] == 0)
+    check("typing is said within its window, and held over the gap between looks",
+          BMQuestLog.typingEvery * 1000 < BMQuestLog.typingWindow
+          && BMQuestLog.typingHold + BMQuestLog.typingEvery * 1000 >= Double(BMQuestLog.pollSeconds) * 1000)
     let lastMine = BMQuestLog.Entry(id: "mine1", role: .giver, text: "hi", at: 1_700_000_005_000, failed: false)
     check("your last message is Seen once they have read up to it, Sent before, and nothing while unknown",
           BMQuestLog.seenLabel(lastMine, theirsRead: 1_700_000_005_000) == "Seen"
           && BMQuestLog.seenLabel(lastMine, theirsRead: 1_700_000_004_999) == "Sent"
           && BMQuestLog.seenLabel(lastMine, theirsRead: nil) == nil)
-    struct Report: Decodable, Equatable { var role: String; var lastRead: Int64; var readOnly: Bool }
-    let reportData = BMQuestLog.readReport(.adventurer, upTo: 1_700_000_005_000)
-    let report = reportData.flatMap { try? JSONDecoder().decode(Report.self, from: $0) }
-    let keys = reportData.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }?.keys.sorted()
-    check("a read is reported as the stamp, whole, and as reading only — not as being in Quest Log",
-          report == Report(role: "adventurer", lastRead: 1_700_000_005_000, readOnly: true)
-          && keys == ["lastRead", "readOnly", "role"],
-          "\(String(describing: report)) \(String(describing: keys))")
+    struct Report: Decodable, Equatable {
+        var role: String
+        var lastRead: Int64?
+        var typing: Bool?
+        var elsewhere: Bool
+    }
+    func said(_ data: Data?) -> (Report?, [String]?) {
+        (data.flatMap { try? JSONDecoder().decode(Report.self, from: $0) },
+         data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }?.keys.sorted())
+    }
+    let (readSaid, readKeys) = said(BMQuestLog.report(.adventurer, lastRead: 1_700_000_005_000))
+    check("a read is reported as the stamp, whole, and from elsewhere — not as being in Quest Log",
+          readSaid == Report(role: "adventurer", lastRead: 1_700_000_005_000, typing: nil, elsewhere: true)
+          && readKeys == ["elsewhere", "lastRead", "role"], "\(String(describing: readSaid)) \(String(describing: readKeys))")
+    let (typingSaid, typingKeys) = said(BMQuestLog.report(.giver, typing: true))
+    let (stoppedSaid, _) = said(BMQuestLog.report(.giver, typing: false))
+    check("typing, and having stopped, are said the same way, with nothing else",
+          typingSaid == Report(role: "giver", lastRead: nil, typing: true, elsewhere: true)
+          && stoppedSaid == Report(role: "giver", lastRead: nil, typing: false, elsewhere: true)
+          && typingKeys == ["elsewhere", "role", "typing"], "\(String(describing: typingSaid)) \(String(describing: typingKeys))")
 
     // ---- the thread's layout is the shared room's
     var calendar = Calendar(identifier: .gregorian)

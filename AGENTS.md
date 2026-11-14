@@ -214,11 +214,13 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   token — never change it in one place only (Quest Log's tests/auth-token.test.mjs holds the same known answers as `selfTest`). `BMQuestLog` is the pure part (Linux-checked): the stored entry, opening and
   unwrapping (`{"text":…}`), ids Quest Log accepts, the layout (it reuses `BMChat.rows`). `BMQuestLogChat` is the connection: it talks to
   `/quest-log/api/chat` on BookMaster's address with the sign-in token as the bearer (what Quest Log's own pages send), opens and seals on this
-  iPhone, polls every 5 s while the room is in front, and keeps what it sent in view until the list shows it. Receipts are Quest Log's own:
-  each poll also reads `/quest-log/api/heartbeat` (`lastRead` per part — the stamp of the newest message seen), your last message says "Seen"
-  or "Sent" against the other part's, and the room in front with the newest message in view reports `lastRead` with `readOnly: true`, which
-  moves only how far it is read (the other's "Read" in Quest Log, and what waits for you in every app) and never Quest Log's presence.
-  BookMaster's locked room does the same (`fetchReadUpTo` / `reportRead` in secretChat.ts). **Pageturner holds the two
+  iPhone, polls every 5 s while the room is in front, and keeps what it sent in view until the list shows it. Receipts and typing are Quest
+  Log's own: each poll also reads `/quest-log/api/heartbeat` (`BMQuestLog.presence`: `lastRead` per part — the stamp of the newest message
+  seen — and `typing`, timed by the answer's `now` against Quest Log's 6 s window). Your last message says "Seen" or "Sent" against the other
+  part's; "Name is typing…" shows for the time left plus `typingHold` (a word every 3 s, a look every 5 s). The room in front with the newest
+  message in view reports `lastRead`, and words in the box report `typing: true` every 3 s (`false` once sent), always with
+  `elsewhere: true`, which moves only those two and never Quest Log's presence or tab. BookMaster's locked room does the same
+  (`fetchPresence` / `reportPresence` in secretChat.ts). **Pageturner holds the two
   keys, never the passphrase**: it is used once to make them and neither sent nor stored; the keys live in memory, and in the Keychain (this
   device only, when unlocked) as JSON unless "Keep it unlocked on this iPhone" is turned off on the lock screen (an earlier build's stored
   passphrase is read once and replaced). Locking the room, unlinking BookMaster (`RootView` → `reset()`) or signing out of the web apps

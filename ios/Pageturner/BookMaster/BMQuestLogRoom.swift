@@ -67,6 +67,11 @@ struct BMQuestLogRoomView: View {
                 Notifier.shared.noteQuestLogOpened()
             }
             .onDisappear { shown = false }
+            // words going into the box show as typing in Quest Log
+            .onChange(of: draft) { _, now in
+                guard let role, !now.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                Task { await chat.typed(as: role) }
+            }
             // what comes in while the room is the one in view is seen as it comes
             .onChange(of: Notifier.shared.questLogUnread) { _, waiting in
                 if waiting { Notifier.shared.noteQuestLogOpened() }
@@ -157,6 +162,15 @@ struct BMQuestLogRoomView: View {
                     ForEach(BMQuestLog.rows(chat.entries)) { row in
                         line(row, mine: row.entry.role == role, lastMine: row.id == lastMine)
                     }
+                    if chat.typing.contains(role.other) {
+                        Text("\(partner) is typing…")
+                            .font(.caption)
+                            .italic()
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 6)
+                            .padding(.top, 6)
+                    }
                     if let error = chat.actionError {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .font(.footnote)
@@ -174,6 +188,10 @@ struct BMQuestLogRoomView: View {
             .scrollDismissesKeyboard(.interactively)
             .ptSoftScrollEdges()
             .onChange(of: chat.entries.last?.id) { _, _ in follow(proxy, role: role) }
+            // "is typing…" is brought into view when you are at the bottom, as a new message is
+            .onChange(of: chat.typing.contains(role.other)) { _, now in
+                if now, atBottom { withAnimation { proxy.scrollTo(bottom, anchor: .bottom) } }
+            }
             .overlay(alignment: .bottom) { newMessageChip(proxy) }
             .overlay {
                 if !chat.ready, chat.loadError == nil { ProgressView() }

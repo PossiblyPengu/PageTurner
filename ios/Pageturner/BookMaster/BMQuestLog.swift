@@ -125,21 +125,46 @@ enum BMQuestLog {
         return plain
     }
 
-    /// How far each part has read the room, out of the presence endpoint's answer (`{ now, giver: { lastRead, … },
-    /// adventurer: … }`): the stamp of the newest message they have seen, 0 for one that has not read it yet. Nil when
-    /// the answer is not that.
-    static func readUpTo(_ data: Data) -> [Role: Double]? {
+    /// How long after its last word someone still counts as typing: Quest Log's own window, in ms.
+    static let typingWindow = 6000.0
+    /// How often, while you type, Quest Log is told so — inside the window, so it does not lapse between.
+    static let typingEvery: TimeInterval = 3
+    /// Someone typing is said every three seconds and looked for every five: held this long (ms) over the gap.
+    static let typingHold = Double(pollSeconds) * 1000 - typingEvery * 1000
+
+    /// What Quest Log's presence endpoint says about the room, for each part.
+    struct Presence: Equatable {
+        /// The stamp of the newest message they have seen (0 for none): what Quest Log's own "Read" compares with.
+        var readUpTo: [Role: Double]
+        /// For how much longer, in ms, they count as typing; 0 for not.
+        var typingFor: [Role: Double]
+    }
+
+    /// The room's presence out of the endpoint's answer (`{ now, giver: { lastRead, typing, … }, adventurer: … }`),
+    /// typing timed by its clock (`now`). Nil when the answer is not that.
+    static func presence(_ data: Data) -> Presence? {
         struct Beat: Decodable {
-            var lastRead: Double = 0
-            enum CodingKeys: String, CodingKey { case lastRead }
+            var lastRead = 0.0
+            var typing = 0.0
+            enum CodingKeys: String, CodingKey { case lastRead, typing }
             init(from decoder: Decoder) throws {
-                // `now` and an old heartbeat are bare numbers, which say nothing about reading
+                // `now` and an old heartbeat are bare numbers, which say nothing about the room
                 let c = try? decoder.container(keyedBy: CodingKeys.self)
                 lastRead = (try? c?.decode(Double.self, forKey: .lastRead)) ?? 0
+                typing = (try? c?.decode(Double.self, forKey: .typing)) ?? 0
             }
         }
+        struct Clock: Decodable { var now: Double? }
         guard let beats = try? JSONDecoder().decode([String: Beat].self, from: data) else { return nil }
-        return Dictionary(uniqueKeysWithValues: Role.allCases.map { ($0, beats[$0.rawValue]?.lastRead ?? 0) })
+        let now = (try? JSONDecoder().decode(Clock.self, from: data))?.now ?? 0
+        func typingFor(_ role: Role) -> Double {
+            let at = beats[role.rawValue]?.typing ?? 0
+            guard at > 0, now > 0 else { return 0 }
+            return max(0, typingWindow - max(0, now - at))
+        }
+        return Presence(
+            readUpTo: Dictionary(uniqueKeysWithValues: Role.allCases.map { ($0, beats[$0.rawValue]?.lastRead ?? 0) }),
+            typingFor: Dictionary(uniqueKeysWithValues: Role.allCases.map { ($0, typingFor($0)) }))
     }
 
     /// Under your last message: whether the other part has read up to it — the shared room's words, and Quest Log's
@@ -149,11 +174,13 @@ enum BMQuestLog {
         return lastMine.at <= theirsRead ? "Seen" : "Sent"
     }
 
-    /// What is said when the room has been read up to `newest`, as `role`: only how far — reading here is not
-    /// being in Quest Log, so the presence it keeps stays as it was.
-    static func readReport(_ role: Role, upTo newest: Double) -> Data? {
-        try? JSONSerialization.data(
-            withJSONObject: ["role": role.rawValue, "lastRead": Int64(newest.rounded()), "readOnly": true] as [String: Any])
+    /// What is said to Quest Log's presence from here: how far you have read, or that you are typing (or have
+    /// stopped) — marked `elsewhere`, so being in the room here never counts as being in Quest Log.
+    static func report(_ role: Role, lastRead: Double? = nil, typing: Bool? = nil) -> Data? {
+        var body: [String: Any] = ["role": role.rawValue, "elsewhere": true]
+        if let lastRead { body["lastRead"] = Int64(lastRead.rounded()) }
+        if let typing { body["typing"] = typing }
+        return try? JSONSerialization.data(withJSONObject: body)
     }
 
     /// Each id once, in the order first seen (a re-post that raced its original is not shown twice).

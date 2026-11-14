@@ -36,6 +36,8 @@ final class BMQuestLogChat {
     private(set) var readUpTo: [BMQuestLog.Role: Double]?
     /// The stamp of the newest message the room lists: what looking at it reads up to.
     private(set) var newestListed: Double = 0
+    /// The parts typing, as Quest Log last said — each until its time is up, held over the gap to the next look.
+    private(set) var typing: Set<BMQuestLog.Role> = []
 
     /// The sign-in token (the bearer) and the chat key, made from the passphrase.
     private var credentials: BMQuestLogCrypto.Credentials?
@@ -46,6 +48,10 @@ final class BMQuestLogChat {
     private var pending: [String: BMQuestLog.Entry] = [:]
     /// The newest stamp already reported as read, so each is reported once.
     private var reported: Double = 0
+    /// What takes each part's "typing" away when its time is up.
+    private var typingEnds: [BMQuestLog.Role: Task<Void, Never>] = [:]
+    /// When Quest Log was last told you are typing: it is said every few seconds, not every key.
+    private var typedAt: Date?
     private var refreshing = false
     private var loadedFor: String?
     /// The simulator run's room: it asks no one, so nothing it shows can be locked by a real answer.
@@ -145,6 +151,10 @@ final class BMQuestLogChat {
         readUpTo = nil
         newestListed = 0
         reported = 0
+        typingEnds.values.forEach { $0.cancel() }
+        typingEnds = [:]
+        typing = []
+        typedAt = nil
     }
 
     // MARK: Which part is yours
@@ -181,10 +191,10 @@ final class BMQuestLogChat {
         refreshing = true
         defer { refreshing = false }
         do {
-            // how far each has read rides along; the room still opens without it
+            // how far each has read, and who is typing, ride along; the room still opens without them
             async let beats = try? call("GET", path: BMQuestLog.heartbeatPath, token: token)
             let data = try await call("GET", token: token)
-            let read = await beats.flatMap(BMQuestLog.readUpTo)
+            let presence = await beats.flatMap(BMQuestLog.presence)
             // locked, or other keys in, while this was out
             guard unlocked, credentials?.token == token else { return }
             var list: [BMQuestLog.Entry] = []
@@ -202,7 +212,10 @@ final class BMQuestLogChat {
             pending = pending.filter { !listed.contains($0.key) }
             entries = list + pending.values.sorted { $0.at < $1.at }
             newestListed = stored.map(\.ts).max() ?? 0
-            if let read { readUpTo = read }
+            if let presence {
+                readUpTo = presence.readUpTo
+                noteTyping(presence.typingFor)
+            }
             ready = true
             loadError = nil
         } catch BMQuestLog.Failure.wrongPassphrase {
@@ -213,13 +226,43 @@ final class BMQuestLogChat {
         }
     }
 
+    /// Who is typing, as a look found it: each stays for the time it has left, and the gap to the next look.
+    private func noteTyping(_ typingFor: [BMQuestLog.Role: Double]) {
+        for role in BMQuestLog.Role.allCases {
+            typingEnds[role]?.cancel()
+            typingEnds[role] = nil
+            let left = typingFor[role] ?? 0
+            guard left > 0 else {
+                typing.remove(role)
+                continue
+            }
+            typing.insert(role)
+            typingEnds[role] = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64((left + BMQuestLog.typingHold) * 1_000_000))
+                guard !Task.isCancelled else { return }
+                self?.typing.remove(role)
+            }
+        }
+    }
+
+    /// Words going into the box: Quest Log is told you are typing — every few seconds while they do, as its own
+    /// pages say it.
+    func typed(as role: BMQuestLog.Role) async {
+        guard unlocked, !offline, let token = credentials?.token else { return }
+        let now = Date()
+        if let typedAt, now.timeIntervalSince(typedAt) < BMQuestLog.typingEvery { return }
+        typedAt = now
+        guard let body = BMQuestLog.report(role, typing: true) else { return }
+        _ = try? await call("POST", path: BMQuestLog.heartbeatPath, body: body, token: token)
+    }
+
     /// Looking at the room is reading it, as in Quest Log: up to the newest message it lists, so the other one's
     /// "Read" lights there and nothing waits for this part in the other apps.
     func markRead(as role: BMQuestLog.Role) async {
         let newest = newestListed
         guard unlocked, !offline, let token = credentials?.token, newest > 0,
               newest > (readUpTo?[role] ?? 0), newest > reported,
-              let body = BMQuestLog.readReport(role, upTo: newest) else { return }
+              let body = BMQuestLog.report(role, lastRead: newest) else { return }
         reported = newest
         do {
             _ = try await call("POST", path: BMQuestLog.heartbeatPath, body: body, token: token)
@@ -264,6 +307,11 @@ final class BMQuestLogChat {
         pending[id] = entry
         entries.append(entry)
         sent += 1
+        // sent: no longer typing
+        if typedAt != nil, let stopped = BMQuestLog.report(role, typing: false) {
+            typedAt = nil
+            Task { _ = try? await call("POST", path: BMQuestLog.heartbeatPath, body: stopped, token: token) }
+        }
         await refresh()
         return true
     }
@@ -341,8 +389,9 @@ final class BMQuestLogChat {
             entry("a3", .adventurer, "🔒", 40, failed: true),
             entry("a4", .adventurer, "Nothing under the third stone but a note: “look up”.", 12),
         ]
-        // the giver's last message has been read
+        // the giver's last message has been read, and the adventurer is writing again
         readUpTo = [.adventurer: now - 100 * 60_000, .giver: now - 12 * 60_000]
+        typing = [.adventurer]
         choose(.giver)
     }
     #endif
