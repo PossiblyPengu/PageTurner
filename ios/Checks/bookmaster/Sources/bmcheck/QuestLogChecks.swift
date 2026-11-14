@@ -71,6 +71,29 @@ func runQuestLogChecks() {
     check("the other part of the story", BMQuestLog.Role.giver.other == .adventurer && BMQuestLog.Role.adventurer.other == .giver
           && BMQuestLog.Role.allCases.map(\.rawValue) == ["giver", "adventurer"])
 
+    // ---- how far each has read: Quest Log's own receipts
+    check("the presence endpoint is beside the chat one", BMQuestLog.heartbeatPath == "/quest-log/api/heartbeat")
+    let beats = Data(#"{"now":1700000009000,"giver":{"lastActive":1700000008000,"lastRead":1700000005000},"adventurer":{"lastActive":1700000001000}}"#.utf8)
+    let read = BMQuestLog.readUpTo(beats)
+    check("how far each has read comes out of the heartbeat, 0 for one who has not",
+          read?[.giver] == 1_700_000_005_000 && read?[.adventurer] == 0, "\(String(describing: read))")
+    check("an answer that is not the heartbeat says nothing", BMQuestLog.readUpTo(Data("[]".utf8)) == nil)
+    check("an old heartbeat, a bare number, has read nothing",
+          BMQuestLog.readUpTo(Data(#"{"now":5,"giver":1700000000000}"#.utf8))?[.giver] == 0)
+    let lastMine = BMQuestLog.Entry(id: "mine1", role: .giver, text: "hi", at: 1_700_000_005_000, failed: false)
+    check("your last message is Seen once they have read up to it, Sent before, and nothing while unknown",
+          BMQuestLog.seenLabel(lastMine, theirsRead: 1_700_000_005_000) == "Seen"
+          && BMQuestLog.seenLabel(lastMine, theirsRead: 1_700_000_004_999) == "Sent"
+          && BMQuestLog.seenLabel(lastMine, theirsRead: nil) == nil)
+    struct Report: Decodable, Equatable { var role: String; var lastRead: Int64; var readOnly: Bool }
+    let reportData = BMQuestLog.readReport(.adventurer, upTo: 1_700_000_005_000)
+    let report = reportData.flatMap { try? JSONDecoder().decode(Report.self, from: $0) }
+    let keys = reportData.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }?.keys.sorted()
+    check("a read is reported as the stamp, whole, and as reading only — not as being in Quest Log",
+          report == Report(role: "adventurer", lastRead: 1_700_000_005_000, readOnly: true)
+          && keys == ["lastRead", "readOnly", "role"],
+          "\(String(describing: report)) \(String(describing: keys))")
+
     // ---- the thread's layout is the shared room's
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "UTC")!

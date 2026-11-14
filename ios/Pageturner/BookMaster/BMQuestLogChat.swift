@@ -31,6 +31,11 @@ final class BMQuestLogChat {
     private(set) var sent = 0
     /// The passphrase was changed in Quest Log: said on the lock screen after the room locks itself.
     private(set) var lockNotice: String?
+    /// How far each part has read the room — the stamp of the newest message they have seen, as Quest Log keeps it
+    /// for its own "Read". Nil until it has said.
+    private(set) var readUpTo: [BMQuestLog.Role: Double]?
+    /// The stamp of the newest message the room lists: what looking at it reads up to.
+    private(set) var newestListed: Double = 0
 
     /// The sign-in token (the bearer) and the chat key, made from the passphrase.
     private var credentials: BMQuestLogCrypto.Credentials?
@@ -39,6 +44,8 @@ final class BMQuestLogChat {
     private var opened: [String: BMQuestLog.Entry] = [:]
     /// Messages sent that the room's list does not show yet — kept in view until it does.
     private var pending: [String: BMQuestLog.Entry] = [:]
+    /// The newest stamp already reported as read, so each is reported once.
+    private var reported: Double = 0
     private var refreshing = false
     private var loadedFor: String?
     /// The simulator run's room: it asks no one, so nothing it shows can be locked by a real answer.
@@ -135,6 +142,9 @@ final class BMQuestLogChat {
         loadError = nil
         actionError = nil
         lockNotice = nil
+        readUpTo = nil
+        newestListed = 0
+        reported = 0
     }
 
     // MARK: Which part is yours
@@ -171,7 +181,10 @@ final class BMQuestLogChat {
         refreshing = true
         defer { refreshing = false }
         do {
+            // how far each has read rides along; the room still opens without it
+            async let beats = try? call("GET", path: BMQuestLog.heartbeatPath, token: token)
             let data = try await call("GET", token: token)
+            let read = await beats.flatMap(BMQuestLog.readUpTo)
             // locked, or other keys in, while this was out
             guard unlocked, credentials?.token == token else { return }
             var list: [BMQuestLog.Entry] = []
@@ -188,6 +201,8 @@ final class BMQuestLogChat {
             let listed = Set(stored.map(\.id))
             pending = pending.filter { !listed.contains($0.key) }
             entries = list + pending.values.sorted { $0.at < $1.at }
+            newestListed = stored.map(\.ts).max() ?? 0
+            if let read { readUpTo = read }
             ready = true
             loadError = nil
         } catch BMQuestLog.Failure.wrongPassphrase {
@@ -195,6 +210,24 @@ final class BMQuestLogChat {
         } catch {
             guard !Task.isCancelled else { return }
             if !ready { loadError = BMQuestLog.explain((error as? BMQuestLog.Failure) ?? .unreachable) }
+        }
+    }
+
+    /// Looking at the room is reading it, as in Quest Log: up to the newest message it lists, so the other one's
+    /// "Read" lights there and nothing waits for this part in the other apps.
+    func markRead(as role: BMQuestLog.Role) async {
+        let newest = newestListed
+        guard unlocked, !offline, let token = credentials?.token, newest > 0,
+              newest > (readUpTo?[role] ?? 0), newest > reported,
+              let body = BMQuestLog.readReport(role, upTo: newest) else { return }
+        reported = newest
+        do {
+            _ = try await call("POST", path: BMQuestLog.heartbeatPath, body: body, token: token)
+            guard credentials?.token == token else { return }
+            readUpTo?[role] = max(readUpTo?[role] ?? 0, newest)
+        } catch {
+            // said again on the next look
+            if reported == newest { reported = 0 }
         }
     }
 
@@ -256,9 +289,11 @@ final class BMQuestLogChat {
 
     // MARK: The wire
 
-    /// One request to Quest Log's chat endpoint. Throws a `BMQuestLog.Failure`.
-    private func call(_ method: String, id: String? = nil, body: Data? = nil, token: String) async throws -> Data {
-        guard var parts = URLComponents(string: "https://\(BMLinkURL.bookMasterHost)\(BMQuestLog.path)") else {
+    /// One request to Quest Log's chat endpoint (or, with `path`, its presence one). Throws a `BMQuestLog.Failure`.
+    private func call(
+        _ method: String, path: String = BMQuestLog.path, id: String? = nil, body: Data? = nil, token: String
+    ) async throws -> Data {
+        guard var parts = URLComponents(string: "https://\(BMLinkURL.bookMasterHost)\(path)") else {
             throw BMQuestLog.Failure.unreachable
         }
         if let id { parts.queryItems = [URLQueryItem(name: "id", value: id)] }
@@ -306,6 +341,8 @@ final class BMQuestLogChat {
             entry("a3", .adventurer, "🔒", 40, failed: true),
             entry("a4", .adventurer, "Nothing under the third stone but a note: “look up”.", 12),
         ]
+        // the giver's last message has been read
+        readUpTo = [.adventurer: now - 100 * 60_000, .giver: now - 12 * 60_000]
         choose(.giver)
     }
     #endif

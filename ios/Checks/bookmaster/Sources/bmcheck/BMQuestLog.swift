@@ -14,6 +14,8 @@ import Foundation
 enum BMQuestLog {
     /// Where Quest Log's chat endpoint is served, on BookMaster's address (the forward to Quest Log's own deployment).
     static let path = "/quest-log/api/chat"
+    /// Its presence endpoint, beside it, which also keeps how far each part has read the room.
+    static let heartbeatPath = "/quest-log/api/heartbeat"
     /// The chat key a passphrase makes: PBKDF2 (SHA-256) over it with this salt, AES-GCM-256 with it.
     static let salt = "quest-log-chat-salt-v1"
     /// The sign-in token it makes, in hex — what the server's APP_AUTH_TOKEN holds: the same PBKDF2 with a salt of its own.
@@ -121,6 +123,37 @@ enum BMQuestLog {
         if let object = parsed as? [String: Any] { return (object["text"] as? String) ?? "" }
         if parsed is [Any] { return "" }
         return plain
+    }
+
+    /// How far each part has read the room, out of the presence endpoint's answer (`{ now, giver: { lastRead, … },
+    /// adventurer: … }`): the stamp of the newest message they have seen, 0 for one that has not read it yet. Nil when
+    /// the answer is not that.
+    static func readUpTo(_ data: Data) -> [Role: Double]? {
+        struct Beat: Decodable {
+            var lastRead: Double = 0
+            enum CodingKeys: String, CodingKey { case lastRead }
+            init(from decoder: Decoder) throws {
+                // `now` and an old heartbeat are bare numbers, which say nothing about reading
+                let c = try? decoder.container(keyedBy: CodingKeys.self)
+                lastRead = (try? c?.decode(Double.self, forKey: .lastRead)) ?? 0
+            }
+        }
+        guard let beats = try? JSONDecoder().decode([String: Beat].self, from: data) else { return nil }
+        return Dictionary(uniqueKeysWithValues: Role.allCases.map { ($0, beats[$0.rawValue]?.lastRead ?? 0) })
+    }
+
+    /// Under your last message: whether the other part has read up to it — the shared room's words, and Quest Log's
+    /// rule (its stamp against how far they have read). Nil while that is not known.
+    static func seenLabel(_ lastMine: Entry, theirsRead: Double?) -> String? {
+        guard let theirsRead else { return nil }
+        return lastMine.at <= theirsRead ? "Seen" : "Sent"
+    }
+
+    /// What is said when the room has been read up to `newest`, as `role`: only how far — reading here is not
+    /// being in Quest Log, so the presence it keeps stays as it was.
+    static func readReport(_ role: Role, upTo newest: Double) -> Data? {
+        try? JSONSerialization.data(
+            withJSONObject: ["role": role.rawValue, "lastRead": Int64(newest.rounded()), "readOnly": true] as [String: Any])
     }
 
     /// Each id once, in the order first seen (a re-post that raced its original is not shown twice).

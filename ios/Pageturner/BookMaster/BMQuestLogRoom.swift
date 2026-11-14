@@ -48,6 +48,8 @@ struct BMQuestLogRoomView: View {
     @State private var sending = false
     @State private var atBottom = true
     @State private var newBelow = false
+    /// Whether the room is on screen — not covered by a screen pushed over the chat.
+    @State private var shown = false
     @FocusState private var focused: Bool
 
     private let chat = BMQuestLogChat.shared
@@ -60,9 +62,11 @@ struct BMQuestLogRoomView: View {
         content
             .background(Color(uiColor: .systemGroupedBackground))
             .onAppear {
+                shown = true
                 chat.loadIfNeeded()
                 Notifier.shared.noteQuestLogOpened()
             }
+            .onDisappear { shown = false }
             // what comes in while the room is the one in view is seen as it comes
             .onChange(of: Notifier.shared.questLogUnread) { _, waiting in
                 if waiting { Notifier.shared.noteQuestLogOpened() }
@@ -70,6 +74,18 @@ struct BMQuestLogRoomView: View {
             .task(id: chat.unlocked && scenePhase == .active) {
                 if chat.unlocked, scenePhase == .active { await chat.poll() }
             }
+            // looking at the room is reading it: in front, and with the newest message in view — one waiting below
+            // the fold is not read yet
+            .task(id: Look(newest: chat.newestListed, role: role, looking: shown && scenePhase == .active && atBottom)) {
+                if shown, scenePhase == .active, atBottom, let role { await chat.markRead(as: role) }
+            }
+    }
+
+    /// What decides whether the room has just been read.
+    private struct Look: Equatable {
+        var newest: Double
+        var role: BMQuestLog.Role?
+        var looking: Bool
     }
 
     @ViewBuilder
@@ -137,8 +153,9 @@ struct BMQuestLogRoomView: View {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     status
+                    let lastMine = chat.entries.last(where: { $0.role == role })?.id
                     ForEach(BMQuestLog.rows(chat.entries)) { row in
-                        line(row, mine: row.entry.role == role)
+                        line(row, mine: row.entry.role == role, lastMine: row.id == lastMine)
                     }
                     if let error = chat.actionError {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -224,12 +241,12 @@ struct BMQuestLogRoomView: View {
         }
     }
 
-    private func line(_ row: BMQuestLog.Row, mine: Bool) -> some View {
+    private func line(_ row: BMQuestLog.Row, mine: Bool, lastMine: Bool) -> some View {
         VStack(spacing: 2) {
             if let day = row.day { dayHeader(day) }
             HStack {
                 if mine { Spacer(minLength: 48) }
-                column(row, mine: mine)
+                column(row, mine: mine, lastMine: lastMine)
                 if !mine { Spacer(minLength: 48) }
             }
             .padding(.top, row.head && row.day == nil ? 6 : 0)
@@ -244,8 +261,9 @@ struct BMQuestLogRoomView: View {
             .padding(.vertical, 10)
     }
 
-    /// One message's bubble, with the other's name above it and its time below it where a burst begins and ends.
-    private func column(_ row: BMQuestLog.Row, mine: Bool) -> some View {
+    /// One message's bubble, with the other's name above it and its time below it where a burst begins and ends — and
+    /// under your own last message, whether they have read it.
+    private func column(_ row: BMQuestLog.Row, mine: Bool, lastMine: Bool) -> some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 2) {
             if row.head, !mine {
                 Text(partner)
@@ -255,12 +273,20 @@ struct BMQuestLogRoomView: View {
             }
             bubble(row.entry, mine: mine)
             if row.tail {
-                Text(BMChat.clock(row.entry.date))
+                Text(footnote(row.entry, lastMine: lastMine))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
             }
         }
+    }
+
+    /// The time, and under your own last message "Seen" or "Sent".
+    private func footnote(_ entry: BMQuestLog.Entry, lastMine: Bool) -> String {
+        let clock = BMChat.clock(entry.date)
+        guard lastMine, let role,
+              let status = BMQuestLog.seenLabel(entry, theirsRead: chat.readUpTo?[role.other]) else { return clock }
+        return "\(clock) · \(status)"
     }
 
     /// The bubble's long-press is the menu with Delete (your own) and Copy.
