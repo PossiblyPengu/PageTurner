@@ -232,7 +232,7 @@ struct ChatAppsSettingsPage: View {
             } header: {
                 Text("Web apps")
             } footer: {
-                Text("They open from the Together tab, signed in once for all three, and stay signed in until you do this.")
+                Text("BookMaster’s pages are the Shelf, Together and Stats tabs; Kindred and Quest Log open from the Together tab’s menu. All three are signed in once, and stay signed in until you do this.")
             }
         }
         .navigationTitle("Chat & web apps")

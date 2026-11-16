@@ -77,21 +77,11 @@ shot 07-together 6 -PTDebugScreen together
 shot 72-reading-now 8 -PTDebugScreen reading
 shot 70-bookmaster 8 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen together
 shot 71-bookmaster-shelf 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen shelf
-shot 73-bookmaster-progress 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmprogress
-shot 74-bookmaster-together 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmtogether
-shot 75-bookmaster-quotes 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmquotes
-shot 76-bookmaster-discover 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmdiscover
-shot 77-bookmaster-find 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmsearch
-shot 78-bookmaster-wrapped 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmwrapped
-shot 79-bookmaster-book 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmbook
-shot 79a-bookmaster-pick 12 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen bmpick
+shot 73-bookmaster-progress 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen stats
 shot 08-search 6 -PTDebugScreen search
 shot 09-settings 6 -PTDebugScreen settings
 # the settings list as a linked reader sees it (the BookMaster suite rows), and the pages behind it
 shot 09a-settings-linked 8 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings
-shot 09h-inbox 12 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen inbox
-shot 09i-questlog-chat 12 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen qlchat -PTDebugChatTab questlog
-shot 09j-questlog-cipher 8 -PTDebugScreen qlvector
 shot 09k-settings-drive 10 -PTDebugSeed 1 -PTDebugScreen settings -PTDebugSettingsPush drive
 shot 09b-settings-bookmaster 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush bookmaster
 shot 09c-settings-notifications 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings -PTDebugSettingsPush notifications

@@ -40,13 +40,11 @@ final class AppRouter {
     var resumePrompt: ResumePrompt?
     /// A book just finished: the sheet that asks for a rating and what to do with its file (`FinishedBookSheet`).
     var finished: Book?
-    /// Where the Together tab should go next — the chat, or a page of one of the web apps — set by
-    /// a tapped notification and cleared by the tab once it has gone there.
-    var suiteTarget: BMDeepLink.Target?
+    /// One of the web apps, full screen over the tabs: where a tapped notification, or a link out of a BookMaster
+    /// page into Kindred or Quest Log, leads.
+    var browser: BMWebLaunch?
     /// The chat as a full page over whatever is up — what the floating chat button opens.
     var showChat = false
-    /// The Together tab should open its notifications list (set by the simulator run; the bell does it by hand).
-    var showInbox = false
     /// Set to have the library shelf filter to this text (a book page's author tap); the shelf clears it once read.
     var librarySearch: String?
     /// The screens that cover the floating button's place (the chat itself, the in-app browser), by
@@ -64,7 +62,7 @@ final class AppRouter {
     /// Something is up over the tabs that a book opening by itself would close (an edit, Settings, the chat…).
     var presenting: Bool {
         detail != nil || editing != nil || shelfTarget != nil || showSettings || showLink || showImporter || showDrive
-            || showChat || resumePrompt != nil || finished != nil
+            || showChat || browser != nil || resumePrompt != nil || finished != nil
     }
 
     /// A book has just been finished (the reader left at its end, an audiobook played out, Mark as Finished): ask
@@ -96,6 +94,7 @@ final class AppRouter {
         showImporter = false
         showDrive = false
         showChat = false
+        browser = nil
         resumePrompt = nil
         finished = nil
     }
@@ -105,25 +104,36 @@ final class AppRouter {
         BMInboxStore.shared.markRead(ids: [item.id])
         switch BMInbox.destination(for: item) {
         case .chat:
-            Notifier.shared.noteChatOpened()
-            // already in front: closing and opening it again would lose the draft, the tab and the place
-            if showChat { return }
-            // whatever is up (the settings, say) is put away first; the chat follows once it is gone
-            let covered = detail != nil || editing != nil || shelfTarget != nil || showSettings
-                || showLink || showImporter || showDrive
-            dismissPresentations()
-            if covered {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.showChat = true }
-            } else {
-                showChat = true
-            }
+            // already in front: closing and opening it again would lose the draft and the place
+            if showChat { Notifier.shared.noteChatOpened(); return }
+            openSuite(.chat, covered: presenting)
         case .together:
             dismissPresentations()
             tab = .together
         case let .web(app, url):
-            dismissPresentations()
-            tab = .together
-            suiteTarget = .web(app, url)
+            openSuite(.web(app, url), covered: presenting)
+        }
+    }
+
+    /// Open the chat or one of the web apps. Whatever is up (the settings, say) is put away first; what is asked
+    /// for follows once it is gone. `covered`: something was up when the request came, so it is waited for.
+    func openSuite(_ target: BMDeepLink.Target, covered: Bool) {
+        guard BookMaster.shared.isLinked else { return }
+        dismissPresentations()
+        if covered {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.present(target) }
+        } else {
+            present(target)
+        }
+    }
+
+    private func present(_ target: BMDeepLink.Target) {
+        switch target {
+        case .chat:
+            Notifier.shared.noteChatOpened()
+            showChat = true
+        case let .web(app, url):
+            browser = BMWebLaunch(app: app, url: url)
         }
     }
 

@@ -1,7 +1,8 @@
 import Foundation
 
-/// The suite's three web apps, opened inside Pageturner, and the rules for where that browser
-/// may go. Pure — no WebKit — so the rules can be checked off-device.
+/// The suite's three web apps, opened inside Pageturner — BookMaster's pages as its tabs (`BMWebTab`), Kindred
+/// and Quest Log in the browser — and the rules for where they may go. Pure — no WebKit — so the rules can be
+/// checked off-device.
 ///
 /// All three are served from BookMaster's address (BookMaster at the root, Kindred under
 /// `/kindred/`, Quest Log under `/quest-log/`), so one browser and one sign-in cover the set, and a
@@ -107,6 +108,45 @@ enum BMWebApp: String, CaseIterable, Identifiable {
     static func isHandoff(_ url: URL?) -> Bool {
         guard let url, url.host?.lowercased() == BMLinkURL.bookMasterHost else { return false }
         return url.path.hasPrefix("/link/")
+    }
+}
+
+/// BookMaster's own pages as Pageturner's tabs, and its chat: the very pages the web shows, drawn alone
+/// (`?in=pageturner` — BookMaster leaves out its own bars, bell, banners and chat button, which Pageturner
+/// draws around them). Each is a web view of its own (`BMWebPages.tab`), so a tab is where it was left.
+enum BMWebTab: String, CaseIterable, Identifiable {
+    case shelf, together, stats, chat
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .shelf: return "Shelf"
+        case .together: return "Together"
+        case .stats: return "Stats"
+        case .chat: return "Chat"
+        }
+    }
+
+    /// The page on BookMaster: its library, Together, its progress, and the chat with nothing around it.
+    var path: String {
+        switch self {
+        case .shelf: return "/library"
+        case .together: return "/together"
+        case .stats: return "/progress"
+        case .chat: return "/embed/chat"
+        }
+    }
+
+    /// Where the tab opens.
+    var url: URL {
+        var parts = URLComponents()
+        parts.scheme = "https"
+        parts.host = BMLinkURL.bookMasterHost
+        parts.path = path
+        // the chat page is drawn alone already; the others are asked to be
+        if self != .chat { parts.queryItems = [URLQueryItem(name: "in", value: "pageturner")] }
+        return parts.url!
     }
 }
 

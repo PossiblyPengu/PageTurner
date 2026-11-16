@@ -189,71 +189,45 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Nothing of the web site is involved, so it works whether or not the PWA is deployed. (`pageturner://link?code=`
   and `docs/js/native-link.js` are the older route and still work; the app handles both.) Why not
   `ASWebAuthenticationSession`: its callback came from a page that was never deployed, so linking never completed.
-- BookMaster lives in three tabs, not one: **Books** (`BookMasterBooksView` — shelf grid, filters,
-  sort, bulk ops, up-next reorder via `setUpNext`, TBR pick, pushed destinations incl. `BMSeriesView`),
-  **Together** (`BookMasterTogetherView`) and **Stats** (`BookMasterStatsView` — overview+stats,
-  goals via `BMGoalSheet`, heatmap, achievements, profile/export/`BMImportSheet`). Each carries its own
-  `NavigationStack` and reports `place = "bookmaster"` while on screen. Shared chrome is `BMShared.swift`
-  (`bmCard`, `BMLinkPrompt`, `BMCover`, `BMMetric`, `BMFormat`). Detail additions: `BMPace` (the web's
-  PaceWidget math, pure), `BMLogSheet` + `BMReadingTimer` (manual logging, persisted stopwatch),
-  `BMEditSheet` (catalogue edit), `BMScanView` (barcode → `CatalogueSearch`). `GoodreadsCSV` parses an
-  export on-device (scalars not Characters — a CRLF is one grapheme but two terminators); only the rows
-  travel to `/pageturner/import`. New bridge writes go through `sendJSON` (username merged server-side).
-- Chat (`BMChat.swift` is pure and Linux-checked; `BMChatView.swift` is the screen): the suite's one shared room, in BookMaster's
-  database, through the `chat` (GET reads, POST sends), `chat-read` and `chat-remove` bridge routes — a message sent here is tagged
-  `pageturner` by the server, whatever the body says. Reached from the floating chat button (below) and a card on the Together tab — no button in any header; the unread dot is the
-  feed's `bookmaster:chat:<id>` notice (`BMChat.unreadNotice`), gone once the room is opened. It polls every 5s while on screen and reports
-  how far you have read. Rules learned in review: a poll that began before a send or take-back finished carries the room as it was and is
-  dropped (`edits`); one refresh at a time; reading is reported only while the screen is in front (`visible`); the length limit counts UTF-16
-  units like the server; a full page that reaches back to nothing held replaces it instead of leaving a hole. Quest Log's own private chat is end-to-end encrypted, and is the chat screen's second tab
-  ("🔒 Quest Log", `BMChatTab`) — a native screen like the shared room's (`BMQuestLogRoomView`), not a framed web page. The cipher is the one in
-  Quest Log's chat.js / utils.js and BookMaster's secretChat.ts, line for line: PBKDF2-SHA256 (100,000 rounds) over the passphrase makes two
-  keys — the chat key (salt `quest-log-chat-salt-v1`) → AES-GCM-256, a fresh 12-byte IV, ciphertext+tag in base64, and the **sign-in token**
-  (salt `quest-log-auth-v1`, 32 bytes as hex) that is the bearer and all Quest Log / BookMaster's forward is ever shown (`BMQuestLogCrypto`,
-  CryptoKit + CommonCrypto), so a message written in any of the three opens in the others and the server's `APP_AUTH_TOKEN` accepts the
-  token — never change it in one place only (Quest Log's tests/auth-token.test.mjs holds the same known answers as `selfTest`). `BMQuestLog` is the pure part (Linux-checked): the stored entry, opening and
-  unwrapping (`{"text":…}`), ids Quest Log accepts, the layout (it reuses `BMChat.rows`). `BMQuestLogChat` is the connection: it talks to
-  `/quest-log/api/chat` on BookMaster's address with the sign-in token as the bearer (what Quest Log's own pages send), opens and seals on this
-  iPhone, polls every 5 s while the room is in front, and keeps what it sent in view until the list shows it. Receipts and typing are Quest
-  Log's own: each poll also reads `/quest-log/api/heartbeat` (`BMQuestLog.presence`: `lastRead` per part — the stamp of the newest message
-  seen — and `typing`, timed by the answer's `now` against Quest Log's 6 s window). Your last message says "Seen" or "Sent" against the other
-  part's; "Name is typing…" shows for the time left plus `typingHold` (a word every 3 s, a look every 5 s). The room in front with the newest
-  message in view reports `lastRead`, and words in the box report `typing: true` every 3 s (`false` once sent), always with
-  `elsewhere: true`, which moves only those two and never Quest Log's presence or tab. BookMaster's locked room does the same
-  (`fetchPresence` / `reportPresence` in secretChat.ts). **Pageturner holds the two
-  keys, never the passphrase**: it is used once to make them and neither sent nor stored; the keys live in memory, and in the Keychain (this
-  device only, when unlocked) as JSON unless "Keep it unlocked on this iPhone" is turned off on the lock screen (an earlier build's stored
-  passphrase is read once and replaced). Locking the room, unlinking BookMaster (`RootView` → `reset()`) or signing out of the web apps
-  erases them. A 429 is "too many wrong passphrases" (10 in 15 minutes per caller). Nothing it opens
-  goes to BookMaster, the inbox, a notification or the log (Quest Log's notices only ever say that something is new). The part (giver or
-  adventurer) is BookMaster's `questLogRole` on the chat answer, else the reader's choice, kept per account. A wrong passphrase is a 401 (and a
-  remembered one that stops working locks the room with a note); a 403 is "that role belongs to another device". The cipher is verified by the
-  simulator run (`-PTDebugScreen qlvector` opens two messages made by Node with the web's recipe; the app dying fails the run), and the room
-  is photographed (`09i-questlog-chat`). Its blue-square dot (`Notifier.questLogUnread`) clears when the room is opened.
+- BookMaster's screens are BookMaster's own pages, not a native copy: the **Shelf**, **Together** and **Stats** tabs are web views of
+  `/library`, `/together` and `/progress` (`BMWebTab`, pure and Linux-checked; `BMWebTabView` / `BMWebTabContent` in `BMWebTabs.swift`), opened
+  with `?in=pageturner` (remembered for the life of the view, `BookMaster/src/lib/embedded.ts`): BookMaster then draws the page alone — no bars,
+  bell, banners or chat button, and no heartbeat of its own — and Pageturner draws those around it (tab bar, Settings, the Together bell and the
+  "Open an app" menu) and says where you are (`place`, set from the selected tab in `RootView`). One `WKWebView` per tab is kept alive
+  (`BMWebPages.tab(_:)`), pull to refresh is the web view's own. Unlinked, a tab shows `BMLinkPrompt` instead. A link out of a tab into Kindred or
+  Quest Log opens that app full screen (`router.browser`, `BMWebBrowserScreen`), as do notices and `pageturner://open`. What stays native is what
+  needs the device: the link and its sync (`BookMasterClient`: progress, sessions, quotes, covers, shelf pull, shelving a book, comments and
+  suggestions on a book's page), the notifications and inbox (`Notifier`, `BMInbox*`), the floating chat button, and the barcode scanner. Do not
+  rebuild a BookMaster screen natively: change the web page, and every app shows it. `BMDot` (`BMDot.swift`) is the notification dot.
+- Chat: the suite's one shared room and Quest Log's own are BookMaster's chat page (`/embed/chat`, with its two tabs), shown full screen by
+  `BMChatScreen` (`BMWebTabs.swift`) — reached from the floating chat button below, and from a chat notice. Quest Log's room inside it is Quest Log's
+  own page (`/quest-log/?embed=chat`, framed same-origin), so it asks for its passphrase itself and is the same screen as in Quest Log and
+  BookMaster; the app holds no keys and no cipher. Receipts, typing and reactions are those apps' business. `BMChat` (pure, Linux-checked) is what
+  is left here: the feed's `bookmaster:chat:<id>` notice that says a message waits (`BMChat.unreadNotice`), which the dot on the button shows and
+  opening the chat clears (`Notifier.chatUnread` / `noteChatOpened`, also called while the chat is open so a message that arrives is read as it
+  comes). Unlinking, or signing out of the web apps, clears the web sign-ins (`BMWebPages.clearSignIns`), Quest Log's unlocked room among them.
   The chat is also one tap from anywhere but the reader: `BMChatButtonLayer` (`BMChatButtonView.swift`) is a draggable round button laid
   over the whole shell in `RootView`, opening the chat as a full-screen page (`router.showChat`, `.fullScreenCover`) — a sheet read as a pop-up. When it shows and where it rests are pure
-  (`BMChatButton`, Linux-checked); it steps aside over the reader (`router.readerOpen`) and over any screen marked `.hidesChatButton()`
-  (the chat, the in-app browser); Settings → Chat & web apps turns it off. Its dot and the Together tab's share one state
-  (`Notifier.chatUnread` / `noteChatOpened`), refreshed by the app's 30 s look. Gestures and accessibility go on the small
-  face *before* `.position`, or they stand over the whole screen.
+  (`BMChatButton`, Linux-checked); it steps aside over the reader (`router.readerOpen`) and over any screen marked `.hidesChatButton()`;
+  Settings → Chat & web apps turns it off. Gestures and accessibility go on the small face *before* `.position`, or they stand over the whole screen.
 - Settings (`Settings/SettingsView.swift`) is a short list of topics, each its own page (`SettingsDestination`), not one long form: the
   BookMaster suite (BookMaster account & what is sent, Notifications — banners, the list, notifying when closed, staying connected — and Chat &
   web apps; unlinked, only the BookMaster row shows), Reading & listening (Reading, Read Aloud, Audiobooks, Appearance), Your library
   (Library & import, Backup) and Support (Diagnostics, version). A new setting goes on the page for its topic; a new topic is a case in
   the enum, a row in the list and a view in `SettingsPages.swift` (or beside the feature). The simulator run screenshots the pages
-  (`-PTDebugSettingsPush <page>`). The Together tab reads top to bottom as: what is waiting (suggestions, notices), the ways into the
-  suite (chat, the other apps), then the two of you.
+  (`-PTDebugSettingsPush <page>`).
 - Whose dot it is: a notice or count about Quest Log is blue and square, every other round in the accent — `BMDotTone` / `BMSuite.dotTone`
-  (pure, Linux-checked) and `BMDot` (the view), used for the notices card, the apps card's tiles and the floating chat button's dot.
+  (pure, Linux-checked) and `BMDot` (the view), used for the inbox and the floating chat button's dot.
   BookMaster, Kindred and Quest Log draw the same rule; change all four together.
 - Deploys are not automatic for BookMaster/Kindred/Quest Log: a push to main runs CI only, and the code reaches production with
   `npm run deploy` in that repo (migrations first, `npm run db:migrate:remote`). Pageturner's own Pages deploy (the bridge function) runs
   from CI with `--branch=main`; without that the deploy lands as a *preview* and the bridge in production silently stays old — the app then
   answers "Unknown bridge route" for anything newer than the last real deploy.
 - Web apps in the app (`BMWebApps.swift` is pure and Linux-checked; `BMWebBrowser.swift` is the WebKit layer): BookMaster, Kindred and Quest Log
-  open inside Pageturner from the Together tab (an "Other apps" card, and any notice in "From the other apps" opens its page). All three live on
+  open inside Pageturner — BookMaster's pages as the tabs, and each app full screen from the Together tab's "Open an app" menu, a notice or a link
+  out of a tab (`router.browser`, one `BMWebBrowserView` with a switch between the three). All three live on
   `bookmaster.pages.dev` (BookMaster at the root, `/kindred/`, `/quest-log/`), so one persistent `WKWebsiteDataStore.default()` signs in once for
-  all; Settings → Chat & web apps clears it. One `WKWebView` per app is kept alive (`BMWebPages`, shed on a memory warning). `BMWebPolicy.decide` is the
+  all; Settings → Chat & web apps clears it. One `WKWebView` per app, and per tab, is kept alive (`BMWebPages`, shed on a memory warning). `BMWebPolicy.decide` is the
   only rule for where a page may go: our host is shown, a link into another of the three switches the browser to that app, every other site, `mailto:`
   and `tel:` go to iOS, and `pageturner://`, `file:`, `javascript:` and plain `http` are refused. The web view needs the app to supply what Safari does:
   JS alert/confirm/prompt panels (without them `confirm()` silently answers no), `target=_blank` links, and `WKDownload` for files a page saves
@@ -272,7 +246,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   for a message arriving while the chat is open) when the app is active, a **local notification** when it is not (and the reader allowed
   it). Everything told is kept in the **inbox** (`BMInbox` pure and Linux-checked, `BMInboxStore` saves it per account, `BMInboxView` is
   the list: the Together tab's bell and Settings → Notifications); `AppRouter.open(_ item:)` is where an item leads (the chat, the Together
-  tab, or a page of a web app), used by banner and list alike; a tapped local notification carries its item's id (`tappedItemID`). The Together tab badge and the app icon count the inbox's unread. An item cleared while BookMaster still lists it is held back (`dismissed`, saved with the history), or the next look would bring it back unread.
+  tab, or a page of a web app, `AppRouter.openSuite`), used by banner and list alike; a tapped local notification carries its item's id (`tappedItemID`). The Together tab badge and the app icon count the inbox's unread. An item cleared while BookMaster still lists it is held back (`dismissed`, saved with the history), or the next look would bring it back unread.
   Behind the app, iOS wakes Pageturner for a background refresh when it likes; **Stay connected** (`BackgroundKeepAlive`, off by default,
   `BMKeepAlive` holds the rules) loops a silent sound so the app is kept running and looks every 30 s (90 s in Low Power Mode). It mixes
   with other sound, leaves a book's audio session alone (the category is only set when it is not already `.playback`), and stops when the

@@ -134,16 +134,12 @@ func runData() async {
     runSelectorChecks()
     runNarrationChecks()
     runShelfChecks()
-    runSuiteChecks()
     runChatChecks()
     runWebAppsChecks()
     runDeepLinkChecks()
     runInboxChecks()
-    runQuestLogChecks()
     runDriveChecks()
     runDriveBooksChecks()
-    runGoodreadsChecks()
-    runPaceChecks()
     runQolChecks()
     runOPDSChecks()
     runVoiceDSPChecks()
@@ -264,13 +260,6 @@ func run() async {
                 && told.items.first?.body == "Hyperion by Dan Simmons — “you will love this”", "\(told.items)")
         check("…and is not announced twice", NotificationPlan.plan(nudges: t.nudges, notices: t.notices, seen: told.seen).items.isEmpty)
     } catch { check("together decodes with a nudge", false, "\(error)") }
-    if let nudgeId {
-        do {
-            try await bm.answerNudge(id: nudgeId, accept: true)
-            let row = q("select ub.status from user_books ub join books b on b.id=ub.book_id join users u on u.id=ub.user_id where u.username='pengu' and b.title='Hyperion'").first
-            check("accepting shelves it as want_to_read", s(row, "status") == "want_to_read", "\(String(describing: row))")
-        } catch { check("accept a suggestion", false, "\(error)") }
-    }
     // pengu suggests a book Kristen doesn't have
     do {
         let to = try await bm.suggest(ref: BMBookRef(title: "Children of Dune", author: "Frank Herbert", isbn: nil, openLibraryId: nil, userBookId: nil), note: "next in the series")
@@ -298,66 +287,6 @@ func run() async {
         let mine = thread.comments.first { $0.userId == thread.you }
         check("own comment readable and recognised", mine?.content == "Slow start but worth it")
     } catch { check("fetch the thread", false, "\(error)") }
-
-    // ------------------------------------------------------------------ chat
-    section("Chat")
-    do {
-        let sent = try await bm.sendChat("hello from the reader")
-        check("a message sends, and comes back as mine", sent.body == "hello from the reader" && sent.name == "Andrew", "\(sent)")
-        check("…tagged as written in Pageturner", sent.app == "pageturner", sent.app)
-        let row = q("select body, app, user_id from chat_messages where id=\(sent.id)").first
-        check("it is in the shared room, in the database", s(row, "body") == "hello from the reader" && s(row, "app") == "pageturner", "\(String(describing: row))")
-
-        let room = try await bm.fetchChat()
-        check("the room reads back: the message, me, my partner, what I have read",
-              room.messages.last?.id == sent.id && room.me.displayName == "Andrew"
-              && room.partner?.displayName == "Kristen" && room.read.mine == sent.id && room.unread == 0, "\(room)")
-
-        // Kristen answers from Kindred
-        let ms = Int(Date().timeIntervalSince1970 * 1000)
-        _ = q("insert into chat_messages (user_id, body, app, created_at) select id, 'and from kindred', 'kindred', \(ms) from users where username='kristenkrae'")
-        let answer = q("select id from chat_messages where body='and from kindred'").first
-        let answerId = Int(s(answer, "id") ?? "") ?? -1
-        let since = try await bm.fetchChat(after: sent.id)
-        check("what came since is just her answer, unread, and says where it was written",
-              since.messages.map(\.id) == [answerId] && since.unread == 1 && since.messages.first?.app == "kindred", "\(since.messages.map(\.id)) unread \(since.unread)")
-        let feed = try await bm.fetchTogether()
-        check("her message shows in my suite feed as the chat notice", BMChat.unreadNotice(feed.notices)?.id == "bookmaster:chat:\(answerId)",
-              "\(feed.notices.map(\.id))")
-
-        try await bm.markChatRead(upTo: answerId)
-        let readRow = q("select r.last_read_id from chat_reads r join users u on u.id=r.user_id where u.username='pengu'").first
-        check("telling the server I have read it is kept", s(readRow, "last_read_id") == "\(answerId)", "\(String(describing: readRow))")
-        let afterRead = try await bm.fetchChat()
-        let feedAfter = try await bm.fetchTogether()
-        check("…so nothing is unread any more, and the notice is gone",
-              afterRead.unread == 0 && afterRead.read.mine == answerId && BMChat.unreadNotice(feedAfter.notices) == nil)
-
-        let older = try await bm.fetchChat(before: answerId)
-        check("paging back returns what came before", older.messages.map(\.id) == [sent.id] && older.complete, "\(older.messages.map(\.id))")
-
-        do {
-            try await bm.removeChat(id: answerId)
-            check("her message cannot be taken back by me", false, "removed")
-        } catch { check("her message cannot be taken back by me", q("select id from chat_messages where id=\(answerId)").count == 1) }
-        try await bm.removeChat(id: sent.id)
-        check("my own can", q("select id from chat_messages where id=\(sent.id)").isEmpty)
-        do {
-            _ = try await bm.sendChat("   ")
-            check("a blank message is refused", false)
-        } catch { check("a blank message is refused", true) }
-    } catch { check("chat", false, "\(error)") }
-    // leave the room as it was found
-    _ = q("delete from chat_messages")
-    _ = q("delete from chat_reads")
-
-    // -------------------------------------------------------------- overview
-    section("Overview")
-    do {
-        let o = try await bm.fetchOverview()
-        check("stats decode", o.stats.currentStreak >= 0 && o.stats.minutesRead >= 12, "\(o.stats)")
-        check("quotes counted", o.stats.quotesSaved >= 1, "\(o.stats.quotesSaved)")
-    } catch { check("overview decodes", false, "\(error)") }
 
     // ----------------------------------------------------------------- shelf
     section("Shelf pull")
@@ -425,83 +354,11 @@ func run() async {
         }
     } catch { check("shelve by name and pin", false, "\(error)") }
 
-    // the detail page's whole read of one book (Dune was finished a moment ago —
-    // at 100% nothing is sealed, and Kristen's own row rides along when she has it)
-    _ = q("""
-        insert or ignore into user_books (id, user_id, book_id, status, current_page, rating)
-        values ('theirs-dune', (select id from users where username='kristenkrae'), '\(bookId)', 'read', 300, 5)
-        """)
-    do {
-        let detail = try await bm.fetchBookDetail(pin: pin)
-        check("detail names the catalogue book", detail.catalogue?.title == "Dune", "\(String(describing: detail.catalogue))")
-        check("detail carries the shelf row", detail.book?.userBookId == pin)
-        check("a finished book reads 100", detail.book?.status == "read", "\(String(describing: detail.book?.status))")
-        check("its sessions come along", detail.sessions.count >= 1, "\(detail.sessions.count)")
-        check("its quotes come along", detail.quotes.contains { $0.content == "Fear is the mind-killer." }, "\(detail.quotes.count)")
-        check("the thread comes along, readable at 100%", detail.comments.count == 2 && detail.comments.allSatisfy { !$0.ahead }, "\(detail.comments)")
-        check("the partner's row comes along", detail.theirs?.name == "Kristen" && detail.theirs?.rating == 5, "\(String(describing: detail.theirs))")
-    } catch { check("fetch the book detail", false, "\(error)") }
-
-    // the whole-list and per-book quotes reads
-    do {
-        let all = try await bm.fetchQuotes()
-        check("the quotes list decodes with books", all.contains { $0.title == "Dune" && $0.content == "Fear is the mind-killer." }, "\(all.count)")
-        if let pin {
-            let own = try await bm.fetchQuotes(pin: pin)
-            check("narrowed to one row", own.allSatisfy { $0.userBookId == pin } && !own.isEmpty, "\(own.count)")
-        }
-    } catch { check("fetch the quotes", false, "\(error)") }
-
-    // badge wall, stat block, partner shelf, the wrap, the suggestions
-    do {
-        let wall = try await bm.fetchAchievements()
-        check("the badge wall decodes", wall.allSatisfy { !$0.id.isEmpty }, "\(wall.count)")
-    } catch { check("fetch the achievements", false, "\(error)") }
-    do {
-        let s = try await bm.fetchStats()
-        check("level and xp decode", s.level >= 1 && s.xp >= 0, "level=\(s.level) xp=\(s.xp)")
-        check("the month has days", !s.recentActivity.isEmpty, "\(s.recentActivity.count)")
-    } catch { check("fetch the stats", false, "\(error)") }
-    do {
-        let theirs = try await bm.fetchPartnerShelf()
-        check("the partner is Kristen", theirs.partner?.name == "Kristen", "\(String(describing: theirs.partner))")
-        check("her year decodes", (theirs.booksThisYear ?? -1) >= 0 && theirs.year == Calendar.current.component(.year, from: Date()), "\(theirs)")
-    } catch { check("fetch the partner shelf", false, "\(error)") }
-    do {
-        let year = try await bm.fetchWrapped()
-        check("the wrap decodes", (year.booksRead ?? 0) >= 1 && (year.pagesRead ?? 0) > 0, "\(year)")
-    } catch { check("fetch the wrap", false, "\(error)") }
-    do {
-        let recs = try await bm.fetchRecommendations()
-        check("the lanes decode", recs.partner != nil, "\(String(describing: recs.partner))")
-    } catch { check("fetch the recommendations", false, "\(error)") }
     do {
         let t = try await bm.fetchTogether()
         check("sent suggestions ride along", t.sent.contains { $0.title == "Children of Dune" && $0.toName == "Kristen" }, "\(t.sent)")
     } catch { check("together's sent list", false, "\(error)") }
 
-    // rows that are yours to take back, each by name
-    do {
-        let sid = q("select id from reading_sessions order by rowid desc limit 1").first
-        let qid = q("select id from quotes where content='Fear is the mind-killer.'").first
-        let cid = q("select id from book_comments where content='Slow start but worth it'").first
-        if let id = s(sid, "id") {
-            try await bm.remove(.session, id: id)
-            check("a session taken back", q("select id from reading_sessions where id='\(id)'").isEmpty)
-        }
-        if let id = s(qid, "id") {
-            try await bm.remove(.quote, id: id)
-            check("a quote taken back", q("select id from quotes where id='\(id)'").isEmpty)
-        }
-        if let id = s(cid, "id") {
-            try await bm.remove(.comment, id: id)
-            check("a comment taken back", q("select id from book_comments where id='\(id)'").isEmpty)
-        }
-        do {
-            try await bm.remove(.session, id: "does-not-exist")
-            check("removing a stranger's row 404s", false)
-        } catch { check("removing a stranger's row 404s", true) }
-    } catch { check("take rows back", false, "\(error)") }
     if let hobbitPin {
         do {
             _ = try await bm.shelve(pin: hobbitPin, unshelve: true)

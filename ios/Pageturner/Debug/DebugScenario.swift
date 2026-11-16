@@ -44,7 +44,7 @@ enum DebugScenario {
         }
     }
 
-    /// A reader linked to a made-up BookMaster: a shelf (one book of which is in the seeded library), numbers, a partner.
+    /// A reader linked to a made-up BookMaster: a shelf (one book of which is in the seeded library) and a partner.
     private static func linkForPhotos() {
         func decode<T: Decodable>(_ json: String) -> T? { try? JSONDecoder().decode(T.self, from: Data(json.utf8)) }
         let shelf: [BMShelfRow] = decode("""
@@ -67,86 +67,7 @@ enum DebugScenario {
                     {"id":"quest-log:1","app":"quest-log","text":"Something new for you","path":"/quest-log"},
                     {"id":"kindred:ask:a1","app":"kindred","text":"Sam asked you a question","path":"/ask"}]}
         """)
-        let overview: BMOverview? = decode("""
-        {"stats":{"currentStreak":12,"longestStreak":31,"booksFinished":18,"minutesRead":5230,"quotesSaved":44},
-         "goals":[{"id":"g1","type":"yearly_books","target":24,"current":18,"progress":0.75},
-                  {"id":"g2","type":"monthly_books","target":2,"current":1,"progress":0.5}],
-         "recentAchievements":[{"id":"a1","name":"Week-long streak","icon":"🔥"},{"id":"a2","name":"Ten books","icon":"📚"}]}
-        """)
-        let bm = BookMaster.shared
-        bm.debugLink(shelf: shelf, together: together, overview: overview)
-        bm.debugStats = decode("""
-        {"xp":4120,"level":7,"xpForNext":5200,"xpProgress":0.62,"currentStreak":12,"longestStreak":31,
-         "booksFinished":18,"totalPages":6140,"minutesRead":5230,"quotesSaved":44,"authorsRead":11,"genresRead":6,
-         "recentActivity":[{"session_date":"2024-05-01","pages":88,"sessions":2},
-                           {"session_date":"2024-05-03","pages":41,"sessions":1}],
-         "currentlyReading":[{"id":"u1","current_page":150,"status":"reading","format":"ebook",
-                              "title":"Moby-Dick","author":"Herman Melville","total_pages":600}]}
-        """)
-        bm.debugPartnerShelf = decode("""
-        {"partner":{"id":"u2","name":"Sam","level":6,"xp":3600},"year":2024,"booksThisYear":9,"pagesThisYear":3020,
-         "stats":{"currentStreak":5,"minutesRead":2810},
-         "books":[{"id":"p1","book_id":"b9","status":"read","current_page":400,"format":"ebook","rating":5,
-                   "title":"Dune","author":"Frank Herbert","total_pages":400,"percent":100},
-                  {"id":"p2","book_id":"b2","status":"reading","current_page":120,"format":"ebook","rating":null,
-                   "title":"Piranesi","author":"Susanna Clarke","total_pages":250,"percent":48}]}
-        """)
-        let quotesReply: BMQuotesReply? = decode("""
-        {"quotes":[{"id":"q1","userBookId":"u1","content":"It is a way I have of driving off the spleen.",
-                    "type":"quote","pageNumber":41,"created_at":"2024-04-02","title":"Moby-Dick","author":"Herman Melville"},
-                   {"id":"q2","userBookId":"u5","content":"Half agony, half hope.","type":"note","pageNumber":null,
-                    "created_at":"2024-03-18","title":"Emma","author":"Jane Austen"}]}
-        """)
-        bm.debugQuotes = quotesReply?.quotes
-        let achievementsReply: BMAchievementsReply? = decode("""
-        {"achievements":[{"id":"a1","name":"Week-long streak","description":"Read seven days in a row","icon":"🔥",
-                          "category":"streak","xp_reward":20,"earned":true,"earned_at":"2024-04-01","progress":1},
-                         {"id":"a2","name":"Twenty books","description":"Finish twenty books","icon":"📚",
-                          "category":"books","xp_reward":50,"earned":false,"progress":0.9}]}
-        """)
-        bm.debugAchievements = achievementsReply?.achievements
-        bm.debugWrapped = decode("""
-        {"year":2024,"booksRead":18,"pagesRead":6140,"sessionsCount":96,"topGenre":"Sci-Fi","bestDay":"Sunday",
-         "longestBook":{"title":"Moby-Dick","author":"Herman Melville","total_pages":600},
-         "fastestBook":{"title":"Emma","author":"Jane Austen","days":3},
-         "longestSession":{"title":"Dune","duration_minutes":140},
-         "firstBook":{"title":"Emma","start_date":"2024-01-03"},
-         "lastBook":{"title":"Piranesi","finish_date":"2024-11-30"},
-         "monthlyActivity":[{"month":"01","sessions":9,"pages":420},{"month":"02","sessions":7,"pages":310}]}
-        """)
-        bm.debugRecommendations = decode("""
-        {"authors":["Frank Herbert","Ursula K. Le Guin"],"subjects":["Sci-Fi","Classic"],
-         "partner":{"name":"Sam"},
-         "partnerPicks":[{"open_library_id":"OL1","title":"The Left Hand of Darkness","author":"Ursula K. Le Guin",
-                          "rating":5,"genres":["Sci-Fi"],"published_year":1969,"total_pages":304}]}
-        """)
-        bm.debugSeries = decode("""
-        [{"id":"s1","name":"Dune Chronicles","author":"Frank Herbert","total_books":6,
-          "total_in_series":6,"books_read":1,"books_owned":2},
-         {"id":"s2","name":"Realm of the Elderlings","author":"Robin Hobb","total_books":16,
-          "total_in_series":9,"books_read":0,"books_owned":3}]
-        """)
-        bm.debugSeriesDetail = decode("""
-        {"series":{"id":"s1","name":"Dune Chronicles","author":"Frank Herbert","total_books":6},
-         "books":[{"id":"b9","title":"Dune","author":"Frank Herbert","position":1,"published_year":1965,
-                   "status":"read","user_book_id":"u9","rating":5},
-                  {"id":"b10","title":"Dune Messiah","author":"Frank Herbert","position":2,"published_year":1969,
-                   "status":"want_to_read","user_book_id":"u10"},
-                  {"id":"b11","title":"Children of Dune","author":"Frank Herbert","position":3,
-                   "published_year":1976}]}
-        """)
-        bm.debugDetail = decode("""
-        {"catalogue":{"id":"b1","title":"Moby-Dick","author":"Herman Melville","total_pages":600,
-                      "published_year":1851,"description":"The whale, again.","genres":"[\\"Classic\\"]"},
-         "book":{"userBookId":"u1","bookId":"b1","title":"Moby-Dick","author":"Herman Melville",
-                 "status":"reading","percent":25,"rating":null,"currentPage":150,"totalPages":600},
-         "theirs":{"name":"Sam","status":"read","rating":5,"percent":100,"finish_date":"2024-03-01"},
-         "sessions":[{"id":"s1","pages_start":100,"pages_end":150,"duration_minutes":80,"session_date":"2024-05-01"}],
-         "quotes":[{"id":"q1","content":"It is a way I have of driving off the spleen.","type":"quote","page_number":41}],
-         "comments":[{"id":"c1","content":"Wait until the end.","user_id":"u2","display_name":"Sam",
-                      "at_percent":90,"ahead":true,"created_at":"2024-04-01"}],
-         "you":"u1","at_percent":25}
-        """)
+        BookMaster.shared.debugLink(shelf: shelf, together: together)
     }
 
     /// The matches `45-lookup` shows: real Open Library jackets (the sim is online), one pinned to the
@@ -202,22 +123,10 @@ enum DebugScenario {
         switch screen {
         case "library", "search": selectTab(.library)
         case "reading": selectTab(.reading)
-        case "stats", "bmprogress", "bmwrapped": selectTab(.stats)
-        case "together", "bmtogether": selectTab(.together)
-        case "inbox": selectTab(.together); router.showInbox = true
-        // Quest Log's private room, opened with a few messages (launch with -PTDebugChatTab questlog)
-        case "qlchat":
-            BMQuestLogChat.shared.debugFixture()
-            selectTab(.together)
-            router.showChat = true
-        // the cipher against messages made by the web's recipe: the app dying here fails the run
-        case "qlvector":
-            if let wrong = BMQuestLogCrypto.selfTest() { fatalError("Quest Log's cipher disagrees with the web's: \(wrong)") }
-            Log.event("qlvector", "the cipher opens what the web's recipe made")
-            selectTab(.together)
-        // the Books tab hosts the shelf and pushes the rest itself
-        case "shelf", "bmbook", "bmquotes", "bmdiscover", "bmsearch", "bmseries", "bmpick":
-            selectTab(.books)
+        case "stats": selectTab(.stats)
+        case "together": selectTab(.together)
+        // the tabs that are BookMaster's own pages
+        case "shelf": selectTab(.books)
         case "settings": router.showSettings = true
         case "detail": router.detail = text
         // a book still in Google Drive: its page offers the download (with `-PTDebugCloudState downloading`, shows one on its way)

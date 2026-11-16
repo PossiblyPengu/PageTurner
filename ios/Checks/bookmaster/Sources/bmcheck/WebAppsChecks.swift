@@ -25,6 +25,18 @@ func runWebAppsChecks() {
     check("every app has a name and a symbol",
           BMWebApp.allCases.count == 3 && BMWebApp.allCases.allSatisfy { !$0.name.isEmpty && !$0.symbol.isEmpty })
 
+    // ---- BookMaster's own pages as the tabs
+    check("each tab is the page BookMaster shows, asked to be drawn alone",
+          BMWebTab.shelf.url.absoluteString == "https://bookmaster.pages.dev/library?in=pageturner"
+          && BMWebTab.together.url.absoluteString == "https://bookmaster.pages.dev/together?in=pageturner"
+          && BMWebTab.stats.url.absoluteString == "https://bookmaster.pages.dev/progress?in=pageturner")
+    check("the chat is its own page, already alone, so is not asked again",
+          BMWebTab.chat.url.absoluteString == "https://bookmaster.pages.dev/embed/chat")
+    check("every tab is on BookMaster's own host and in BookMaster's own part of it, and is named",
+          BMWebTab.allCases.allSatisfy {
+              $0.url.host == "bookmaster.pages.dev" && BMWebApp.app(for: $0.url) == .bookmaster && !$0.title.isEmpty
+          })
+
     // ---- where a notice goes
     // the paths the suite really sends: Kindred's are relative to its folder, Quest Log's already carry theirs
     check("Kindred's notice paths are under /kindred",

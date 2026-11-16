@@ -1,13 +1,16 @@
 import SwiftUI
 import WebKit
 
-/// One of the suite's web apps, kept alive so switching away and back finds it where it was left.
+/// One of the suite's web apps — or one of BookMaster's pages as a tab — kept alive so switching away and back
+/// finds it where it was left.
 ///
 /// The three share one persistent website data store, so a sign-in survives closing the app. What
 /// the page may show, and where everything else goes, is `BMWebPolicy` (pure, Linux-checked).
 @Observable @MainActor
 final class BMWebPage {
     let app: BMWebApp
+    /// Where it opens when nothing else is asked for: a tab's page, or the app's front door.
+    let home: URL
     let webView: WKWebView
     private(set) var title = ""
     private(set) var currentURL: URL?
@@ -28,7 +31,8 @@ final class BMWebPage {
     @ObservationIgnored private var observers: [NSKeyValueObservation] = []
     @ObservationIgnored private var started = false
 
-    init(app: BMWebApp) {
+    init(app: BMWebApp, home: URL? = nil) {
+        self.home = home ?? app.start
         let delegate = BMWebDelegate()
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
@@ -85,11 +89,11 @@ final class BMWebPage {
         })
     }
 
-    /// Show `url`, or this app's front door.
+    /// Show `url`, or where this page opens.
     func open(_ url: URL? = nil) {
         failure = nil
         started = true
-        let target = url ?? app.start
+        let target = url ?? home
         requested = target
         webView.load(URLRequest(url: target))
     }
@@ -131,12 +135,15 @@ final class BMWebPage {
     func goForward() { webView.goForward() }
 }
 
-/// The three pages, made as they are first wanted.
+/// The three apps' pages for the browser, and BookMaster's pages as tabs, made as they are first wanted.
 @Observable @MainActor
 final class BMWebPages {
     static let shared = BMWebPages()
 
     @ObservationIgnored private var pages: [BMWebApp: BMWebPage] = [:]
+    @ObservationIgnored private var tabs: [BMWebTab: BMWebPage] = [:]
+    /// What a tab does with a link into Kindred or Quest Log: open it in the browser (set by the app's root).
+    @ObservationIgnored var onLeaveTab: ((BMWebApp, URL) -> Void)?
     /// The one on screen.
     @ObservationIgnored var visible: BMWebApp?
     /// What to do with a link into another of the apps: set by the browser on screen, applied to every page.
@@ -161,9 +168,19 @@ final class BMWebPages {
         return page
     }
 
+    /// BookMaster's page for a tab: its own web view, opened on that page, which stays where it was left.
+    func tab(_ tab: BMWebTab) -> BMWebPage {
+        if let page = tabs[tab] { return page }
+        let page = BMWebPage(app: .bookmaster, home: tab.url)
+        page.onSwitch = { [weak self] target, url in self?.onLeaveTab?(target, url) }
+        tabs[tab] = page
+        return page
+    }
+
     /// Low on memory: let go of the pages nobody is looking at; they are made and loaded again when wanted.
     private func shed() {
         for (app, page) in pages where app != visible && page.webView.window == nil { pages[app] = nil }
+        for (tab, page) in tabs where page.webView.window == nil { tabs[tab] = nil }
     }
 
     /// Forget every sign-in and everything the sites stored. The pages stay — a browser on screen is
@@ -172,8 +189,10 @@ final class BMWebPages {
         let store = WKWebsiteDataStore.default()
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
         for page in pages.values { page.unload() }
+        for page in tabs.values { page.unload() }
         if let visible, let page = pages[visible], page.webView.window != nil { page.open() }
-        BMQuestLogChat.shared.lock()   // the private room is Quest Log's too
+        // a tab on screen starts over at its page (BookMaster's sign-in, now)
+        for page in tabs.values where page.webView.window != nil { page.open() }
     }
 }
 
@@ -397,7 +416,7 @@ struct BMWebBrowserView: View {
     var body: some View {
         // grouped, so no one expression is a long chain the compiler has to solve at once
         let page = BMWebPages.shared.page(for: app)
-        return lifecycle(chrome(page, content: stack(page))).hidesChatButton()
+        return lifecycle(chrome(page, content: stack(page)))
     }
 
     private func stack(_ page: BMWebPage) -> some View {

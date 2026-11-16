@@ -112,25 +112,6 @@ struct BMChatButtonLayer: View {
     }
 }
 
-/// The chat as a full page over the app, for the floating button: the same screen the Together tab pushes,
-/// with a way back. (A sheet left the page behind it showing at the top, which read as a pop-up.)
-struct BMChatScreen: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            BMChatView()
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { dismiss() } label: {
-                            Label("Back", systemImage: "chevron.left")
-                        }
-                    }
-                }
-        }
-    }
-}
-
 private struct HidesChatButton: ViewModifier {
     @Environment(AppRouter.self) private var router: AppRouter?
     @State private var id = UUID()

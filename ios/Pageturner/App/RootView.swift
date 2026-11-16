@@ -57,12 +57,23 @@ struct RootView: View {
                 guard old, !linked else { return }
                 library.clearBookMasterFields()
                 notifier.reset()
-                BMQuestLogChat.shared.reset()
+                // the web apps' sign-ins, Quest Log's unlocked room among them, belong to the reader who went away
+                Task { await BMWebPages.shared.clearSignIns() }
             }
             .onChange(of: intents.request, initial: true) { _, request in
                 guard let request else { return }
                 intents.request = nil
                 handle(request)
+            }
+            // where a link out of a BookMaster tab goes (Kindred, Quest Log), and where presence says you are
+            .onAppear { BMWebPages.shared.onLeaveTab = { [router = self.router] app, url in router.browser = BMWebLaunch(app: app, url: url) } }
+            .onChange(of: router.tab, initial: true) { _, tab in
+                switch tab {
+                case .books, .together: bookMaster.place = "bookmaster"
+                case .stats: bookMaster.place = "stats"
+                case .library: bookMaster.place = "library"
+                case .reading: break   // the reader and the player say where they are themselves
+                }
             }
             #if DEBUG
             // CI simulator run: launch arguments choose a screen (Debug/DebugScenario.swift)
@@ -84,6 +95,7 @@ struct RootView: View {
     }
 
     private func handle(_ request: IntentRouter.Request) {
+        let covered = router.presenting
         if case let .bookFinished(id) = request {
             // nothing is closed for it: it waits for what is up to go (`offerFinished`)
             router.offerFinished(id, library: library)
@@ -120,9 +132,7 @@ struct RootView: View {
             guard let book = library.continueBook else { return }
             router.open(book, library: library)
         case let .openSuite(target):
-            // the Together tab opens it: it owns the chat and the in-app browser
-            router.tab = .together
-            router.suiteTarget = target
+            router.openSuite(target, covered: covered)
         case .importBooks:
             router.tab = .library
             router.showImporter = true
@@ -145,6 +155,7 @@ struct RootView: View {
             .sheet(item: $r.shelfTarget) { ShelvesSheet(target: $0) }
             .sheet(isPresented: $r.showSettings) { SettingsView() }
             .fullScreenCover(isPresented: $r.showChat) { BMChatScreen() }
+            .fullScreenCover(item: $r.browser) { BMWebBrowserScreen(launch: $0) }
             .sheet(isPresented: $r.showLink) { linkSheet }
             .sheet(isPresented: $r.showDrive) { DriveBrowserView(purpose: .importBooks) }
             .sheet(item: $r.finished) { FinishedBookSheet(book: $0) }
@@ -397,14 +408,14 @@ struct RootView: View {
                 LibraryView()
             }
             Tab("Shelf", systemImage: "bookmark.fill", value: AppTab.books) {
-                BookMasterBooksView()
+                BMWebTabView(tab: .shelf)
             }
             Tab("Together", systemImage: "person.2.fill", value: AppTab.together) {
-                BookMasterTogetherView()
+                BMWebTabView(tab: .together)
             }
             .badge(bmBadge ? inbox.unreadCount : 0)
             Tab("Stats", systemImage: "chart.bar.fill", value: AppTab.stats) {
-                BookMasterStatsView()
+                BMWebTabView(tab: .stats)
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
@@ -420,14 +431,14 @@ struct RootView: View {
             withMiniPlayer(LibraryView())
                 .tabItem { Label("Library", systemImage: "books.vertical") }
                 .tag(AppTab.library)
-            withMiniPlayer(BookMasterBooksView())
+            withMiniPlayer(BMWebTabView(tab: .shelf))
                 .tabItem { Label("Shelf", systemImage: "bookmark.fill") }
                 .tag(AppTab.books)
-            withMiniPlayer(BookMasterTogetherView())
+            withMiniPlayer(BMWebTabView(tab: .together))
                 .tabItem { Label("Together", systemImage: "person.2.fill") }
                 .badge(bmBadge ? inbox.unreadCount : 0)
                 .tag(AppTab.together)
-            withMiniPlayer(BookMasterStatsView())
+            withMiniPlayer(BMWebTabView(tab: .stats))
                 .tabItem { Label("Stats", systemImage: "chart.bar.fill") }
                 .tag(AppTab.stats)
         }
