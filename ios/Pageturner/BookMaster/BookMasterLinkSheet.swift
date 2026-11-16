@@ -67,8 +67,9 @@ private struct LinkWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        // nothing is kept: the BookMaster session lives only as long as this sheet
-        configuration.websiteDataStore = .nonPersistent()
+        // the shared store, the one BookMaster's pages in the tabs use: signing in here signs them in too, once. (Unlinking,
+        // or signing out of the web apps in Settings, forgets it — `BMWebPages.clearSignIns`.)
+        configuration.websiteDataStore = .default()
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.allowsBackForwardNavigationGestures = false

@@ -28,9 +28,18 @@ struct BMWebTabView: View {
         }
     }
 
-    /// The notifications bell and the ways into Kindred and Quest Log on the Together tab; Settings on every one.
+    /// The page this tab keeps — made only when a linked reader's toolbar asks for it.
+    private var page: BMWebPage { BMWebPages.shared.tab(tab) }
+
+    /// A way back through the pages the tab has been sent to, the notifications bell and the ways into Kindred and Quest Log
+    /// on the Together tab, a menu of BookMaster's other pages; Settings on every one.
     @ToolbarContentBuilder
     private var barItems: some ToolbarContent {
+        if bookMaster.isLinked, page.canGoBack {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { page.goBack() } label: { Label("Back", systemImage: "chevron.backward") }
+            }
+        }
         if bookMaster.isLinked, tab == .together {
             ToolbarItem(placement: .topBarLeading) {
                 let unread = inbox.unreadCount
@@ -50,6 +59,21 @@ struct BMWebTabView: View {
                     Image(systemName: "square.grid.2x2")
                 }
                 .accessibilityLabel("Open an app")
+            }
+        }
+        if bookMaster.isLinked {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button(tab.title) { page.open() }
+                    ForEach(BMWebPlace.allCases) { place in
+                        Button(place.title) { page.open(place.url) }
+                    }
+                    Divider()
+                    Button("Reload") { page.reload() }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("BookMaster pages")
             }
         }
         SettingsToolbarItem(router: router)

@@ -37,6 +37,13 @@ func runWebAppsChecks() {
               $0.url.host == "bookmaster.pages.dev" && BMWebApp.app(for: $0.url) == .bookmaster && !$0.title.isEmpty
           })
 
+    check("the pages the tabs' menu leads to are BookMaster's own, drawn alone, and named",
+          BMWebPlace.allCases.map(\.url.absoluteString) == [
+              "https://bookmaster.pages.dev/dashboard?in=pageturner", "https://bookmaster.pages.dev/search?in=pageturner",
+              "https://bookmaster.pages.dev/series?in=pageturner", "https://bookmaster.pages.dev/wrapped?in=pageturner",
+              "https://bookmaster.pages.dev/profile?in=pageturner",
+          ] && BMWebPlace.allCases.allSatisfy { !$0.title.isEmpty && BMWebApp.app(for: $0.url) == .bookmaster })
+
     // ---- where a notice goes
     // the paths the suite really sends: Kindred's are relative to its folder, Quest Log's already carry theirs
     check("Kindred's notice paths are under /kindred",

@@ -182,7 +182,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Sessions and quotes always queue, oldest first, a 4xx is dropped. Presence beats are never queued.
   Only a push reply or a shelf pull may change a book's `bm*`
   fields (`LibraryStore.updateBookMaster` / `applyShelf`); `update()` always keeps the stored ones.
-- Linking: `BookMasterLinkSheet` (a `WKWebView`, non-persistent data store) opens
+- Linking: `BookMasterLinkSheet` (a `WKWebView` on the shared default data store, so the sign-in it ends with is also the one BookMaster's tabs use) opens
   bookmaster.pages.dev/link/pageturner?from=https://pageturner.pages.dev; BookMaster signs the user in and
   sends the browser to `pageturner.pages.dev/?bm-link=<code>`, which the sheet's navigation delegate cancels,
   reading the code off the URL (`BMLinkURL.code(fromReturn:)` — only that host, https, a plausible code).
@@ -194,7 +194,8 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   with `?in=pageturner` (remembered for the life of the view, `BookMaster/src/lib/embedded.ts`): BookMaster then draws the page alone — no bars,
   bell, banners or chat button, and no heartbeat of its own — and Pageturner draws those around it (tab bar, Settings, the Together bell and the
   "Open an app" menu) and says where you are (`place`, set from the selected tab in `RootView`). One `WKWebView` per tab is kept alive
-  (`BMWebPages.tab(_:)`), pull to refresh is the web view's own. Unlinked, a tab shows `BMLinkPrompt` instead. A link out of a tab into Kindred or
+  (`BMWebPages.tab(_:)`), pull to refresh is the web view's own. The web's own tab bar and header are not drawn there, so the tab's toolbar brings a Back
+  button (while the tab has been sent somewhere) and a "BookMaster pages" menu (`BMWebPlace`: Today, Find a Book, Series, Wrapped, Profile, the tab's own page, Reload). Unlinked, a tab shows `BMLinkPrompt` instead. A link out of a tab into Kindred or
   Quest Log opens that app full screen (`router.browser`, `BMWebBrowserScreen`), as do notices and `pageturner://open`. What stays native is what
   needs the device: the link and its sync (`BookMasterClient`: progress, sessions, quotes, covers, shelf pull, shelving a book, comments and
   suggestions on a book's page), the notifications and inbox (`Notifier`, `BMInbox*`), the floating chat button, and the barcode scanner. Do not
@@ -231,8 +232,8 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   only rule for where a page may go: our host is shown, a link into another of the three switches the browser to that app, every other site, `mailto:`
   and `tel:` go to iOS, and `pageturner://`, `file:`, `javascript:` and plain `http` are refused. The web view needs the app to supply what Safari does:
   JS alert/confirm/prompt panels (without them `confirm()` silently answers no), `target=_blank` links, and `WKDownload` for files a page saves
-  (BookMaster's CSV/JSON export is a blob download) — handed to the share sheet. The sign-in is the web's own (BookMaster's password); nothing links
-  the bridge's device key to a web session, on purpose. Things this layer has to get right (each was a real bug in review): Quest Log's notice
+  (BookMaster's CSV/JSON export is a blob download) — handed to the share sheet. The sign-in is the web's own (BookMaster's password) — the link sheet makes it, in the shared store, so the tabs
+  need no second one; the bridge's device key itself is never tied to a web session. Kindred and Quest Log keep their own (BookMaster's `/link/*` pages hand a signed-in reader across). Things this layer has to get right (each was a real bug in review): Quest Log's notice
   paths already say `/quest-log` while Kindred's are relative to `/kindred` (`BMWebApp.noticePrefix`); BookMaster's `/link/*` pages only hand the
   reader on, so after a cross-app switch the source page is sent back to its front door (`isHandoff`) or it stays on "Linking…"; `window.open`
   of `about:blank`/`blob:` must be refused (`newWindow`) or it blanks the page; the pages are held by `BMWebPages` and the host view follows the

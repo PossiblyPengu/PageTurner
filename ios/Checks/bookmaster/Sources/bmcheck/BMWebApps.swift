@@ -140,12 +140,47 @@ enum BMWebTab: String, CaseIterable, Identifiable {
 
     /// Where the tab opens.
     var url: URL {
+        // the chat page is drawn alone already; the others are asked to be
+        BMWebPlace.address(path, alone: self != .chat)
+    }
+}
+
+/// BookMaster's other pages, reached from the tabs' menu: the web draws its own navigation, which is left out inside
+/// Pageturner, so each is a way to send the tab's page there (it stays that tab, with a way back).
+enum BMWebPlace: String, CaseIterable, Identifiable {
+    case today, find, series, wrapped, profile
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today: return "Today"
+        case .find: return "Find a Book"
+        case .series: return "Series"
+        case .wrapped: return "Wrapped"
+        case .profile: return "Profile"
+        }
+    }
+
+    var path: String {
+        switch self {
+        case .today: return "/dashboard"
+        case .find: return "/search"
+        case .series: return "/series"
+        case .wrapped: return "/wrapped"
+        case .profile: return "/profile"
+        }
+    }
+
+    var url: URL { Self.address(path, alone: true) }
+
+    /// A page on BookMaster's host, asked to be drawn alone (`?in=pageturner`) when it is not already.
+    static func address(_ path: String, alone: Bool) -> URL {
         var parts = URLComponents()
         parts.scheme = "https"
         parts.host = BMLinkURL.bookMasterHost
         parts.path = path
-        // the chat page is drawn alone already; the others are asked to be
-        if self != .chat { parts.queryItems = [URLQueryItem(name: "in", value: "pageturner")] }
+        if alone { parts.queryItems = [URLQueryItem(name: "in", value: "pageturner")] }
         return parts.url!
     }
 }
