@@ -82,7 +82,7 @@ struct LibrarySettingsPage: View {
         ) {
             Button("Reset Stats", role: .destructive) { ReadingLog.shared.clear() }
         } message: {
-            Text("This clears the time, streaks and charts kept on this phone. BookMaster’s own numbers aren’t touched.")
+            Text("This clears the reading time and streaks kept on this phone. BookMaster’s own numbers aren’t touched.")
         }
         .alert("Auto-import", isPresented: Binding(
             get: { message != nil },

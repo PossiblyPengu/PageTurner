@@ -380,7 +380,7 @@ func runStatsChecks() {
 
 @MainActor
 func runTrendChecks() {
-    section("Reading trends and the finish forecast")
+    section("The finish forecast")
     var cal = Calendar(identifier: .gregorian)
     cal.timeZone = TimeZone(identifier: "UTC")!
     cal.firstWeekday = 2   // weeks run Monday to Sunday
@@ -394,31 +394,6 @@ func runTrendChecks() {
     func sit(_ daysAgo: Int, _ minutes: Double, from: Double = 0, to: Double = 0.1, _ id: UUID? = nil) -> ReadingSession {
         ReadingSession(bookID: id ?? book, title: "T", end: at(daysAgo: daysAgo), minutes: minutes, progressStart: from, progressEnd: to, audio: false)
     }
-    func summary(_ s: [ReadingSession], calendar: Calendar? = nil) -> ReadingTrends.Summary {
-        ReadingTrends.summary(s, now: now, calendar: calendar ?? cal)
-    }
-
-    let empty = summary([])
-    check("no sittings: eight empty weeks and nothing to compare", empty.weeks.count == 8 && empty.weeks.allSatisfy { $0.minutes == 0 }
-          && empty.thisWeekMinutes == 0 && empty.changeFromLastWeek == nil && empty.activeDays == 0 && empty.bestDay == nil)
-
-    // this week (Mon 12 Feb): 12th 10, 13th 20, 14th 30.  Last week: Sun 11th 40, Thu 8th 20, Wed 7th 20.
-    let log = [sit(2, 10), sit(1, 20), sit(0, 30), sit(3, 40), sit(6, 20), sit(7, 20)]
-    let t = summary(log)
-    check("this week and last are summed from Monday", t.thisWeekMinutes == 60 && t.lastWeekMinutes == 80, "\(t.thisWeekMinutes)/\(t.lastWeekMinutes)")
-    check("the current week is the last one and weeks run oldest first",
-          t.weeks.last?.start == at(daysAgo: 2, hour: 0) && t.weeks[6].start == at(daysAgo: 9, hour: 0) && t.weeks.map(\.start) == t.weeks.map(\.start).sorted())
-    check("the change from last week is a fraction", t.changeFromLastWeek == -0.25, "\(String(describing: t.changeFromLastWeek))")
-    check("active days and the average on one", t.activeDays == 6 && abs(t.averageActiveDayMinutes - 140.0 / 6) < 0.0001, "\(t.activeDays) \(t.averageActiveDayMinutes)")
-    check("the best day is the one with the most time", t.bestDay?.minutes == 40 && t.bestDay?.date == at(daysAgo: 3, hour: 0))
-
-    var sunday = cal
-    sunday.firstWeekday = 1
-    check("weeks start where the calendar says (Sunday puts the 11th in this week)", summary(log, calendar: sunday).thisWeekMinutes == 100)
-
-    check("a sitting too short to count does not make an active day",
-          summary([sit(0, 0.4)]).activeDays == 0 && summary([sit(0, .nan), sit(0, -3)]).thisWeekMinutes == 0)
-    check("sittings older than the chart fall off the weeks", summary([sit(200, 50)]).weeks.allSatisfy { $0.minutes == 0 })
 
     // finish forecast: 0 → 0.3 over the 7 days from the 8th to today; 0.7 left at 0.3 / 7 a day → 17 days
     let reading = [sit(6, 20, from: 0, to: 0.1), sit(3, 20, from: 0.1, to: 0.2), sit(0, 20, from: 0.2, to: 0.3)]
