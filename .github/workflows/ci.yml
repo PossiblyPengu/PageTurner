@@ -37,7 +37,11 @@ jobs:
           node-version: 20
           cache: npm
 
+      # onnxruntime-node (a dependency of the web app's speech library) downloads a CUDA build from GitHub on install, and
+      # that download now answers 404, failing the install; the tests never use the GPU build
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
       - name: Lint
         run: npm run lint
