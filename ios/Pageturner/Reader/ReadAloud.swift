@@ -98,6 +98,11 @@ final class ReadAloud: NSObject, ObservableObject {
     /// removeDuplicates would drop it.
     private var pendingFollow: Locator?
     private var isTurning = false
+    /// The page has just come back to the front and is waking: nothing moves it until `afterSettling` does.
+    private var settling = false
+    private var settleTask: Task<Void, Never>?
+    /// The next move of the page is the one that catches it up after waking: made without the slide.
+    private var followQuietly = false
     private var consecutiveFailures = 0
     private var subscriptions: Set<AnyCancellable> = []
     private var sleepTimer: Timer?
@@ -159,6 +164,33 @@ final class ReadAloud: NSObject, ObservableObject {
     /// nothing is chased, painted or measured per word on a page nobody sees; coming back catches the page up.
     private(set) var onScreen = true
     private var lastNarrated: Locator?
+    /// Called once the page has been taken to the voice after the reader came back to the front: a page that was
+    /// moved behind a locked screen is repainted then, when there is something to paint.
+    var onPageCaughtUp: (() -> Void)?
+
+    /// The one voice the app has. A second `begin` stops it first, whoever holds it — a voice whose reader was torn
+    /// down with it still speaking is no one's to stop, and starting again beside it was two voices at once.
+    private static var current: ReadAloud?
+    /// The reader that holds this voice; nil once that reader is gone.
+    weak var owner: AnyObject?
+    /// The book being read, so another reader of it can tell the voice is its own.
+    var bookID: UUID?
+    /// The sentence being said now.
+    var sentence: Locator? { spoken.sentence }
+
+    /// A voice still going whose reader is gone: nobody's controls show it, and only whoever finds it can stop it.
+    static var stray: ReadAloud? {
+        guard let current, current.isActive, current.owner == nil else { return nil }
+        return current
+    }
+
+    /// What the log should say of the voice, for the line written when the app comes back to the front.
+    static var summary: String {
+        guard let current else { return "no voice" }
+        let state = current.isPlaying ? "speaking" : "paused"
+        let reader = current.owner == nil ? ", no reader" : ""
+        return state + reader
+    }
 
     static func canSpeak(_ publication: Publication) -> Bool {
         SpeechSynthesizer.canSpeak(publication: publication)
@@ -212,7 +244,8 @@ final class ReadAloud: NSObject, ObservableObject {
             Publishers.CombineLatest($spoken, $highlights)
                 .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
                 .sink { [weak self] spoken, highlights in
-                    guard let self, self.onScreen else { return }
+                    // a page still waking is painted once, by `afterSettling`, with what is being said by then
+                    guard let self, self.onScreen, !self.settling else { return }
                     self.paint(spoken, as: highlights, on: decorable)
                 }
                 .store(in: &subscriptions)
@@ -323,23 +356,47 @@ final class ReadAloud: NSObject, ObservableObject {
     /// behind the marks, so a no just waits a moment and goes again. A fresh
     /// target arriving meanwhile replaces the stale one rather than queueing.
     private func follow() {
-        guard !isTurning, let navigator else { return }
+        // the page was just brought back: the catch-up (`afterSettling`) moves it, once, to where the voice is now
+        guard !settling, !isTurning, let navigator else { return }
+        // the first move after waking is made without the slide: a chapter slid into a view that is still waking
+        // was the blank page
+        let woke = followQuietly
+        followQuietly = false
         isTurning = true
         Task { @MainActor in
+            var quiet = woke
             var attempts = 0
             while let locator = pendingFollow, attempts < 15 {
                 pendingFollow = nil
                 attempts += 1
+                let slide = !quiet
                 // the wait is bounded: a webview suspended behind a locked screen can leave
                 // a go unanswered for good, which would hold the follow shut on isTurning
-                if await bounded(8, { await navigator.go(to: locator, options: NavigatorGoOptions(animated: true)) }) == true {
+                if await bounded(8, { await navigator.go(to: locator, options: NavigatorGoOptions(animated: slide)) }) == true {
                     attempts = 0
+                    quiet = false
                 } else {
                     pendingFollow = pendingFollow ?? locator
                     try? await Task.sleep(nanoseconds: 400_000_000)
                 }
             }
             isTurning = false
+            if woke { onPageCaughtUp?() }
+        }
+    }
+
+    /// The reader has just come back to the front (the phone was unlocked, or another tab left): the page's web views
+    /// are still waking, and a page moved the instant the app is active — a chapter loaded into a view nobody has
+    /// painted — is the blank one. So the catch-up waits a moment, and only the newest place is gone to.
+    private func afterSettling(_ work: @escaping @MainActor () -> Void) {
+        settleTask?.cancel()
+        settling = true
+        settleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.settling = false
+            guard self.onScreen else { return }
+            work()
         }
     }
 
@@ -352,7 +409,7 @@ final class ReadAloud: NSObject, ObservableObject {
     /// Readium's `evaluateJavaScript` hands back what a script returns there and then — it does not wait for a
     /// promise — so the script measures and scrolls in one go, and the waiting for a mark to be painted is done here.
     private func followScrolling(_ sentence: Locator, recenter: Bool = false) {
-        guard !isTurning, let epub = navigator as? EPUBNavigatorViewController else { return }
+        guard !settling, !isTurning, let epub = navigator as? EPUBNavigatorViewController else { return }
         isTurning = true
         Task { @MainActor in
             defer {
@@ -487,6 +544,13 @@ final class ReadAloud: NSObject, ObservableObject {
 
     private func begin(locate: @escaping @MainActor () async -> Locator?) {
         interruptedWhilePlaying = nil
+        // one voice: another one still going (an earlier session of this reader's, or one whose reader is gone) is
+        // stopped before this one speaks, so two never overlap
+        if let other = Self.current, other !== self {
+            Log.event("readaloud", "another voice was still going (\(Self.summary)) — stopped before this one began")
+            other.stop()
+        }
+        Self.current = self
         rearmChapterBell()
         registerAudio()
         AudioFocus.shared.claim("readaloud")
@@ -539,7 +603,17 @@ final class ReadAloud: NSObject, ObservableObject {
     func stop() {
         startup.cancel()
         interruptedWhilePlaying = nil
+        // the sound is the app's one voice's: a voice that was replaced already (its stop reported late) must not cut
+        // off the one that replaced it
+        let theVoice = Self.current === self || Self.current == nil
+        if Self.current === self { Self.current = nil }
         synthesizer.stop()
+        // cut here and now, not left to the cancelled sentence's own hop to the player: a voice started straight
+        // after must not find the old one's audio still queued
+        if theVoice {
+            NeuralPlayer.shared.stop()
+            SystemTTSEngine.silence()
+        }
         // the synthesizer tells us it has stopped in a moment — by then this may be gone, and the
         // marks would stay on the page
         wordTimeout?.cancel()
@@ -623,7 +697,8 @@ final class ReadAloud: NSObject, ObservableObject {
 
     /// Per-word work is for a page that is looked at: not in Low Power Mode, and not with the reader left.
     private func updateWordReporting() {
-        neural.reportsWords = onScreen && highlights.needsWords && !LowPower.on
+        neural.reportsWords = highlights.needsWords && !LowPower.on
+        neural.watched = onScreen
     }
 
     /// The reader was left with the narration going on, or came back to it.
@@ -635,20 +710,31 @@ final class ReadAloud: NSObject, ObservableObject {
             // a jump in flight is a jump nobody will see
             pendingFollow = nil
             lastNarrated = nil
+            settleTask?.cancel()
+            settling = false
             return
         }
         guard isActive else { return }
-        // the marks and the page catch up to what is being said now
-        if let decorable { paint(spoken, as: highlights, on: decorable) }
-        if scrolls {
-            if let sentence = spoken.sentence {
-                scrolledTo = nil
-                followHeld = false
-                followScrolling(sentence, recenter: true)
+        // the marks and the page catch up to what is being said now — once the page has had a moment to wake, and to
+        // wherever the voice has got to by then, not to where it was at the instant of the unlock
+        afterSettling { [weak self] in
+            guard let self else { return }
+            if let decorable = self.decorable {
+                // painted afresh: what the page holds may be a page that was reloaded behind the lock
+                self.painted = ([], [])
+                self.paint(self.spoken, as: self.highlights, on: decorable)
             }
-        } else if let place = (spoken.word ?? spoken.sentence)?.followable {
-            pendingFollow = place
-            follow()
+            if self.scrolls {
+                if let sentence = self.spoken.sentence {
+                    self.scrolledTo = nil
+                    self.followHeld = false
+                    self.followScrolling(sentence, recenter: true)
+                }
+            } else if let place = (self.spoken.word ?? self.spoken.sentence)?.followable {
+                self.pendingFollow = place
+                self.followQuietly = true
+                self.follow()
+            }
         }
     }
 

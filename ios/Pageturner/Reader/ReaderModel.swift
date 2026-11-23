@@ -330,6 +330,8 @@ final class ReaderModel: ObservableObject {
             learnChapterTicks(publication: publication)
             learnPageCount(publication: publication)
             phase = .ready
+            // a voice still going from a reader that is gone (the app was left locked with it speaking): this one takes it
+            adoptStray()
             autoHideChrome()
             #if DEBUG
             Task { await debugTurn() }
@@ -1166,6 +1168,11 @@ final class ReaderModel: ObservableObject {
               )
         else { return }
         readAloud.onError = { [weak self] message in self?.notice = message }
+        // whose voice it is: a voice that outlives its reader is found (and taken over) by the next reader of the book
+        readAloud.owner = self
+        readAloud.bookID = book.id
+        // the page was moved to the voice after waking: the web views are asked to paint it again as they wake
+        readAloud.onPageCaughtUp = { [weak self] in self?.refreshAwakeSoon() }
         // a session that ends itself (sleep timer, repeated failures) must not leave a dead one here
         readAloud.onStopped = { [weak self, weak readAloud] in
             guard let self, let readAloud, self.readAloud === readAloud else { return }
@@ -1208,6 +1215,10 @@ final class ReaderModel: ObservableObject {
     /// The repaint kick covers the path .active misses — the app was resumed with this reader away
     /// (its strip on another tab), so its webview may have gone stale while nobody looked at it.
     func readerShown() {
+        // what the log needs to tell, after the fact, whether the controls knew the voice was going
+        let mine: String = readAloud.map { $0.isPlaying ? "speaking" : "not speaking" } ?? "none"
+        Log.event("readaloud", "reader in front — its voice: \(mine); the app's: \(ReadAloud.summary)")
+        adoptStray()
         readAloud?.setOnScreen(true)
         if let place = catchUpOnWake, readAloud == nil {
             catchUpOnWake = nil
@@ -1223,6 +1234,23 @@ final class ReaderModel: ObservableObject {
             }
         }
         refreshAwake()
+        refreshAwakeSoon()
+    }
+
+    /// A voice is still going that no reader owns: its reader went (a view torn down while it spoke, with the phone
+    /// locked) and nothing shows it, so the controls offered to start one — and a second began over it. This reader
+    /// takes it over: it is stopped, and begun again from the sentence it was on if it is this book's and speaking.
+    private func adoptStray() {
+        guard phase == .ready, readAloud == nil, let stray = ReadAloud.stray else { return }
+        let place = stray.sentence
+        let speaking = stray.isPlaying
+        let ours = stray.bookID == book.id
+        let state = speaking ? "speaking" : "paused"
+        let whose = ours ? "" : " (another book's)"
+        Log.event("readaloud", "a voice with no reader was still \(state)\(whose) — stopped")
+        stray.stop()
+        guard ours, speaking, let place else { return }
+        startReadAloud(from: place)
     }
 
     /// Where a voice that ended in the background stopped: the page goes there once the app is in front.
@@ -1322,6 +1350,17 @@ final class ReaderModel: ObservableObject {
     func refreshAwake() {
         guard let view = navigatorController?.view else { return }
         Self.repaintWebViews(in: view)
+    }
+
+    /// The web views wake a little after the app does, and a repaint asked of one that is still waking is lost: asked
+    /// again as they come up.
+    func refreshAwakeSoon() {
+        for delay in [0.35, 1.2] as [Double] {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                self?.refreshAwake()
+            }
+        }
     }
 
     /// A page's photograph laid over it for the time the app is asleep: a web view

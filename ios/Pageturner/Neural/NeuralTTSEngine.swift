@@ -58,6 +58,11 @@ final class NeuralTTSEngine {
     /// Tell Readium which word is being spoken (the highlights that follow words are on).
     @MainActor var reportsWords = true
 
+    /// A page is being looked at. Each sentence's words are timed whenever they are wanted, but only said to Readium
+    /// while someone is looking: coming back to the page mid-sentence (the phone unlocked) finds the word the voice
+    /// is on at the very next tick, rather than going without a word mark until the next sentence.
+    @MainActor var watched = true
+
     /// Sentences that have been made ahead of being asked for, by voice and text…
     @MainActor private var made: [String: Task<NeuralSynth.Audio, Error>] = [:]
     /// …and the one that was said last, so that picking up after a pause (which starts the sentence
@@ -123,7 +128,7 @@ final class NeuralTTSEngine {
             var lit = -1
             let cancellation = Cancellation()
             func follow(_ seconds: TimeInterval) {
-                guard !cancellation.isSet, let next = SpokenWords.index(at: seconds, in: words), next != lit else { return }
+                guard !cancellation.isSet, watched, let next = SpokenWords.index(at: seconds, in: words), next != lit else { return }
                 lit = next
                 // back onto the page's own text; a word with no counterpart there ("to" of a year
                 // range, say) keeps the last mark lit rather than the whole sentence flashing over it

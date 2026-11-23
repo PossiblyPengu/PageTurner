@@ -48,6 +48,13 @@ final class SystemTTSEngine: NSObject, AVSpeechSynthesizerDelegate {
 
     @MainActor private var flight: Flight?
 
+    /// Whatever the device voice is saying is cut off — whichever engine said it. The synthesizer is shared by every
+    /// engine there has been, so a voice whose own engine is gone can still be speaking through it.
+    @MainActor
+    static func silence() {
+        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+    }
+
     init(tuning: SpeechTuning) {
         self.tuning = tuning
         super.init()
@@ -94,6 +101,9 @@ final class SystemTTSEngine: NSObject, AVSpeechSynthesizerDelegate {
         // nothing should still be in flight — but end whatever is, rather than leak its await
         if let old = flight {
             old.finish()
+            Self.synthesizer.stopSpeaking(at: .immediate)
+        } else if Self.synthesizer.isSpeaking {
+            // the shared synthesizer is still saying a sentence of an engine that is gone: never over this one
             Self.synthesizer.stopSpeaking(at: .immediate)
         }
         let flight = Flight(utterance: av, original: original, spoken: spoken, onSpeakRange: onSpeakRange)
