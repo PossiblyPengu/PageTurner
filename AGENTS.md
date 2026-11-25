@@ -194,7 +194,9 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Low Power Mode). The log says, per voice, how long each load took and on how many threads, and every 100 sentences the seconds of speech made
   against the seconds of processor time it took ("0.30 of real time" = busy a third of the time it speaks) and how many were made ahead —
   read that first when a long listen drains the battery: 50% in two hours with the screen off (an iPhone 15 Pro Max) is ~4 W, far above what
-  audio playback costs.
+  audio playback costs. "Stay connected" (`BackgroundKeepAlive`) looks every two minutes rather than every half minute while a book of ours
+  is playing (`BMKeepAlive.pollInterval(lowPower:bookPlaying:)`): the sound keeps the app running anyway, and a look every 30 s kept the radio
+  awake for the whole listen.
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the
