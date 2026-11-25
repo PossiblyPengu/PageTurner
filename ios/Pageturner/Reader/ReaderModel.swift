@@ -446,6 +446,44 @@ final class ReaderModel: ObservableObject {
 
     private var tapOnLeft = false
 
+    /// Turn a page as a tap at its edge would — with the reader's turn, rustle and tap — for the volume buttons and
+    /// the hands-free turner. False when there was no page that way (or no book yet).
+    @discardableResult
+    func turnPage(forward: Bool) async -> Bool {
+        guard case .ready = phase, let navigator else { return false }
+        // the side a tap would have been on, for the way the page leaves
+        tapOnLeft = forward == (navigator.presentation.readingProgression == .rtl)
+        pageIsTurning()
+        let options = NavigatorGoOptions(animated: settings.pageTurn == .slide)
+        return forward ? await navigator.goForward(options: options) : await navigator.goBackward(options: options)
+    }
+
+    /// The volume buttons as page turns, while `ReaderView` says the page is in front with nothing over it.
+    private lazy var volumePager: VolumeButtonPager = {
+        let pager = VolumeButtonPager()
+        pager.mayTurn = { [weak self] in self?.volumeMayTurn ?? false }
+        pager.onTurn = { [weak self] down in
+            guard let self else { return }
+            let forward = down != self.settings.volumeSwapped
+            Task { await self.turnPage(forward: forward) }
+        }
+        return pager
+    }()
+
+    func volumeButtons(_ on: Bool) {
+        if on, let host = navigatorController?.view {
+            volumePager.start(in: host)
+        } else {
+            volumePager.stop()
+        }
+    }
+
+    /// A press turns the page only while nothing of ours makes sound — a voice, an audiobook, a sample.
+    private var volumeMayTurn: Bool {
+        settings.volumeTurns && !readAloudPlaying && SpeechPreview.shared.playing == nil
+            && PlaybackCoordinator.shared.player?.isPlaying != true
+    }
+
     /// Called just before the adapter changes the page: when the reader has chosen another turn than
     /// Readium's slide, the page as it is now leaves over what comes next.
     private func pageIsTurning(frozenAt: Double? = nil) {

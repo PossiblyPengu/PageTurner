@@ -119,6 +119,14 @@ struct ReaderView: View {
             && model.notice == nil
     }
 
+    /// The volume buttons turn pages: asked for, the book in front with nothing over it, the app active, and no
+    /// voice of ours speaking (the buttons are volume then).
+    private var wantsVolumeTurns: Bool {
+        visible && scenePhase == .active && model.phase == .ready && model.settings.volumeTurns && !model.readAloudPlaying
+            && !showContents && !showSettings && !showSearch && !showVoices
+            && exportFile == nil && model.footnote == nil && model.editingHighlight == nil && model.pronouncing == nil
+    }
+
     /// Turn the screen down once the hands have been off for a while (`NarrationDim.delay`), and back up at once
     /// when they return — a tap shows the controls, which ends `wantsDim`.
     private func applyDim(_ dim: Bool) {
@@ -146,6 +154,7 @@ struct ReaderView: View {
             .onChange(of: model.settings) { _, _ in model.applySettings() }
             .onChange(of: model.settings.keepAwake) { _, _ in keepAwake(true) }
             .onChange(of: wantsDim) { _, dim in applyDim(dim) }
+            .onChange(of: wantsVolumeTurns) { _, on in model.volumeButtons(on) }
             // a theme that follows the clock: look again every few minutes
             .onReceive(Timer.publish(every: 300, on: .main, in: .common).autoconnect()) { _ in model.refreshNight() }
             .onAppear {
@@ -156,6 +165,7 @@ struct ReaderView: View {
             }
             .onDisappear {
                 visible = false
+                model.volumeButtons(false)
                 model.sleepCover(false)   // a cover put up as the app went inactive must not outlive the reader
                 keepAwake(false)
                 applyDim(false)

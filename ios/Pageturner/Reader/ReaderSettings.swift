@@ -153,6 +153,10 @@ struct ReaderSettings: Codable, Equatable {
     var turnHaptic = false
     /// The rustle of a page when it turns.
     var turnSound = false
+    /// The volume buttons turn the page while nothing is playing (`VolumeButtonPager`): down is the next page…
+    var volumeTurns = false
+    /// …or up is.
+    var volumeSwapped = false
     /// The first part of each word in bold.
     var bionic = false
 
@@ -195,6 +199,8 @@ struct ReaderSettings: Codable, Equatable {
         tapZone = try c.decodeIfPresent(TapZone.self, forKey: .tapZone) ?? tapZone
         turnHaptic = try c.decodeIfPresent(Bool.self, forKey: .turnHaptic) ?? turnHaptic
         turnSound = try c.decodeIfPresent(Bool.self, forKey: .turnSound) ?? turnSound
+        volumeTurns = try c.decodeIfPresent(Bool.self, forKey: .volumeTurns) ?? volumeTurns
+        volumeSwapped = try c.decodeIfPresent(Bool.self, forKey: .volumeSwapped) ?? volumeSwapped
         bionic = try c.decodeIfPresent(Bool.self, forKey: .bionic) ?? bionic
     }
 

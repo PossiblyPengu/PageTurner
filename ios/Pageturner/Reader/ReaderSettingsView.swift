@@ -137,6 +137,10 @@ struct ReaderSettingsView: View {
             }
             Toggle("Tap in the fingers on a turn", isOn: $settings.turnHaptic)
             Toggle("Rustle of the page on a turn", isOn: $settings.turnSound)
+            Toggle("Volume buttons turn pages", isOn: $settings.volumeTurns)
+            if settings.volumeTurns {
+                Toggle("Volume up is the next page", isOn: $settings.volumeSwapped)
+            }
             Toggle("Keep the screen on", isOn: $settings.keepAwake)
         }
     }

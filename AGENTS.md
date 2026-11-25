@@ -213,6 +213,13 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   marks that move per spoken word (the sentence mark stays). Grid covers come from
   `LibraryStore.coverThumbnail(for:maxPixels:)` — ImageIO-decoded at cell size and NSCache'd —
   never `cover(for:)` in a list.
+- Turning a page from code (`ReaderModel.turnPage(forward:)`) goes the way a tap at the edge does — the chosen turn,
+  rustle and tap — and is what the volume buttons and the hands-free turner use. The volume buttons
+  (`Reader/VolumeButtonPager.swift`, Reading sheet switch, off by default) watch `outputVolume` and put the volume back
+  through an off-screen `MPVolumeView` (which also keeps iOS's volume banner away). Only while nothing of ours plays
+  (asked at each press); with nothing of ours holding the session it takes an `.ambient` mixing one, so no one's
+  music stops, and a paused voice's or audiobook's session category is left alone. `ReaderView.wantsVolumeTurns`
+  turns it off with a sheet up, the voice speaking or the app inactive.
 - The reader (`Reader/`): `ReaderModel` owns the Readium navigator; `JumpHistory` drives the Back chip;
   page turns are `PageTurnStyle`: Readium's slide, a hinge `flip`, a `fade`, and `curl` — a finger-tracked
   peel. `PageCurl` is the pure geometry (fold line, cylinder roll, warped mesh — Linux-checked);
