@@ -5,6 +5,7 @@ import SwiftUI
 struct ReaderView: View {
     @StateObject private var model: ReaderModel
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(AppRouter.self) private var router
     @State private var showContents = false
     @State private var showSettings = false
     @State private var showSearch = false
@@ -699,6 +700,11 @@ struct ReaderView: View {
     /// What the page can do besides: turn itself, and what comes later.
     private var moreMenu: some View {
         Menu {
+            if let audio = model.companion {
+                Button { listen(to: audio) } label: {
+                    Label("Listen from Here", systemImage: "headphones")
+                }
+            }
             if model.handsFree == nil {
                 Button { model.startHandsFree(); model.revealChrome() } label: {
                     Label("Turn Pages for Me", systemImage: "hand.raised.slash")
@@ -717,6 +723,16 @@ struct ReaderView: View {
         .foregroundStyle(.primary)
         .accessibilityLabel("More")
         .simultaneousGesture(TapGesture().onEnded { _ in model.holdChrome() })
+    }
+
+    /// Over to the audiobook of this book, at the same place: the page's chapter by name, or the same share.
+    private func listen(to audio: Book) {
+        model.stopHandsFree()
+        if model.readAloud != nil { model.stopReadAloud() }
+        AudioStartAt.request(model.companionPlace, for: audio.id)
+        model.flushSave()
+        library.flushSaves()
+        router.open(audio, library: library)
     }
 
     private func toolButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {

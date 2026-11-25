@@ -6,6 +6,7 @@ import SwiftUI
 struct NowPlayingView: View {
     @ObservedObject var player: AudioPlayer
     @Environment(AppRouter.self) private var router
+    @EnvironmentObject private var library: LibraryStore
     let onStop: () -> Void
     /// The way off the player: the Reading tab is its home, so leaving is a tab switch.
     let onClose: () -> Void
@@ -109,6 +110,11 @@ struct NowPlayingView: View {
             PTIconButton(systemImage: "chevron.down", label: "Close player") { onClose() }
             Spacer()
             Menu {
+                if let ebook = Companion.match(for: player.record, in: library.books) {
+                    Button { read(ebook) } label: {
+                        Label("Read from Here", systemImage: "book")
+                    }
+                }
                 if player.chapters.count > 1 {
                     Button { showChapters = true } label: {
                         Label("Chapters", systemImage: "list.bullet")
@@ -133,6 +139,16 @@ struct NowPlayingView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+    }
+
+    /// Over to the ebook of this book, at the same place: the chapter being played by name, or the same share.
+    private func read(_ ebook: Book) {
+        let marks = player.chapters.map { Companion.Mark(title: $0.title, start: $0.start) }
+        let place = Companion.place(at: player.position, in: marks, end: player.duration)
+        player.pause()
+        OpenAt.request(.companion(place), for: ebook.id)
+        onClose()
+        router.open(ebook, library: library)
     }
 
     private var artwork: some View {

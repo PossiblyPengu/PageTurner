@@ -10,6 +10,8 @@ enum OpenAt {
         case locator(String)
         case position(Int)
         case chapter(Int, progression: Double)
+        /// Where the audiobook of this book was (`Companion`): the chapter of the same name, or the same share.
+        case companion(Companion.Place)
     }
 
     private static var pending: [UUID: Place] = [:]

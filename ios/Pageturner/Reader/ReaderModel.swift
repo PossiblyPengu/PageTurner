@@ -865,7 +865,30 @@ final class ReaderModel: ObservableObject {
                   let start = await publication.locate(publication.readingOrder[index])
             else { return nil }
             return start.copy(locations: { $0.progression = min(max(progression, 0), 1) })
+        case let .companion(place):
+            // where each contents entry begins, then the place among them
+            let toc = (try? await publication.tableOfContents().get()) ?? []
+            var marks: [Companion.Mark] = []
+            for link in toc.prefix(400) {
+                if let at = await publication.locate(link)?.locations.totalProgression, at.isFinite {
+                    marks.append(Companion.Mark(title: link.title ?? "", start: at))
+                }
+            }
+            marks.sort { $0.start < $1.start }
+            let target = Companion.locate(place, in: marks, end: 1)
+            return await publication.locate(progression: min(max(target, 0), 0.999))
         }
+    }
+
+    /// The audiobook of this book, when the library has one (`Companion`).
+    var companion: Book? { Companion.match(for: book, in: library.books) }
+
+    /// Where the page is, as the audiobook will find it: its chapter, how far into it, how far through the book.
+    var companionPlace: Companion.Place {
+        Companion.place(
+            at: book.progression ?? 0,
+            in: chapterMarks.map { Companion.Mark(title: $0.title, start: $0.at) },
+            end: 1)
     }
 
     /// Where this book is now, as the other version of it would open it: a PDF's page (0-based), or a text

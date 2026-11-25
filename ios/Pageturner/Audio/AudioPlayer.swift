@@ -223,7 +223,10 @@ final class AudioPlayer: ObservableObject {
             return
         }
         load(track: 0)
-        let target = book.audioPosition ?? (book.progression.map { $0 * total }) ?? 0
+        // asked to start where the ebook was left (`Listen from Here`): that place, found among these chapters
+        let marks = chapters.map { Companion.Mark(title: $0.title, start: $0.start) }
+        let handed = AudioStartAt.take(for: book.id).map { Companion.locate($0, in: marks, end: total) }
+        let target = handed ?? book.audioPosition ?? (book.progression.map { $0 * total }) ?? 0
         if target > 1 { seek(to: target, resume: false) }
         _ = checkpoint.adopt(position: book.audioPosition, progression: book.progression, playhead: position)
         opened = true
@@ -274,6 +277,16 @@ final class AudioPlayer: ObservableObject {
     /// The library's record of this book changed from outside — a restart, "Go to N%" from
     /// BookMaster's offer — while the player was already loaded: follow it, rather than carry on
     /// from the old place and write that back over it.
+    /// The book as this player holds it.
+    var record: Book { book }
+
+    /// Go to where the ebook of this book was (`Companion`): the chapter of the same name, or the same share.
+    func go(to place: Companion.Place) {
+        guard duration > 0 else { return }
+        let marks = chapters.map { Companion.Mark(title: $0.title, start: $0.start) }
+        seek(to: Companion.locate(place, in: marks, end: duration), resume: isPlaying)
+    }
+
     func adopt(_ latest: Book) {
         book = latest
         clips = latest.audioClips

@@ -406,6 +406,13 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (`navigator(_:setupUserScripts:)`), reversible, checked in headless Chromium. OpenDyslexic is Readium's own bundled font.
 - Online catalogues (`Library/OPDSFeed.swift` parses, Linux-checked; `OPDSBrowser.swift` browses and downloads through the
   normal importer; passwords in the Keychain). Plain http is allowed only on the local network (Info.plist).
+- Ebook and audiobook of one book (`Library/Companion.swift`, Linux-checked): `Companion.match` finds the other
+  edition (same title by `BMShelf.titlesAgree`, authors agreeing either way round, the very same title first). The
+  reader's More menu has "Listen from Here" and Now Playing's "Read from Here": the place goes over as a chapter name,
+  how far into it and how far through the book (`Companion.Place`), and is found in the other edition by the chapter's
+  folded name (`chapterKey`: "Chapter Three", "03 - Chapter 3" and "III" are all "3"; the one nearest the same share
+  when several match), else by the same share. The audiobook takes it through `AudioStartAt` (in `open()`, or
+  `go(to:)` when it is loaded already), the ebook through `OpenAt.Place.companion`, resolved against its contents.
 - Saved words (`Library/SavedWordsView.swift`; pure parts in `WordStudy.swift`, Linux-checked): each word gets a short
   definition from Wiktionary's REST API when saved (`WordDefinitions`, only the word is sent, a Wikimedia-style
   User-Agent; "" marks "looked, none", nil "not asked yet", so a failure offline is retried when the list next opens).

@@ -22,6 +22,8 @@ final class PlaybackCoordinator {
         if bookID == book.id, let player {
             // a restart or a jump to BookMaster's place may have changed the record since it loaded
             player.adopt(library.books.first { $0.id == book.id } ?? book)
+            // open already, and asked to go where the ebook was
+            if let place = AudioStartAt.take(for: book.id) { player.go(to: place) }
             return
         }
         stop()
