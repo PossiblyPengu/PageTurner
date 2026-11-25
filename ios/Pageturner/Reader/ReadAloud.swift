@@ -70,7 +70,13 @@ final class ReadAloud: NSObject, ObservableObject {
         }
     }
 
-    @Published private var spoken = Spoken()
+    /// Not `@Published`: it changes with every word, and nothing drawn in SwiftUI shows it — published, the
+    /// controls and the now-playing strip were laid out again three or four times a second for nothing.
+    private let spokenSubject = CurrentValueSubject<Spoken, Never>(Spoken())
+    private var spoken: Spoken {
+        get { spokenSubject.value }
+        set { spokenSubject.send(newValue) }
+    }
     /// Sentences said since the voice last started — for the memory line in the log.
     private var sentencesSaid = 0
     /// The sentence a voice has named a word of, and the wait for it to: a voice that never does
@@ -241,7 +247,7 @@ final class ReadAloud: NSObject, ObservableObject {
         // light the sentence, the line and the word being spoken, as chosen
         if let decorable = navigator as? DecorableNavigator {
             self.decorable = decorable
-            Publishers.CombineLatest($spoken, $highlights)
+            Publishers.CombineLatest(spokenSubject, $highlights)
                 .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
                 .sink { [weak self] _, _ in
                     // a page still waking is painted once, by `afterSettling`, with what is being said by then

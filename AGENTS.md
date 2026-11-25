@@ -172,6 +172,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Triggered by six turns in a row refused or unanswered, or the voice's mark off the page for ten seconds, at most once in 45 s, with the page then taken to
   the voice without the slide. Turns are made without the slide after any failure, too: a long smooth scroll to catch up left the web view half painted.
   The log says `the page is not following the voice (…)` and `laying the pages out again`.
+- Battery while it reads aloud: `ReadAloud.spoken` is a plain subject, not `@Published` (it changes per word and no SwiftUI view shows it — published,
+  the controls were laid out again per word); the place is written at most every 20 s while the voice moves it (`ReaderModel.scheduleSaveForVoice`; a
+  pause or leaving writes at once) instead of the whole catalogue per sentence; and the neural player's ticker runs at 120 ms, not per word, while
+  nobody is watching (`follow` answers nil when `watched` is false).
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the

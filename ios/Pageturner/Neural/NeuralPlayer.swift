@@ -258,8 +258,10 @@ final class NeuralPlayer {
                 // the word timing is fitted to ~105ms, so 15Hz is already finer
                 // than the marks can show; a lead-only wait doesn't need that, and
                 // Low Power Mode trades it all for wakeups
+                // a follower with no word to come (nobody watching, the sentence's last word) is not looked in on
+                // 15 times a second either
                 var interval: UInt64 = LowPower.on ? 200_000_000
-                    : self.follower != nil ? 66_000_000 : 120_000_000
+                    : self.follower != nil && self.nextReport != nil ? 66_000_000 : 120_000_000
                 // sooner, when whoever follows the voice has said when its next word starts
                 if !LowPower.on, self.follower != nil, let next = self.nextReport {
                     let wait = max(next, 0) / max(self.speed, 0.25)

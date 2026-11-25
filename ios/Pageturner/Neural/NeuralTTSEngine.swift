@@ -153,7 +153,9 @@ final class NeuralTTSEngine {
             func follow(_ seconds: TimeInterval) -> TimeInterval? {
                 guard !cancellation.isSet, let timeline else { return nil }
                 let until = timeline.untilNextWord(after: seconds)
-                guard watched, let next = timeline.index(at: seconds), next != lit else { return until }
+                // nobody is watching (the phone is locked, the reader is away): no word to wake for
+                guard watched else { return nil }
+                guard let next = timeline.index(at: seconds), next != lit else { return until }
                 lit = next
                 // a word with no counterpart on the page ("to" of a year range, say) keeps the last
                 // mark lit rather than the whole sentence flashing over it

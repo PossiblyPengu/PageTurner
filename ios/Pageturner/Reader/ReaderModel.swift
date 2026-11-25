@@ -27,13 +27,19 @@ final class ReaderModel: ObservableObject {
     @Published private(set) var showChrome = true
     @Published var settings = ReaderSettings.load()
     @Published var toc: [ReadiumShared.Link] = []
+    /// The pending save is the voice's slow one (`scheduleSaveForVoice`).
+    private var savesForVoice = false
     @Published var canReadAloud = false
     @Published var isSearchable = false
     @Published private(set) var readAloud: ReadAloud? {
         didSet {
             guard readAloud !== oldValue else { return }
             playingSink = readAloud?.$isPlaying
-                .sink { [weak self] playing in self?.readAloudPlaying = playing }
+                .sink { [weak self] playing in
+                    self?.readAloudPlaying = playing
+                    // paused or ended: the place the voice got to is written now, not at its next slow save
+                    if !playing, self?.savesForVoice == true { self?.scheduleSave() }
+                }
             if readAloud == nil {
                 readAloudPlaying = false
                 // the voice has ended: bring the page to where it stopped. A page still
@@ -1317,7 +1323,7 @@ final class ReaderModel: ObservableObject {
         let entry = chapterEntry(for: locator)
         chapterTitle = entry?.link.title
         currentChapterID = entry?.id
-        scheduleSave()
+        scheduleSaveForVoice()
         beginSession()
         reading.moved(to: locator.locations.totalProgression)
         pushProgress()
@@ -1341,9 +1347,26 @@ final class ReaderModel: ObservableObject {
     /// when the reader is going away (called from ReaderView.onDisappear).
     private func scheduleSave() {
         saveTask?.cancel()
+        savesForVoice = false
         saveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
+            saveTask = nil
+            writeReading()
+        }
+    }
+
+    /// The voice has moved on a sentence: the place is written within twenty seconds, not after every sentence —
+    /// a write is the whole catalogue encoded and the library told, and an hour of listening was a thousand of
+    /// them. Whatever ends the listening (a pause, the reader or the app going away) writes at once.
+    private func scheduleSaveForVoice() {
+        guard saveTask == nil else { return }
+        savesForVoice = true
+        saveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard !Task.isCancelled else { return }
+            saveTask = nil
+            savesForVoice = false
             writeReading()
         }
     }
