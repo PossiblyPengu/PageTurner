@@ -5,8 +5,6 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     @EnvironmentObject private var library: LibraryStore
     @Environment(AppRouter.self) private var router
-    @AppStorage("libraryFilter") private var filter: Filter = .all
-    @AppStorage("libraryStatus") private var status: Status = .any
     @AppStorage("librarySort") private var sortOrder = LibraryStore.SortOrder.recent.rawValue
     @AppStorage("libraryShelf") private var shelfKey = LibraryView.allKey
     /// One book per line instead of a wall of covers — kept between launches.
@@ -30,9 +28,7 @@ struct LibraryView: View {
     @State private var reviewPicked = false
     /// The folded-in Search tab's field — empty means the shelf shows.
     @State private var query = ""
-    @State private var showDuplicates = false
     @State private var showCatalogs = false
-    @State private var showHighlights = false
     /// "Later" on the backup reminder, until the view is next built.
     @State private var backupSnoozed = false
 
@@ -47,35 +43,25 @@ struct LibraryView: View {
     /// Every series, each under its name with how far through it the reader is and the book that comes next.
     private static let seriesKey = "~series"
 
-    /// Shelves that fill themselves from what the books are. Each shows only when it holds some of the
-    /// library but not all of it.
+    /// The one row of filters: how far along, what kind, then shelves that fill themselves. Each shows only when it
+    /// holds some of the library but not all of it. (Status and kind used to be a segmented bar and a picker in the
+    /// sort menu besides the chips: three places to look for one thing.)
     private static let smartShelves: [(key: String, label: String, includes: (Book) -> Bool)] = [
+        ("~reading", "Reading", { ($0.progression ?? 0) > 0.001 && ($0.progression ?? 0) < 0.995 }),
         ("~unread", "Unread", { ($0.progression ?? 0) <= 0.001 }),
+        ("~finished", "Finished", { ($0.progression ?? 0) >= 0.995 }),
+        ("~books", "Books", { !$0.isAudio }),
+        ("~audio", "Audiobooks", { $0.isAudio }),
+    ]
+
+    /// The same, after the series and the reader's own shelves.
+    private static let laterShelves: [(key: String, label: String, includes: (Book) -> Bool)] = [
         ("~long", "Long reads", { !$0.isAudio && ($0.pages ?? 0) >= 300 }),
         ("~short", "Short reads", { !$0.isAudio && ($0.pages ?? 0) > 0 && ($0.pages ?? 0) < 150 }),
         ("~month", "Added this month", { $0.addedAt > Date().addingTimeInterval(-30 * 86_400) }),
     ]
 
-    /// How far along a book is: none of it, some of it, all of it.
-    enum Status: String, CaseIterable, Identifiable {
-        case any = "Any Status", inProgress = "In Progress", unread = "Unread", finished = "Finished"
-        var id: String { rawValue }
-
-        func includes(_ book: Book) -> Bool {
-            let p = book.progression ?? 0
-            switch self {
-            case .any: return true
-            case .inProgress: return p > 0.001 && p < 0.995
-            case .unread: return p <= 0.001
-            case .finished: return p >= 0.995
-            }
-        }
-    }
-
-    enum Filter: String, CaseIterable, Identifiable {
-        case all = "All", books = "Books", audiobooks = "Audiobooks", incomplete = "Incomplete"
-        var id: String { rawValue }
-    }
+    private static var allSmart: [(key: String, label: String, includes: (Book) -> Bool)] { smartShelves + laterShelves }
 
     private var order: LibraryStore.SortOrder {
         LibraryStore.SortOrder(rawValue: sortOrder) ?? .recent
@@ -84,11 +70,14 @@ struct LibraryView: View {
     private var shelfKeys: [String] {
         let upNext = library.books.contains { $0.bmUpNext == true }
         let series = library.books.contains { $0.series != nil }
-        let smart = Self.smartShelves.filter { shelf in
-            let n = library.books.filter(shelf.includes).count
-            return n > 0 && n < library.books.count
-        }.map(\.key)
-        return [Self.allKey] + (upNext ? [Self.upNextKey] : []) + (series ? [Self.seriesKey] : []) + library.shelves + smart
+        func useful(_ shelves: [(key: String, label: String, includes: (Book) -> Bool)]) -> [String] {
+            shelves.filter { shelf in
+                let n = library.books.filter(shelf.includes).count
+                return n > 0 && n < library.books.count
+            }.map(\.key)
+        }
+        return [Self.allKey] + useful(Self.smartShelves) + (series ? [Self.seriesKey] : []) + (upNext ? [Self.upNextKey] : [])
+            + library.shelves + useful(Self.laterShelves)
     }
 
     /// The chosen shelf, unless it has since been deleted or emptied of its reason to exist.
@@ -101,7 +90,7 @@ struct LibraryView: View {
         case Self.allKey: return "All"
         case Self.upNextKey: return "Up next"
         case Self.seriesKey: return "Series"
-        default: return Self.smartShelves.first { $0.key == key }?.label ?? key
+        default: return Self.allSmart.first { $0.key == key }?.label ?? key
         }
     }
 
@@ -114,7 +103,7 @@ struct LibraryView: View {
         // how many series, not books
         case Self.seriesKey: return Set(library.books.compactMap { $0.series.map(SeriesShelf.key) }).count
         default:
-            if let smart = Self.smartShelves.first(where: { $0.key == key }) {
+            if let smart = Self.allSmart.first(where: { $0.key == key }) {
                 return library.books.filter(smart.includes).count
             }
             return library.books.filter { $0.collections.contains(key) }.count
@@ -136,19 +125,13 @@ struct LibraryView: View {
         case Self.upNextKey: list = list.filter { $0.bmUpNext == true }
         case Self.seriesKey: list = list.filter { $0.series != nil }
         default:
-            if let smart = Self.smartShelves.first(where: { $0.key == activeShelfKey }) {
+            if let smart = Self.allSmart.first(where: { $0.key == activeShelfKey }) {
                 list = list.filter(smart.includes)
             } else {
                 list = list.filter { $0.collections.contains(activeShelfKey) }
             }
         }
-        if status != .any { list = list.filter { status.includes($0) } }
-        switch filter {
-        case .all: return list
-        case .books: return list.filter { !$0.isAudio }
-        case .audiobooks: return list.filter { $0.isAudio }
-        case .incomplete: return list.filter { lacksDetails($0) }
-        }
+        return list
     }
 
     /// Missing what a lookup could fill — an author, a blurb, or a jacket on
@@ -206,8 +189,6 @@ struct LibraryView: View {
     /// body's modifier chain stays short enough for the type checker.
     private func sheets<V: View>(_ content: V) -> some View {
         content
-            .sheet(isPresented: $showDuplicates) { DuplicatesSheet() }
-            .sheet(isPresented: $showHighlights) { HighlightsHubView() }
             .sheet(isPresented: $showCatalogs) { NavigationStack { OPDSCatalogsView() } }
             // the misses "Find Details" couldn't match, one lookup sheet at a time
             #if DEBUG
@@ -285,34 +266,26 @@ struct LibraryView: View {
                         backupSnoozed = true
                     }
                 }
-                if !searching {
-                    Picker("Show", selection: $filter) {
-                        ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-
-                    if !selecting { shelfChips }
-                }
+                if !searching, !selecting { shelfChips }
 
                 if books.isEmpty {
                     if searching {
                         ContentUnavailableView.search(text: query)
                             .padding(.top, 40)
                     } else {
-                        let shelved = activeShelfKey != Self.allKey
-                        let filtered = status != .any || filter != .all || shelved
+                        let filtered = activeShelfKey != Self.allKey
                         ContentUnavailableView {
-                            Label(filter == .audiobooks ? "No Audiobooks" : "No Books",
-                                  systemImage: filter == .audiobooks ? "headphones" : "book.closed")
+                            Label(activeShelfKey == "~audio" ? "No Audiobooks" : "No Books",
+                                  systemImage: activeShelfKey == "~audio" ? "headphones" : "book.closed")
                         } description: {
                             if filtered {
-                                Text("The current shelf and filters are hiding everything.")
+                                Text("Nothing on this shelf.")
                             } else {
                                 Text("Nothing matches yet.")
                             }
                         } actions: {
                             if filtered {
-                                Button("Show All Books") { status = .any; filter = .all; shelfKey = Self.allKey }
+                                Button("Show All Books") { shelfKey = Self.allKey }
                             } else {
                                 Button { router.showImporter = true } label: {
                                     Label("Add Books", systemImage: "plus")
@@ -457,9 +430,20 @@ struct LibraryView: View {
             ToolbarItem(placement: .topBarLeading) {
                 let books = visible
                 let all = selected.count == books.count && !books.isEmpty
-                Button(all ? "Deselect All" : "Select All") {
-                    selected = all ? [] : Set(books.map(\.id))
+                let lacking = books.filter(lacksDetails)
+                // what the old "Incomplete" filter was for: tick the books missing an author, a blurb or a cover,
+                // then Find Details
+                Menu {
+                    Button(all ? "Deselect All" : "Select All") {
+                        selected = all ? [] : Set(books.map(\.id))
+                    }
+                    if !lacking.isEmpty {
+                        Button("Select \(lacking.count) Missing Details") { selected = Set(lacking.map(\.id)) }
+                    }
+                } label: {
+                    Text("Select")
                 }
+                .accessibilityLabel("Select books")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") {
@@ -470,42 +454,22 @@ struct LibraryView: View {
             }
         } else {
             ToolbarItem(placement: .topBarLeading) {
+                // sorting and how the shelf is laid out — nothing else (filters are the chips)
                 Menu {
-                    Section("Sort") {
-                        Picker("Sort", selection: $sortOrder) {
-                            ForEach(LibraryStore.SortOrder.allCases) { o in
-                                Text(o.label).tag(o.rawValue)
-                            }
+                    Picker("Sort", selection: $sortOrder) {
+                        ForEach(LibraryStore.SortOrder.allCases) { o in
+                            Text(o.label).tag(o.rawValue)
                         }
                     }
-                    Section("Show") {
-                        Picker("Status", selection: $status) {
-                            ForEach(Status.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        Button { listView.toggle() } label: {
-                            Label(listView ? "Show as Covers" : "Show as List",
-                                  systemImage: listView ? "square.grid.2x2" : "list.bullet")
-                        }
-                    }
-                    Section("Notes") {
-                        Button { showHighlights = true } label: {
-                            Label("All Highlights", systemImage: "highlighter")
-                        }
-                    }
-                    Section("Get books") {
-                        Button { showCatalogs = true } label: {
-                            Label("Online Catalogs…", systemImage: "network")
-                        }
-                    }
-                    Section("Tidy") {
-                        Button { showDuplicates = true } label: {
-                            Label("Find Duplicates…", systemImage: "square.on.square")
-                        }
+                    Divider()
+                    Button { listView.toggle() } label: {
+                        Label(listView ? "Show as Covers" : "Show as List",
+                              systemImage: listView ? "square.grid.2x2" : "list.bullet")
                     }
                 } label: {
-                    Image(systemName: status == .any ? "arrow.up.arrow.down" : "line.3.horizontal.decrease.circle.fill")
+                    Image(systemName: "arrow.up.arrow.down")
                 }
-                .accessibilityLabel(status == .any ? "Sort books" : "Sort and filter books, showing \(status.rawValue)")
+                .accessibilityLabel("Sort books")
             }
             if !library.books.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -519,6 +483,7 @@ struct LibraryView: View {
                 Menu {
                     Button { router.showImporter = true } label: { Label("From Files…", systemImage: "folder") }
                     Button { router.showDrive = true } label: { Label("From Google Drive…", systemImage: "externaldrive") }
+                    Button { showCatalogs = true } label: { Label("From an Online Catalog…", systemImage: "network") }
                 } label: {
                     if library.importing { ProgressView() } else { Image(systemName: "plus") }
                 }

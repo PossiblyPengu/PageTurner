@@ -271,6 +271,60 @@ struct BookDetailSheet: View {
         }
     }
 
+    /// Where the book stands, in one row — finished, back to the start and, with BookMaster, want to read or abandoned
+    /// behind it.
+    private var statusMenu: some View {
+        Menu {
+            if !isFinished {
+                Button(book.isAudio ? "Mark as Listened" : "Mark as Finished", action: onFinish)
+            }
+            if (book.progression ?? 0) > 0 {
+                Button(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning") { confirmRestart = true }
+            }
+            if let onShelfMove, BookMaster.shared.isLinked {
+                if book.bmStatus != BMShelfStatus.wantToRead.rawValue {
+                    Button("Want to Read") {
+                        // back to not started: a place worth keeping asks first
+                        if (book.progression ?? 0) > 0.001 { confirmWantToRead = true } else { onShelfMove(.wantToRead) }
+                    }
+                }
+                if book.bmStatus != BMShelfStatus.abandoned.rawValue {
+                    Button("Abandoned") { onShelfMove(.abandoned) }
+                }
+            }
+        } label: {
+            HStack {
+                Text("Status").foregroundStyle(.primary)
+                Spacer()
+                Text(statusText).foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .confirmationDialog("Start over?", isPresented: $confirmRestart, titleVisibility: .visible) {
+            Button(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning", role: .destructive, action: onRestart)
+        } message: {
+            Text("Your place in this book is forgotten.")
+        }
+        .confirmationDialog("Back to Want to Read?", isPresented: $confirmWantToRead, titleVisibility: .visible) {
+            Button("Move to Want to Read", role: .destructive) { onShelfMove?(.wantToRead) }
+        } message: {
+            Text("Your place in this book is forgotten.")
+        }
+    }
+
+    private var statusText: String {
+        if let status = book.bmStatus,
+           status == BMShelfStatus.wantToRead.rawValue || status == BMShelfStatus.abandoned.rawValue {
+            return BMShelf.label(forStatus: status)
+        }
+        let p = book.progression ?? 0
+        if isFinished { return book.isAudio ? "Listened" : "Finished" }
+        if p > 0.001 { return "\(Int((p * 100).rounded()))% in" }
+        return "Not started"
+    }
+
     /// The stars live with the cover, where rating is a gesture — not a line in the facts.
     @ViewBuilder
     private var ratingRow: some View {
@@ -323,16 +377,12 @@ struct BookDetailSheet: View {
                     }
                 }
                 Section {
-                    LabeledContent("Format", value: book.ext.uppercased())
                     if let year = book.year { LabeledContent("Year", value: year) }
                     if let isbn = book.isbn { LabeledContent("ISBN", value: isbn) }
                     if let pages = book.pages { LabeledContent("Pages", value: "\(pages)") }
                     LabeledContent("Added", value: book.addedAt.formatted(date: .abbreviated, time: .omitted))
                     if let opened = book.lastOpenedAt {
                         LabeledContent("Last opened", value: opened.formatted(date: .abbreviated, time: .shortened))
-                    }
-                    if let p = book.progression {
-                        LabeledContent("Progress", value: "\(Int((p * 100).rounded()))%")
                     }
                     if let status = book.bmStatus {
                         LabeledContent("On BookMaster", value: BMShelf.label(forStatus: status)
@@ -360,41 +410,11 @@ struct BookDetailSheet: View {
                         LabeledContent("Bookmarks", value: "\(book.bookmarks.count)")
                     }
                 }
-                // the actions, grouped by what they are about: where the book sits
-                // on the shelf, the book's record, and what happens to its files
-                Section("Shelf") {
-                    if !isFinished {
-                        Button(book.isAudio ? "Mark as Listened" : "Mark as Finished", action: onFinish)
-                    }
-                    if (book.progression ?? 0) > 0 {
-                        Button(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning") { confirmRestart = true }
-                            .confirmationDialog("Start over?", isPresented: $confirmRestart, titleVisibility: .visible) {
-                                Button(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning", role: .destructive, action: onRestart)
-                            } message: {
-                                Text("Your place in this book is forgotten.")
-                            }
-                    }
-                    if let onShelfMove, BookMaster.shared.isLinked {
-                        if book.bmStatus != BMShelfStatus.wantToRead.rawValue {
-                            Button("Move to Want to Read") {
-                                // back to not started: a place worth keeping asks first
-                                if (book.progression ?? 0) > 0.001 { confirmWantToRead = true }
-                                else { onShelfMove(.wantToRead) }
-                            }
-                            .confirmationDialog("Back to Want to Read?", isPresented: $confirmWantToRead, titleVisibility: .visible) {
-                                Button("Move to Want to Read", role: .destructive) { onShelfMove(.wantToRead) }
-                            } message: {
-                                Text("Your place in this book is forgotten.")
-                            }
-                        }
-                        if book.bmStatus != BMShelfStatus.abandoned.rawValue {
-                            Button("Mark as Abandoned") { onShelfMove(.abandoned) }
-                        }
-                    }
+                // the same few things as the shelf's hold menu: where it stands, its shelves, what this kind of book
+                // has besides, and removing it (the root's dialog says what removing can mean for it). Edit is at the top.
+                Section {
+                    statusMenu
                     Button(book.collections.isEmpty ? "Add to a Shelf…" : "Shelves: \(book.collections.joined(separator: ", "))", action: onShelves)
-                }
-                Section("Manage") {
-                    Button("Edit Details", action: onEdit)
                     if let onTextVersion, book.ext == "pdf", cloud == nil {
                         textVersionRow(onTextVersion)
                     }
@@ -406,20 +426,7 @@ struct BookDetailSheet: View {
                     }
                 }
                 Section {
-                    if book.drive != nil, cloud == nil {
-                        Button("Remove Download", action: onRemoveDownload)
-                    }
-                    if isFinished, book.drive == nil, cloud == nil, !library.missing.contains(book.id),
-                       let onClearFile {
-                        Button("Remove File", role: .destructive) { confirmClearFile = true }
-                            .confirmationDialog("Remove the file of “\(book.title)”?",
-                                                isPresented: $confirmClearFile, titleVisibility: .visible) {
-                                Button("Remove File", role: .destructive, action: onClearFile)
-                            } message: {
-                                Text("The file is the book’s only copy — the book is removed from the library with it. Your BookMaster shelf isn’t touched.")
-                            }
-                    }
-                    Button("Remove from Library", role: .destructive, action: onDelete)
+                    Button("Remove…", role: .destructive, action: onDelete)
                 }
             }
             .navigationTitle("Book Info")
@@ -440,7 +447,7 @@ struct BookDetailSheet: View {
         }
         // sheets, the share button and the alerts: a chain of their own, so the
         // type checker never faces the whole page at once
-        .modifier(DetailPresented(book: book, changeCover: $changeCover, showNotes: $showNotes,
+        .modifier(DetailPresented(book: book, onEdit: onEdit, changeCover: $changeCover, showNotes: $showNotes,
             detent: $detent, coverFailed: $coverFailed, shareLine: shareLine,
             onCover: { candidate in
                 guard !candidate.coverURLs.isEmpty else { return }
@@ -466,6 +473,7 @@ struct BookDetailSheet: View {
 /// as one modifier, keeping `body` under the type checker's limit.
 private struct DetailPresented: ViewModifier {
     let book: Book
+    let onEdit: () -> Void
     @Binding var changeCover: Bool
     @Binding var showNotes: Bool
     @Binding var detent: PresentationDetent
@@ -477,6 +485,9 @@ private struct DetailPresented: ViewModifier {
     func body(content: Content) -> some View {
         content
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Edit", action: onEdit)
+                }
                 ToolbarItem(placement: .primaryAction) {
                     // the Open Library page when the book has one, its name otherwise
                     if let olid = book.openLibraryId,

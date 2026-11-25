@@ -182,8 +182,6 @@ struct BookGrid: View {
     @State private var restarting: Book?
     /// Back to "want to read" forgets the place too, so it asks first.
     @State private var wantToRead: Book?
-    /// Removing a local file removes the book with it, so it asks first.
-    @State private var clearing: Book?
 
     /// Wider cells at accessibility sizes, so titles under the covers have room.
     private var columns: [GridItem] {
@@ -228,15 +226,6 @@ struct BookGrid: View {
             }
         } message: { _ in
             Text("Your place in this book is forgotten.")
-        }
-        .confirmationDialog(
-            "Remove the file of “\(clearing?.title ?? "")”?",
-            isPresented: Binding(get: { clearing != nil }, set: { if !$0 { clearing = nil } }),
-            titleVisibility: .visible, presenting: clearing
-        ) { book in
-            Button("Remove File", role: .destructive) { router.clearFinished(book, library: library) }
-        } message: { _ in
-            Text("The file is the book’s only copy — the book is removed from the library with it. Your BookMaster shelf isn’t touched.")
         }
     }
 
@@ -372,7 +361,8 @@ struct BookGrid: View {
         }
     }
 
-    /// The hold-menu on a book — shelved while ticking.
+    /// The hold-menu on a book — shelved while ticking. Five things: open it, where it stands, its shelves, its
+    /// page, and removing it (one item: the root's dialog offers what removing can mean for this book).
     @ViewBuilder
     private func bookMenu(_ book: Book) -> some View {
         if !ticked {
@@ -391,54 +381,50 @@ struct BookGrid: View {
                     Label(book.isAudio ? "Play" : "Read", systemImage: book.isAudio ? "play.fill" : "book.fill")
                 }
             }
-            if (book.progression ?? 0) < 0.995 {
-                Button { router.markFinished(book, library: library) } label: {
-                    Label(book.isAudio ? "Mark as Listened" : "Mark as Finished", systemImage: "checkmark.circle")
-                }
-            }
-            if (book.progression ?? 0) > 0 {
-                Button { restarting = book } label: {
-                    Label(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning", systemImage: "arrow.counterclockwise")
-                }
-            }
-            if BookMaster.shared.isLinked {
-                if book.bmStatus != BMShelfStatus.wantToRead.rawValue {
-                    Button {
-                        if (book.progression ?? 0) > 0.001 { wantToRead = book }
-                        else { BookMaster.shared.moveToShelf(.wantToRead, bookID: book.id, library: library) }
-                    } label: {
-                        Label("Move to Want to Read", systemImage: "bookmark")
-                    }
-                }
-                if book.bmStatus != BMShelfStatus.abandoned.rawValue {
-                    Button { BookMaster.shared.moveToShelf(.abandoned, bookID: book.id, library: library) } label: {
-                        Label("Mark as Abandoned", systemImage: "pause.circle")
-                    }
-                }
-            }
-            Divider()
-            Button { router.detail = book } label: {
-                Label("Book Info", systemImage: "info.circle")
+            Menu {
+                statusChoices(book)
+            } label: {
+                Label("Status", systemImage: "checkmark.circle")
             }
             Button { router.openShelves([book.id]) } label: {
                 Label("Shelves…", systemImage: "books.vertical")
             }
-            Button { router.editing = book } label: {
-                Label("Edit Details", systemImage: "pencil")
+            Button { router.detail = book } label: {
+                Label("Book Info", systemImage: "info.circle")
             }
             Divider()
-            if book.drive != nil, !library.inCloud.contains(book.id) {
-                Button { router.removeDownload(book, library: library) } label: {
-                    Label("Remove Download", systemImage: "icloud.and.arrow.up")
-                }
-            }
-            if book.drive == nil, (book.progression ?? 0) >= 0.995, !library.missing.contains(book.id) {
-                Button { clearing = book } label: {
-                    Label("Remove File", systemImage: "doc.badge.minus")
-                }
-            }
             Button(role: .destructive) { router.askDelete([book]) } label: {
-                Label("Remove from Library", systemImage: "trash")
+                Label("Remove…", systemImage: "trash")
+            }
+        }
+    }
+
+    /// Where the book stands: finished, back to the start, and — with BookMaster — want to read or abandoned.
+    @ViewBuilder
+    private func statusChoices(_ book: Book) -> some View {
+        if (book.progression ?? 0) < 0.995 {
+            Button { router.markFinished(book, library: library) } label: {
+                Label(book.isAudio ? "Mark as Listened" : "Mark as Finished", systemImage: "checkmark.circle")
+            }
+        }
+        if (book.progression ?? 0) > 0 {
+            Button { restarting = book } label: {
+                Label(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning", systemImage: "arrow.counterclockwise")
+            }
+        }
+        if BookMaster.shared.isLinked {
+            if book.bmStatus != BMShelfStatus.wantToRead.rawValue {
+                Button {
+                    if (book.progression ?? 0) > 0.001 { wantToRead = book }
+                    else { BookMaster.shared.moveToShelf(.wantToRead, bookID: book.id, library: library) }
+                } label: {
+                    Label("Want to Read", systemImage: "bookmark")
+                }
+            }
+            if book.bmStatus != BMShelfStatus.abandoned.rawValue {
+                Button { BookMaster.shared.moveToShelf(.abandoned, bookID: book.id, library: library) } label: {
+                    Label("Abandoned", systemImage: "pause.circle")
+                }
             }
         }
     }

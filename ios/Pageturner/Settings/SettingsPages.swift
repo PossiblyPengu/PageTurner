@@ -60,6 +60,7 @@ struct LibrarySettingsPage: View {
     @State private var hardcoverSaved = HardcoverClient.hasOwnToken
     @State private var hardcoverBusy = false
     @State private var hardcoverResult: String?
+    @State private var showDuplicates = false
     @AppStorage(SpotlightIndexer.enabledKey) private var spotlight = true
     @AppStorage("stats-tracking") private var statsTracking = true
     @AppStorage("auto-clear-finished") private var autoClearFinished = false
@@ -69,9 +70,16 @@ struct LibrarySettingsPage: View {
         Form {
             autoImport
             finishedBooks
+            // was in the library's sort menu, with nothing to do with sorting
+            Section {
+                Button("Find Duplicates…") { showDuplicates = true }
+            } footer: {
+                Text("The same book added twice — two files, or a Drive copy and one from Files — side by side, to keep one.")
+            }
             hardcover
             searchAndStats
         }
+        .sheet(isPresented: $showDuplicates) { DuplicatesSheet() }
         .navigationTitle("Library & import")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: spotlight) { _, on in

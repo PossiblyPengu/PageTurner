@@ -352,14 +352,18 @@ struct RootView: View {
                 titleVisibility: .visible,
                 presenting: router.pendingDelete.isEmpty ? nil : router.pendingDelete
             ) { books in
+                // one Drive book that is on the phone: its download can go and the book stay, to come down again
+                if books.count == 1, let book = books.first, book.drive != nil, !library.inCloud.contains(book.id) {
+                    Button("Remove Download, Keep the Book") { router.removeDownload(book, library: library) }
+                }
                 Button(books.count == 1 ? "Remove from Library" : "Remove \(books.count) Books", role: .destructive) {
                     for book in books {
                         router.putAway(book.id)
                         library.delete(book)
                     }
                 }
-            } message: { _ in
-                Text("This also deletes the file from this device. Your BookMaster shelf isn’t touched.")
+            } message: { books in
+                Text(Self.deleteMessage(books, inCloud: library.inCloud))
             }
     }
 
@@ -369,6 +373,14 @@ struct RootView: View {
 
     private var resumeShown: Binding<Bool> {
         Binding(get: { router.resumePrompt != nil }, set: { if !$0 { router.resumePrompt = nil } })
+    }
+
+    /// What removing does: a Drive book can lose just its download; anything removed takes its file with it.
+    private static func deleteMessage(_ books: [Book], inCloud: Set<UUID>) -> String {
+        if books.count == 1, let book = books.first, book.drive != nil, !inCloud.contains(book.id) {
+            return "Removing the download frees the space and keeps the book, your place and notes, to download again. Removing it from the library takes it all. Your BookMaster shelf isn’t touched."
+        }
+        return "This also deletes the file from this device. Your BookMaster shelf isn’t touched."
     }
 
     private var deleteShown: Binding<Bool> {

@@ -8,6 +8,12 @@ struct ReadingNowView: View {
     @ObservedObject private var log = ReadingLog.shared
     /// "Open Library" on the empty state.
     var onBrowse: () -> Void
+    @State private var showHighlights = false
+
+    /// How many highlights and saved words there are, across the library — the row to them shows when there are any.
+    private var notesCount: Int {
+        library.books.reduce(0) { $0 + $1.highlights.count + $1.words.count }
+    }
 
     private var current: Book? { library.continueBook }
 
@@ -100,6 +106,27 @@ struct ReadingNowView: View {
                         }
                     }
                     PartnerStrip()
+                    // every highlight and saved word, from every book (was in the library's sort menu)
+                    if notesCount > 0 {
+                        Button { showHighlights = true } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "highlighter")
+                                    .font(.title3)
+                                    .foregroundStyle(Color.ptAccent)
+                                    .frame(width: 32)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Highlights & Saved Words").font(.headline)
+                                    Text("\(notesCount) across your books").font(.subheadline).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                            }
+                            .padding(14)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                     if !alsoReading.isEmpty {
                         Text("Also reading").font(.title3.weight(.semibold))
                         BookGrid(books: alsoReading)
@@ -112,6 +139,7 @@ struct ReadingNowView: View {
             .ptSoftScrollEdges()
             .navigationTitle("Reading")
             .toolbar { SettingsToolbarItem(router: router) }
+            .sheet(isPresented: $showHighlights) { HighlightsHubView() }
         }
     }
 }
