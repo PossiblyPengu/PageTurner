@@ -28,6 +28,8 @@ final class SystemTTSEngine: NSObject, AVSpeechSynthesizerDelegate {
         let onSpeakRange: (Range<String.Index>) -> Void
         var continuation: CheckedContinuation<Result<Void, TTSError>, Never>?
         var cancelled = false
+        /// A word of it has been reported — the first always is: it is what shows the voice works.
+        var reported = false
 
         init(utterance: AVSpeechUtterance, original: String, spoken: String,
              onSpeakRange: @escaping (Range<String.Index>) -> Void) {
@@ -47,6 +49,11 @@ final class SystemTTSEngine: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     @MainActor private var flight: Flight?
+
+    /// A page is being looked at. Behind a locked screen, or with the reader left, only each sentence's first word
+    /// is reported: the rest changed nothing anyone could see, and each was a trip through the play loop, read-aloud
+    /// and its mark pipeline — three or four a second for as long as the voice went on.
+    @MainActor var watched = true
 
     /// Whatever the device voice is saying is cut off — whichever engine said it. The synthesizer is shared by every
     /// engine there has been, so a voice whose own engine is gone can still be speaking through it.
@@ -146,6 +153,8 @@ final class SystemTTSEngine: NSObject, AVSpeechSynthesizerDelegate {
               let range = Range(characterRange, in: flight.spoken),
               let mapped = flight.wordMap.originalRange(of: range)
         else { return }
+        if !watched, flight.reported { return }
+        flight.reported = true
         flight.onSpeakRange(mapped)
     }
 

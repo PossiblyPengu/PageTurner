@@ -386,6 +386,12 @@ final class CompositeTTSEngine {
 
     /// Have the voice that will be asked for loaded before the first sentence is: a chosen
     /// neural voice, or the one Automatic will route the book's language to.
+    /// Whether a page is being looked at — the device voice reports only each sentence's first word when not.
+    @MainActor
+    func setWatched(_ watched: Bool) {
+        system.watched = watched
+    }
+
     func warmVoice(_ identifier: String?, bookLanguage: String?) {
         if let id = identifier, NeuralVoice.key(fromID: id) != nil {
             neural.warm(id)

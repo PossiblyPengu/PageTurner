@@ -721,6 +721,7 @@ final class ReadAloud: NSObject, ObservableObject {
     private func updateWordReporting() {
         neural.reportsWords = highlights.needsWords && !LowPower.on
         neural.watched = onScreen
+        composite.setWatched(onScreen)
     }
 
     /// The reader was left with the narration going on, or came back to it.
@@ -845,6 +846,8 @@ final class ReadAloud: NSObject, ObservableObject {
     private var longestStall: TimeInterval = 0
     private var stallWatch: Task<Void, Never>?
     private var lastSlowLog: Date?
+    /// The playback state last given to the lock screen.
+    private var toldPlayback: MPNowPlayingPlaybackState?
     /// How the page's turns are going: answers that were no, or never came, one after another.
     private var goFailures = 0
     /// Since when the voice's mark has been seen off the page, without once being seen on it.
@@ -1098,8 +1101,10 @@ final class ReadAloud: NSObject, ObservableObject {
 
     /// The main thread's lateness, while the voice is going and its page is in front: a pause there shows as a
     /// late highlight and a late page turn however fast everything else is.
+    /// Runs only while the voice is going and its page is watched: behind a locked screen it woke the app five times
+    /// a second for hours to measure nothing. The next word said with the page in front starts it again.
     private func startStallWatch() {
-        stallWatch?.cancel()
+        guard stallWatch == nil, isPlaying, onScreen else { return }
         stallWatch = Task { @MainActor [weak self] in
             var last = Date()
             while !Task.isCancelled {
@@ -1108,7 +1113,10 @@ final class ReadAloud: NSObject, ObservableObject {
                 let now = Date()
                 let late = now.timeIntervalSince(last) - 0.2
                 last = now
-                guard self.isPlaying, self.onScreen else { continue }
+                guard self.isPlaying, self.onScreen else {
+                    self.stallWatch = nil
+                    return
+                }
                 self.longestStall = max(self.longestStall, late)
                 if late > 0.4, self.lastSlowLog.map({ now.timeIntervalSince($0) > 20 }) ?? true {
                     self.lastSlowLog = now
@@ -1217,6 +1225,9 @@ final class ReadAloud: NSObject, ObservableObject {
     /// narration has carried it, elapsed = where it is now. The buttons are
     /// `RemoteControls`'.
     private func publishNowPlaying() {
+        // whatever else has written the lock screen's state since (an audiobook, the remote controls), the next
+        // state change tells it again
+        toldPlayback = nil
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: displayTitle,
             MPMediaItemPropertyArtist: displayAuthor,
@@ -1279,6 +1290,7 @@ extension ReadAloud: SpeechSynthesizerDelegate {
             // narration keeps the app running behind a locked screen: an end there is a crash (or iOS taking the
             // memory back), not the clean suspension that clears the marker
             if !wasPlaying { Log.markForeground() }
+            if onScreen, stallWatch == nil { startStallWatch() }
             noteProgression(utterance.locator)
             // the chapter-end bell rings the first sentence in a different chapter;
             // one that names no chapter (a locator outside the contents) leaves it armed
@@ -1348,7 +1360,12 @@ extension ReadAloud: SpeechSynthesizerDelegate {
                 Task { @MainActor in _ = await bounded(3, { await epub.evaluateJavaScript(SpokenMarkScript.hold) }) }
             }
         }
-        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+        // told when it changes, not with every word (a message to the system's media service each time)
+        let playback: MPNowPlayingPlaybackState = isPlaying ? .playing : .paused
+        if playback != toldPlayback {
+            toldPlayback = playback
+            MPNowPlayingInfoCenter.default().playbackState = playback
+        }
     }
 
     func publicationSpeechSynthesizer(

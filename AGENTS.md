@@ -176,6 +176,15 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   the controls were laid out again per word); the place is written at most every 20 s while the voice moves it (`ReaderModel.scheduleSaveForVoice`; a
   pause or leaving writes at once) instead of the whole catalogue per sentence; and the neural player's ticker runs at 120 ms, not per word, while
   nobody is watching (`follow` answers nil when `watched` is false).
+  "Dim the screen while it reads" (on by default) really dims now: it used to set `UIScreen.wantsSoftwareDimming`, which only lets the screen
+  go below its lowest step and dims nothing, so with "Keep screen awake" (also on by default) a book read aloud held the screen at full
+  brightness for as long as the voice went on. Fifteen seconds hands-off (`NarrationDim.delay`; `ReaderView.wantsDim`: controls hidden, no
+  sheet) turns it down to about a third (`NarrationDim`, Linux-checked; `ScreenDimmer` moves `UIScreen.brightness`); a tap gives the light
+  back at once, unless the brightness was moved meanwhile (theirs stands). An app's brightness outlives it on the home screen, so it is
+  given back at `.inactive` and on leaving the reader. Also cut: the stall watch runs only while the voice goes and its page is watched (it
+  woke the app five times a second behind the lock); the lock screen's playback state is written when it changes, not per word; the
+  neural player passes its time-stretch unit by at 1× and ticks four times a second, not eight, with no word to come; and the device voice
+  reports only each sentence's first word while nobody watches (`SystemTTSEngine.watched`; the first still proves the voice works).
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the

@@ -133,6 +133,7 @@ func runData() async {
     runSpokenWordsChecks()
     runSelectorChecks()
     runNarrationChecks()
+    runNarrationDimChecks()
     runShelfChecks()
     runChatChecks()
     runWebAppsChecks()
