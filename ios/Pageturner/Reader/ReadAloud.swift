@@ -1247,18 +1247,33 @@ extension Locator {
 private final class PendingBox<T>: @unchecked Sendable {
     var answered = false
     var value: T?
+    /// Whoever is waiting, woken once: by the answer or by the time running out, whichever is first.
+    var waiter: CheckedContinuation<Void, Never>?
+
+    func wake() {
+        waiter?.resume()
+        waiter = nil
+    }
 }
 
 /// `body` bounded to `seconds`, nil when it does not answer in time. A webview suspended
 /// behind a locked screen can leave a call hanging for good — without the bound, a follow's
-/// `isTurning` would hold the page shut for the rest of the session.
+/// `isTurning` would hold the page shut for the rest of the session. The answer is handed on the
+/// moment it comes: looked for every 100 ms, as it used to be, each mark and each page turn was that late.
 @MainActor
 private func bounded<T>(_ seconds: Double, _ body: @escaping @MainActor () async -> T) async -> T? {
     let box = PendingBox<T>()
-    Task { @MainActor in box.value = await body(); box.answered = true }
-    for _ in 0 ..< max(Int(seconds * 10), 1) {
-        if box.answered { return box.value }
-        try? await Task.sleep(nanoseconds: 100_000_000)
+    Task { @MainActor in
+        box.value = await body()
+        box.answered = true
+        box.wake()
     }
-    return nil
+    if box.answered { return box.value }
+    let limit = Task { @MainActor in
+        try? await Task.sleep(nanoseconds: UInt64(max(seconds, 0.1) * 1_000_000_000))
+        box.wake()
+    }
+    await withCheckedContinuation { box.waiter = $0 }
+    limit.cancel()
+    return box.answered ? box.value : nil
 }
