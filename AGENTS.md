@@ -141,6 +141,15 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   views to wake, then paints the marks afresh and moves the page once, without the slide (`followQuietly`), and `ReaderModel.refreshAwakeSoon` asks for
   a repaint again as they come up. The neural voice times each sentence's words whenever words are wanted and only says them while the page is watched
   (`NeuralTTSEngine.watched`), so a sentence that was half said when the phone was unlocked has its word mark at the next tick, not after the sentence.
+- Marks and page turns keep up with the voice (`ReadAloud.syncMarks` / `lookAtPage`): the page runs what it is sent in order, so a mark per word
+  that takes longer to anchor than a word takes to say piles up, the highlight trails the voice by more and more, and the `go` that turns the page
+  waits behind it. Now one update is in flight: paint, wait ~45 ms (Readium draws on the next animation frame), then ask the page for the first mark
+  (`markScript`: "on", "off" the page's width, or "none") — the answer comes after everything sent before it, so how long it takes is how far behind
+  the page is — and words said meanwhile are skipped (the next mark is the word then being said). A mark found off the page turns it at once (at most
+  one such turn per 0.7 s; three turns in a row that did not bring it in view switch the shortcut off and the old throttled `go` a second takes over,
+  which also runs whenever there is no mark to find, in sentence-only highlighting's case always). The log says, at the end of a session and when the
+  page is left, how many marks were sent and skipped, the page's slowest answer and the main thread's longest hold-up (`logSession`; slow ones are
+  logged as they happen) — read it first when the highlighting or the page turning lags.
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the

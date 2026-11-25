@@ -243,10 +243,10 @@ final class ReadAloud: NSObject, ObservableObject {
             self.decorable = decorable
             Publishers.CombineLatest($spoken, $highlights)
                 .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
-                .sink { [weak self] spoken, highlights in
+                .sink { [weak self] _, _ in
                     // a page still waking is painted once, by `afterSettling`, with what is being said by then
                     guard let self, self.onScreen, !self.settling else { return }
-                    self.paint(spoken, as: highlights, on: decorable)
+                    self.syncMarks()
                 }
                 .store(in: &subscriptions)
             // iOS toggling Low Power Mode mid-book adds or drops the word marks
@@ -551,6 +551,7 @@ final class ReadAloud: NSObject, ObservableObject {
             other.stop()
         }
         Self.current = self
+        startStallWatch()
         rearmChapterBell()
         registerAudio()
         AudioFocus.shared.claim("readaloud")
@@ -607,6 +608,10 @@ final class ReadAloud: NSObject, ObservableObject {
         // off the one that replaced it
         let theVoice = Self.current === self || Self.current == nil
         if Self.current === self { Self.current = nil }
+        logSession("session ended")
+        stallWatch?.cancel()
+        stallWatch = nil
+        markState = "none"
         synthesizer.stop()
         // cut here and now, not left to the cancelled sentence's own hop to the player: a voice started straight
         // after must not find the old one's audio still queued
@@ -712,6 +717,8 @@ final class ReadAloud: NSObject, ObservableObject {
             lastNarrated = nil
             settleTask?.cancel()
             settling = false
+            markState = "none"
+            logSession("page left")
             return
         }
         guard isActive else { return }
@@ -722,6 +729,7 @@ final class ReadAloud: NSObject, ObservableObject {
             if let decorable = self.decorable {
                 // painted afresh: what the page holds may be a page that was reloaded behind the lock
                 self.painted = ([], [])
+                self.markState = "none"
                 self.paint(self.spoken, as: self.highlights, on: decorable)
             }
             if self.scrolls {
@@ -791,6 +799,169 @@ final class ReadAloud: NSObject, ObservableObject {
     /// What is on the page now, so that only what changed is sent to it. The marks that move per
     /// word — the band and the word — share a group, so a word's step is one call to the page.
     private var painted: (sentence: [Decoration], marks: [Decoration]) = ([], [])
+
+    // MARK: - Keeping the page with the voice
+
+    /// One update of the page at a time. The web view runs what it is sent in order, and a mark per word, each
+    /// anchoring its text in the chapter, can come faster than a long chapter's page answers: the marks then fall behind
+    /// the voice by more and more, and the page is turned late too, its `go` queued behind them. So a mark is sent only
+    /// once the page has taken the last one; the words said meanwhile are skipped, and the next mark is the word being
+    /// said then.
+    private var syncing = false
+    private var syncAgain = false
+    /// What the last look at the page said of the voice's mark: "on" the page, "off" it (on another page of the
+    /// chapter), or "none" (not found: in another chapter, not drawn yet, or not drawn at all).
+    private var markState = "none"
+    /// The page is turned the moment its mark is seen off the page — unless that has not worked (below).
+    private var fastFollowAllowed = true
+    private var lastFastFollow: Date?
+    private var sawMarkOnSinceFollow = true
+    private var fastFollowMisses = 0
+    // What the log says at the end of a session (`logSession`) — where the time went, if the highlighting lagged.
+    private var marksSent = 0
+    private var marksSkipped = 0
+    private var slowestLook: TimeInterval = 0
+    private var slowLooks = 0
+    private var longestStall: TimeInterval = 0
+    private var stallWatch: Task<Void, Never>?
+    private var lastSlowLog: Date?
+
+    /// Whether the page itself has said the voice's mark is on it — then the page is right, whatever else.
+    private var pageHasTheMark: Bool {
+        fastFollowAllowed && markState == "on" && !painted.marks.isEmpty && !scrolls
+    }
+
+    /// The first mark the voice has painted (the line's band, else the word's, else the sentence's), and whether it is
+    /// inside the page's width: the page of a paginated chapter is a column, and the ones beyond it lie off to a side.
+    private static let markScript = """
+    (function() {
+      var el = document.querySelector('[data-group="tts-word"] [data-writing-mode]')
+            || document.querySelector('[data-group="tts"] [data-writing-mode]');
+      if (!el) { return 'none'; }
+      var r = el.getBoundingClientRect(), w = window.innerWidth;
+      if (r.width === 0 && r.height === 0) { return 'none'; }
+      return (r.right <= 1 || r.left >= w - 1) ? 'off' : 'on';
+    })()
+    """
+
+    /// Paint what is being said, and look at the page. Asked for with every change of word; only one runs, and
+    /// whoever asks while it does is answered by its next round with the newest word.
+    private func syncMarks() {
+        guard onScreen, !settling, let decorable else { return }
+        if syncing {
+            syncAgain = true
+            marksSkipped += 1
+            return
+        }
+        syncing = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var rounds = 0
+            repeat {
+                syncAgain = false
+                rounds += 1
+                marksSent += 1
+                paint(spoken, as: highlights, on: decorable)
+                await lookAtPage()
+            } while syncAgain && onScreen && !settling && isActive && rounds < 500
+            syncing = false
+        }
+    }
+
+    /// Ask the page where the voice's mark is, a few frames after it was sent (Readium draws on the next animation
+    /// frame), and turn the page if the mark is on another one. The answer comes after everything sent before it,
+    /// so how long it takes is how far behind the page is.
+    private func lookAtPage() async {
+        try? await Task.sleep(nanoseconds: 45_000_000)
+        guard onScreen, !settling, let epub = navigator as? EPUBNavigatorViewController else {
+            markState = "none"
+            return
+        }
+        let started = Date()
+        let answer = await bounded(3, {
+            ((try? await epub.evaluateJavaScript(Self.markScript).get()) as? String) ?? "none"
+        })
+        let took = Date().timeIntervalSince(started)
+        slowestLook = max(slowestLook, took)
+        if took > 0.25 {
+            slowLooks += 1
+            if lastSlowLog.map({ Date().timeIntervalSince($0) > 20 }) ?? true {
+                lastSlowLog = Date()
+                let ms = Int(took * 1000)
+                Log.event("readaloud", "the page took \(ms) ms to answer — its marks are that far behind the voice")
+            }
+        }
+        guard let answer else {
+            markState = "none"   // no answer in 3 s: the old way (a `go` a second) is all there is
+            return
+        }
+        markState = answer
+        guard !scrolls, isActive, !painted.marks.isEmpty, fastFollowAllowed else { return }
+        switch answer {
+        case "on":
+            sawMarkOnSinceFollow = true
+            fastFollowMisses = 0
+        case "off":
+            // a turn under way (its smooth scroll has not landed) is left to land
+            if let last = lastFastFollow, Date().timeIntervalSince(last) < 0.7 { return }
+            if lastFastFollow != nil, !sawMarkOnSinceFollow {
+                // the last turn did not bring the mark into view: three in a row, and the page is not to be trusted
+                fastFollowMisses += 1
+                if fastFollowMisses >= 3 {
+                    fastFollowAllowed = false
+                    Log.error("readaloud", "the page kept saying the voice's mark was off it after being turned — back to the slow follow")
+                    return
+                }
+            }
+            guard let place = (spoken.word ?? spoken.sentence)?.followable else { return }
+            lastFastFollow = Date()
+            sawMarkOnSinceFollow = false
+            pendingFollow = place
+            follow()
+        default:
+            // no mark on this page: in another chapter, or not drawn — the slow follow finds it
+            if let place = (spoken.word ?? spoken.sentence)?.followable { followTarget.send(place) }
+        }
+    }
+
+    /// The main thread's lateness, while the voice is going and its page is in front: a pause there shows as a
+    /// late highlight and a late page turn however fast everything else is.
+    private func startStallWatch() {
+        stallWatch?.cancel()
+        stallWatch = Task { @MainActor [weak self] in
+            var last = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard let self else { return }
+                let now = Date()
+                let late = now.timeIntervalSince(last) - 0.2
+                last = now
+                guard self.isPlaying, self.onScreen else { continue }
+                self.longestStall = max(self.longestStall, late)
+                if late > 0.4, self.lastSlowLog.map({ now.timeIntervalSince($0) > 20 }) ?? true {
+                    self.lastSlowLog = now
+                    let ms = Int(late * 1000)
+                    Log.event("readaloud", "the main thread was held up for \(ms) ms while the voice was going")
+                }
+            }
+        }
+    }
+
+    /// The numbers of this stretch of narration, for the diagnostics: marks sent and skipped to keep up, the slowest
+    /// answer from the page, the longest hold-up of the main thread.
+    private func logSession(_ why: String) {
+        guard marksSent > 0 else { return }
+        let slowest = Int(slowestLook * 1000), stall = Int(longestStall * 1000)
+        let shortcut = fastFollowAllowed ? "on" : "off"
+        let line = "\(why): \(marksSent) marks sent, \(marksSkipped) skipped to keep up; the page's slowest answer \(slowest) ms "
+            + "(\(slowLooks) over 250); main thread's longest hold-up \(stall) ms; page-turn shortcut \(shortcut)"
+        Log.event("readaloud", line)
+        marksSent = 0
+        marksSkipped = 0
+        slowestLook = 0
+        slowLooks = 0
+        longestStall = 0
+    }
 
     /// A mark's id names its chapter file as well as its group. Readium tells only the file a changed
     /// decoration is now in, so with one id throughout, the marks in the file the voice has just left would
@@ -970,7 +1141,9 @@ extension ReadAloud: SpeechSynthesizerDelegate {
             if onScreen {
                 if scrolls {
                     scrollNudge.send(utterance.locator)
-                } else if let word, let place = word.followable {
+                } else if let word, let place = word.followable, !pageHasTheMark {
+                    // the slow way (a `go` a second): only while the page cannot say where the voice's mark is —
+                    // `lookAtPage` turns it at once when the mark is off the page
                     followTarget.send(place)
                 }
             }
