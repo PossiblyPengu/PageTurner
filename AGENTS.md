@@ -104,6 +104,15 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 
 ### UI structure (Liquid Glass; see `ios/DESIGN.md`)
 
+- Fewer places, not fewer things (the UX pass of Nov 2026 — keep it that way when adding): three tabs (Reading, Library,
+  BookMaster). The library filters in **one** chip row (`LibraryView.smartShelves`/`laterShelves`, then series, Up next and the
+  reader's shelves); the sort menu only sorts. A book's hold menu and its Book Info page carry the same five things — open, Status ▸,
+  Shelves, Book Info, Remove… (the root's remove dialog offers what removing can mean: a Drive book can keep itself without its
+  download) — Edit is Book Info's top-left button. In the reader the selection menu is iOS's own + Highlight + More… (`SelectionChoicesSheet`,
+  `ReaderModel.act(_:on:)`: the choices take the selection they were given, it is cleared before the sheet); search is a Contents tab;
+  the Reading sheet is one short screen with More Options (`ReaderMoreOptions`), and read-aloud's settings open from the read-aloud
+  bar (`ReadAloudSheetContent`). A new action goes into one of these, not a new button or menu.
+
 - `Design/Glass.swift` is the only place that touches `glassEffect` / `GlassEffectContainer` and the
   `.glass` button styles — call its `ptGlass`, `PTGlassGroup`, `ptButtonStyle` helpers, never
   `#available(iOS 26, *)` at a call site. Glass is for controls floating over content, not content.
@@ -278,7 +287,8 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Nothing of the web site is involved, so it works whether or not the PWA is deployed. (`pageturner://link?code=`
   and `docs/js/native-link.js` are the older route and still work; the app handles both.) Why not
   `ASWebAuthenticationSession`: its callback came from a page that was never deployed, so linking never completed.
-- BookMaster's screens are BookMaster's own pages, not a native copy: the **Shelf**, **Together** and **Stats** tabs are web views of
+- BookMaster's screens are BookMaster's own pages, not a native copy: the **BookMaster** tab's Shelf, Together and Stats pages (one tab with a
+  switch under its bar, `BookMasterTabView` and `AppRouter.bmPage`; go there with `router.showBookMaster(_:)` — they were three tabs) are web views of
   `/library`, `/together` and `/progress` (`BMWebTab`, pure and Linux-checked; `BMWebTabView` / `BMWebTabContent` in `BMWebTabs.swift`), opened
   with `?in=pageturner` (remembered for the life of the view, `BookMaster/src/lib/embedded.ts`): BookMaster then draws the page alone — no bars,
   bell, banners or chat button, and no heartbeat of its own — and Pageturner draws those around it (tab bar, Settings, the Together bell and the

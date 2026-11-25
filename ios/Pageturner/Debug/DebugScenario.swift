@@ -123,10 +123,10 @@ enum DebugScenario {
         switch screen {
         case "library", "search": selectTab(.library)
         case "reading": selectTab(.reading)
-        case "stats": selectTab(.stats)
-        case "together": selectTab(.together)
+        case "stats": router.showBookMaster(.stats)
+        case "together": router.showBookMaster(.together)
         // the tabs that are BookMaster's own pages
-        case "shelf": selectTab(.books)
+        case "shelf": router.showBookMaster(.shelf)
         case "settings": router.showSettings = true
         case "detail": router.detail = text
         // a book still in Google Drive: its page offers the download (with `-PTDebugCloudState downloading`, shows one on its way)

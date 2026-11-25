@@ -44,7 +44,7 @@ struct RootView: View {
             .onChange(of: notifier.openTogether, initial: true) { _, open in
                 guard open else { return }
                 router.dismissPresentations()
-                router.tab = .together
+                router.showBookMaster(.together)
                 notifier.openTogether = false
             }
             .onChange(of: notifier.tappedItemID, initial: true) { _, id in
@@ -67,18 +67,21 @@ struct RootView: View {
             }
             // where a link out of a BookMaster tab goes (Kindred, Quest Log), and where presence says you are
             .onAppear { BMWebPages.shared.onLeaveTab = { [router = self.router] app, url in router.browser = BMWebLaunch(app: app, url: url) } }
-            .onChange(of: router.tab, initial: true) { _, tab in
-                switch tab {
-                case .books, .together: bookMaster.place = "bookmaster"
-                case .stats: bookMaster.place = "stats"
-                case .library: bookMaster.place = "library"
-                case .reading: break   // the reader and the player say where they are themselves
-                }
-            }
+            .onChange(of: router.tab, initial: true) { _, _ in sayWhere() }
+            .onChange(of: router.bmPage) { _, _ in sayWhere() }
             #if DEBUG
             // CI simulator run: launch arguments choose a screen (Debug/DebugScenario.swift)
             .task { await DebugScenario.run(library: library, router: router) { router.tab = $0 } }
             #endif
+    }
+
+    /// Where presence says the reader is: the tab, and on BookMaster's which page.
+    private func sayWhere() {
+        switch router.tab {
+        case .bookmaster: bookMaster.place = router.bmPage == .stats ? "stats" : "bookmaster"
+        case .library: bookMaster.place = "library"
+        case .reading: break   // the reader and the player say where they are themselves
+        }
     }
 
     /// A tapped notification leads where its inbox item does; a pile ("3 new things") or one the inbox no longer
@@ -90,7 +93,7 @@ struct RootView: View {
             router.open(item)
         } else {
             router.dismissPresentations()
-            router.tab = .together
+            router.showBookMaster(.together)
         }
     }
 
@@ -419,16 +422,10 @@ struct RootView: View {
             Tab("Library", systemImage: "books.vertical", value: AppTab.library) {
                 LibraryView()
             }
-            Tab("Shelf", systemImage: "bookmark.fill", value: AppTab.books) {
-                BMWebTabView(tab: .shelf)
-            }
-            Tab("Together", systemImage: "person.2.fill", value: AppTab.together) {
-                BMWebTabView(tab: .together)
+            Tab("BookMaster", systemImage: "person.2.fill", value: AppTab.bookmaster) {
+                BookMasterTabView()
             }
             .badge(bmBadge ? inbox.unreadCount : 0)
-            Tab("Stats", systemImage: "chart.bar.fill", value: AppTab.stats) {
-                BMWebTabView(tab: .stats)
-            }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .tabViewBottomAccessory(isEnabled: showMiniPlayer) { miniPlayer }
@@ -443,16 +440,10 @@ struct RootView: View {
             withMiniPlayer(LibraryView())
                 .tabItem { Label("Library", systemImage: "books.vertical") }
                 .tag(AppTab.library)
-            withMiniPlayer(BMWebTabView(tab: .shelf))
-                .tabItem { Label("Shelf", systemImage: "bookmark.fill") }
-                .tag(AppTab.books)
-            withMiniPlayer(BMWebTabView(tab: .together))
-                .tabItem { Label("Together", systemImage: "person.2.fill") }
+            withMiniPlayer(BookMasterTabView())
+                .tabItem { Label("BookMaster", systemImage: "person.2.fill") }
                 .badge(bmBadge ? inbox.unreadCount : 0)
-                .tag(AppTab.together)
-            withMiniPlayer(BMWebTabView(tab: .stats))
-                .tabItem { Label("Stats", systemImage: "chart.bar.fill") }
-                .tag(AppTab.stats)
+                .tag(AppTab.bookmaster)
         }
     }
 

@@ -4,8 +4,19 @@ import SwiftUI
 /// the web shows (`BMWebTab`), drawn alone, so they are the same everywhere and there is no second copy of them
 /// here to keep in step. Pageturner draws what is around a page: the tab bar, the notifications bell, the settings
 /// button, the banners and the floating chat button.
+/// The BookMaster tab: its Shelf, Together and Stats pages behind one switch at the top — they were three tabs.
+struct BookMasterTabView: View {
+    @Environment(AppRouter.self) private var router
+
+    var body: some View {
+        BMWebTabView(tab: router.bmPage, switchesPages: true)
+    }
+}
+
 struct BMWebTabView: View {
     let tab: BMWebTab
+    /// The BookMaster tab's switch between its pages, under the bar.
+    var switchesPages = false
     @Environment(AppRouter.self) private var router
     @State private var showInbox = false
     private let bookMaster = BookMaster.shared
@@ -16,16 +27,33 @@ struct BMWebTabView: View {
             Group {
                 if bookMaster.isLinked {
                     BMWebTabContent(tab: tab)
+                        .id(tab)
                 } else {
                     ScrollView { BMLinkPrompt().padding(16).ptReadableWidth() }
                         .background(Color(uiColor: .systemGroupedBackground))
                 }
             }
-            .navigationTitle(tab.title)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if switchesPages, bookMaster.isLinked { pagePicker }
+            }
+            .navigationTitle(switchesPages ? "BookMaster" : tab.title)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $showInbox) { BMInboxView() }
             .toolbar { barItems }
         }
+    }
+
+    /// Shelf · Together · Stats — Together marked while something there is unread.
+    private var pagePicker: some View {
+        Picker("BookMaster page", selection: Binding(get: { router.bmPage }, set: { router.bmPage = $0 })) {
+            ForEach([BMWebTab.shelf, .together, .stats]) { page in
+                Text(page == .together && inbox.unreadCount > 0 ? "Together •" : page.title).tag(page)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     /// The page this tab keeps — made only when a linked reader's toolbar asks for it.

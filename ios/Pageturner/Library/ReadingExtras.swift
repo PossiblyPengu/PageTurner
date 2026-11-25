@@ -135,7 +135,7 @@ struct PartnerStrip: View {
     var body: some View {
         Group {
             if let partner = together?.partner {
-                Button { router.tab = .together } label: {
+                Button { router.showBookMaster(.together) } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "person.2.fill")
                             .foregroundStyle(Color.ptAccent)

@@ -2,9 +2,9 @@ import Foundation
 import Observation
 
 enum AppTab: Hashable {
-    /// `books` is the BookMaster shelf, `together` the other reader, `stats`
-    /// the numbers — BookMaster's one dashboard grew into three tabs.
-    case reading, library, books, together, stats
+    /// `bookmaster` holds BookMaster's own pages — the shelf, the other reader, the numbers — behind one switch
+    /// (`AppRouter.bmPage`). They had grown into three tabs of their own.
+    case reading, library, bookmaster
 }
 
 /// BookMaster has a book further on than this device — asked before it opens.
@@ -53,6 +53,15 @@ final class AppRouter {
 
     /// An ebook is open in the Reading tab and that tab is up: the reader, where nothing floats.
     var readerOpen: Bool { tab == .reading && reading != nil }
+
+    /// Which of BookMaster's pages its tab shows.
+    var bmPage: BMWebTab = .shelf
+
+    /// The BookMaster tab, at `page`.
+    func showBookMaster(_ page: BMWebTab) {
+        bmPage = page
+        tab = .bookmaster
+    }
 
     func hideChatButton(_ id: UUID, _ hide: Bool) {
         if hide { chatButtonHiders.insert(id) } else { chatButtonHiders.remove(id) }
@@ -109,7 +118,7 @@ final class AppRouter {
             openSuite(.chat, covered: presenting)
         case .together:
             dismissPresentations()
-            tab = .together
+            showBookMaster(.together)
         case let .web(app, url):
             openSuite(.web(app, url), covered: presenting)
         }
