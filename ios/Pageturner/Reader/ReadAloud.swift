@@ -620,6 +620,9 @@ final class ReadAloud: NSObject, ObservableObject {
         stallWatch = nil
         markState = "none"
         clearInPage()
+        // the next session asks the page afresh
+        refusals = 0
+        refusedSentence = nil
         synthesizer.stop()
         // cut here and now, not left to the cancelled sentence's own hop to the player: a voice started straight
         // after must not find the old one's audio still queued

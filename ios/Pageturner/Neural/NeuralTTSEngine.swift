@@ -78,7 +78,8 @@ final class NeuralTTSEngine {
         var timeline: SpokenWords.Timeline?
     }
 
-    /// With this much of a sentence still to be heard, what is being made ahead is no longer made at leisure.
+    /// With this much of a sentence still to be heard — or six tenths of it, if that is more: the next one is
+    /// likely as long, and takes as long to make — what is being made ahead is no longer made at leisure.
     private static let hurryAt: TimeInterval = 2.5
     /// Bumped by `reset`, so a lookahead still in flight can tell it is stale.
     @MainActor private var generation = 0
@@ -245,7 +246,8 @@ final class NeuralTTSEngine {
     private func hurryLater(after seconds: TimeInterval) {
         playing += 1
         let mine = playing
-        let wait = seconds / max(speed, 0.25) - Self.hurryAt
+        let length = seconds / max(speed, 0.25)
+        let wait = length - max(Self.hurryAt, length * 0.6)
         guard wait > 0 else {
             NeuralSynth.shared.hurry()
             return

@@ -263,7 +263,7 @@ final class NeuralPlayer {
                 // sooner, when whoever follows the voice has said when its next word starts
                 if !LowPower.on, self.follower != nil, let next = self.nextReport {
                     let wait = max(next, 0) / max(self.speed, 0.25)
-                    interval = min(interval, max(UInt64(wait * 1_000_000_000), 4_000_000))
+                    interval = min(interval, max(UInt64(wait * 1_000_000_000), 15_000_000))
                 }
                 try? await Task.sleep(nanoseconds: interval)
             }
@@ -274,7 +274,11 @@ final class NeuralPlayer {
     private func tick() {
         let now = Date()
         defer { lastTick = now }
-        guard engine.isRunning, node.isPlaying, let current = pending.first else { return }
+        guard engine.isRunning, node.isPlaying, let current = pending.first else {
+            // nothing is moving (paused, interrupted): no word is about to start
+            nextReport = nil
+            return
+        }
         if let last = lastTick {
             clock.advance(
                 seconds: min(max(now.timeIntervalSince(last), 0), 0.2), speed: max(speed, 0.25),

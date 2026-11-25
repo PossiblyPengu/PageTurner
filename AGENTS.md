@@ -161,7 +161,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 - The neural voice's words: `SpokenWords.Timeline` (when each word starts, and where it is in the page's text; Linux-checked) is made with the sound, in
   the make-ahead task and off the main thread (`NeuralTTSEngine.timeline`). `NeuralPlayer`'s `progress` answers how long until the next word starts and
   the ticker wakes then, not at the next 66 ms. Sentences made ahead run at `.utility` on `NeuralSynth`'s queue; `hurry()` (an empty urgent block behind
-  them — a serial queue lends its priority) is called when one is waited for, or when the sentence being said has under 2.5 s left.
+  them — a serial queue lends its priority) is called when one is waited for, or when the sentence being said has under 2.5 s (or six tenths of itself, if more) left.
 - A page that will not turn (`ReadAloud.pageIsStuck` → `ReaderModel.reloadPages`): Readium's navigator is a state machine (`EPUBNavigatorViewController.State`):
   `go(to:)` takes it to `.jumping` and back only when `PaginationView.goToIndex` returns, and while it is `.jumping` or `.moving` every other `go` answers
   false at once. A move that never finishes — the target spread never loads, a web view stops answering `evaluateJavaScript` — so refuses every later turn
