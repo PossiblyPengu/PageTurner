@@ -84,8 +84,10 @@ enum SpokenMarkScript {
     private static func json(_ value: [String: Any]) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: value),
               let text = String(data: data, encoding: .utf8) else { return "{}" }
-        // valid JSON, and these two end a line in older JavaScript
+        // valid JSON, and these two end a line in older JavaScript. A fixed-layout spread is sent its scripts inside a
+        // template literal (`EPUBFixedSpreadView.evaluateScript`), where a book's "${…}" would be run: no bare $ or `
         return text.replacingOccurrences(of: "\u{2028}", with: "\\u2028").replacingOccurrences(of: "\u{2029}", with: "\\u2029")
+            .replacingOccurrences(of: "$", with: "\\u0024").replacingOccurrences(of: "`", with: "\\u0060")
     }
 
     /// Installed once per chapter (it does nothing the second time).
@@ -111,10 +113,16 @@ enum SpokenMarkScript {
         return { text: out.join(''), map: map };
       }
 
+      // its text nodes are still the page's (Bionic Reading swaps them for others of the same length)
+      function whole(st) {
+        for (var i = 0; i < st.nodes.length; i++) { if (!st.nodes[i].isConnected) { return false; } }
+        return true;
+      }
+
       // the characters of `root`, spaces left out, and the text node and offset each came from
       function stream(root) {
         var length = root.textContent.length;
-        if (cache && cache.root === root && cache.length === length) { return cache; }
+        if (cache && cache.root === root && cache.length === length && whole(cache)) { return cache; }
         var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
         var nodes = [], parts = [], node, count = 0;
         var which = new Int32Array(length), where = new Int32Array(length);
@@ -151,19 +159,25 @@ enum SpokenMarkScript {
         var st = stream(root);
         var before = strip(loc.before || '').text;
         if (before.length > 24) { before = before.substring(before.length - 24); }
-        var first = -1, onward = -1, told = -1, from = 0, p;
-        var carried = S.root === root ? S.end : 0;
+        var first = -1, onward = -1, told = -1, toldOnward = -1, from = 0, p;
+        // the sentence said last, given again (the page was rebuilt, the look changed), is where it was
+        var key = q.text + '\n' + before;
+        var carried = S.root === root ? (S.key === key ? S.at : S.end) : 0;
         while ((p = st.text.indexOf(q.text, from)) >= 0) {
           if (first < 0) { first = p; }
           if (onward < 0 && p >= carried) { onward = p; }
-          if (before && told < 0 && p >= before.length && st.text.substring(p - before.length, p) === before) { told = p; }
+          if (before && p >= before.length && st.text.substring(p - before.length, p) === before) {
+            if (told < 0) { told = p; }
+            if (p >= carried) { toldOnward = p; }
+          }
           from = p + 1;
-          if (told >= 0) { break; }
+          if (toldOnward >= 0) { break; }
         }
-        // where the text before it says; else the next one after the sentence said last; else the first
-        var at = told >= 0 ? told : (onward >= 0 ? onward : first);
+        // where the text before it says (a refrain: the next such after the sentence said last); else the next one
+        // after the sentence said last; else the first
+        var at = toldOnward >= 0 ? toldOnward : (told >= 0 ? told : (onward >= 0 ? onward : first));
         if (at < 0) { return 'none'; }
-        S.id = id; S.root = root; S.st = st; S.q = q; S.at = at; S.end = at + q.text.length;
+        S.id = id; S.root = root; S.key = key; S.st = st; S.q = q; S.at = at; S.end = at + q.text.length;
         S.last = null;
         setLook(look || {});
         return 'ok';
@@ -279,7 +293,7 @@ enum SpokenMarkScript {
       function word(id, a, b) {
         if (S.id !== id) { return 'stale'; }
         // the page was rebuilt under the sentence (the type size, the font): it is found again
-        if (!S.root.isConnected || S.root.textContent.length !== S.st.length) { S.id = null; return 'stale'; }
+        if (!S.root.isConnected || S.root.textContent.length !== S.st.length || !whole(S.st)) { S.id = null; return 'stale'; }
         S.last = [a, b];
         expireLater();
         return place(a, b);

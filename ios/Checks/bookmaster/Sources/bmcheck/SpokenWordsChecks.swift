@@ -333,6 +333,10 @@ func runPlayheadChecks() {
                                       look: .init(word: "rgba(1, 2, 3, 0.5)", line: 0.16), from: 3, to: 7, install: false)
     check("the sentence is handed over as JSON, quotes and line ends escaped",
           given.contains("\\\"no\\\"") && given.contains("\\u2028") && !given.contains("\u{2028}") && given.contains("p.word(7,3,7)"))
+    check("a book's ${…} and ` are not left for a template literal to run", {
+        let g = SpokenMarkScript.give(.init(id: 1, text: "a ${alert(1)} `b`", before: "$", cssSelector: nil), look: .init(word: nil, line: nil), from: 0, to: 1, install: false)
+        return !g.contains("$") && !g.contains("`") && g.contains("\\u0024{alert(1)}")
+    }())
     check("the script is sent only when the page asks for it",
           !given.contains("createTreeWalker") && SpokenMarkScript.give(.init(id: 1, text: "a", before: nil, cssSelector: nil), look: .init(word: nil, line: nil), from: 0, to: 1, install: true).contains("createTreeWalker"))
     check("the page's answers are the ones the app knows",
