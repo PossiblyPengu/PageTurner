@@ -9,6 +9,12 @@ on:
       - ".github/workflows/ios.yml"
       - ".github/workflows/ios-build.yml"
       - ".github/actions/ios-env/**"
+  # a pull request is built too (never published): nothing else compiles the app before main does
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+      - ".github/workflows/ios-build.yml"
 
 concurrency:
   group: ios-${{ github.ref }}
@@ -23,6 +29,7 @@ jobs:
   # source whose links never change), so a source added once to SideStore offers each build as an update.
   publish:
     needs: build
+    if: github.event_name == 'push'
     concurrency:
       group: ios-release
       cancel-in-progress: false
