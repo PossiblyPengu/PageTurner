@@ -914,6 +914,10 @@ final class ReadAloud: NSObject, ObservableObject {
             // Readium's word marks, if the last word had them, go
             paint(spoken, as: highlights, on: decorable, marks: false)
             markState = answer
+            // the page lets go of a mark nobody moves for half a minute — not of one the voice is paused on
+            if !isPlaying, let epub = navigator as? EPUBNavigatorViewController {
+                _ = await bounded(3, { await epub.evaluateJavaScript(SpokenMarkScript.hold) })
+            }
             act(on: answer)
             return
         }
@@ -1330,12 +1334,10 @@ extension ReadAloud: SpeechSynthesizerDelegate {
             publishNowPlaying()
             noteProgression(utterance.locator)
             // stays where it was if this is the sentence that was being said
-            // the page's own marks stay while it is paused, however long
-            if inPage, let epub = navigator as? EPUBNavigatorViewController {
-                Task { @MainActor in _ = await bounded(3, { await epub.evaluateJavaScript(SpokenMarkScript.hold) }) }
-            }
             let stayed = spoken.sentence == utterance.locator ? spoken.word : nil
             spoken = Spoken(sentence: utterance.locator, word: stayed ?? firstWord(of: utterance))
+            // the page's own mark is told to stay while the voice is paused (`putOnPage`)
+            syncMarks()
         }
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
     }
