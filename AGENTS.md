@@ -185,6 +185,16 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   woke the app five times a second behind the lock); the lock screen's playback state is written when it changes, not per word; the
   neural player passes its time-stretch unit by at 1× and ticks four times a second, not eight, with no word to come; and the device voice
   reports only each sentence's first word while nobody watches (`SystemTTSEngine.watched`; the first still proves the voice works).
+- Neural voices' processor time (`NeuralSynth`): a voice is loaded with **one** ONNX Runtime thread unless it has shown it cannot keep up on one
+  (`threads(for:)`, remembered per voice in `neural-threads-<key>`). Two were the rule: ORT's second thread spins rather than sleeps between the
+  model's many small steps (sherpa-onnx does not expose `allow_spinning`), and a thread the queue does not run is not held to the queue's
+  priority — so sentences made ahead at `.utility` still ran on the performance cores. On one thread all of it runs on `NeuralSynth.queue`'s own
+  thread at the block's QoS, which `hurry()` lifts. A made-ahead sentence still being made at its turn after one of 3 s or more
+  (`NeuralTTSEngine.noteWait`, > 150 ms) twice in ten minutes gives that voice two threads for good (`needsMoreThreads`, reloaded at once; never in
+  Low Power Mode). The log says, per voice, how long each load took and on how many threads, and every 100 sentences the seconds of speech made
+  against the seconds of processor time it took ("0.30 of real time" = busy a third of the time it speaks) and how many were made ahead —
+  read that first when a long listen drains the battery: 50% in two hours with the screen off (an iPhone 15 Pro Max) is ~4 W, far above what
+  audio playback costs.
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the

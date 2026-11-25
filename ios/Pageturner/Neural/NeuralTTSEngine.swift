@@ -232,6 +232,7 @@ final class NeuralTTSEngine {
             if let ready = try? await ahead.value {
                 recent = (key, ready)
                 Self.log("sentence made ahead, waited \(Self.ms(since: started)) ms")
+                noteWait(Date().timeIntervalSince(started), entry: entry)
                 return ready
             }
         }
@@ -249,6 +250,7 @@ final class NeuralTTSEngine {
         playing += 1
         let mine = playing
         let length = seconds / max(speed, 0.25)
+        lastHeardLength = length
         let wait = length - max(Self.hurryAt, length * 0.6)
         guard wait > 0 else {
             NeuralSynth.shared.hurry()
@@ -260,6 +262,25 @@ final class NeuralTTSEngine {
             guard let self, self.playing == mine, !self.made.isEmpty else { return }
             NeuralSynth.shared.hurry()
         }
+    }
+
+    /// How long the sentence last started takes to hear — the time the one after it had to be made in.
+    @MainActor private var lastHeardLength: TimeInterval = 0
+    /// When sentences made ahead were still being made at their turn although there had been time to make them.
+    @MainActor private var lateTimes: [Date] = []
+
+    /// A sentence made ahead was waited for. After a sentence of three seconds or more (time enough, hurried for the
+    /// last two and a half), a wait means the voice cannot keep up on the threads it has: twice in ten minutes and it
+    /// is given more (`NeuralSynth.needsMoreThreads`). A short one before it (a heading) proves nothing.
+    @MainActor
+    private func noteWait(_ waited: TimeInterval, entry: NeuralVoiceIndex.Entry) {
+        guard waited > 0.15, lastHeardLength >= 3 else { return }
+        let now = Date()
+        lateTimes = lateTimes.filter { now.timeIntervalSince($0) < 600 } + [now]
+        Log.event("neural", "a sentence made ahead was not ready in time: waited \(Int(waited * 1000)) ms")
+        guard lateTimes.count >= 2 else { return }
+        lateTimes = []
+        NeuralSynth.shared.needsMoreThreads(forKey: entry.info.key)
     }
 
     /// What the simulator run reads back to see whether sentences really follow without a wait.
