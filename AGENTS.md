@@ -150,6 +150,18 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   which also runs whenever there is no mark to find, in sentence-only highlighting's case always). The log says, at the end of a session and when the
   page is left, how many marks were sent and skipped, the page's slowest answer and the main thread's longest hold-up (`logSession`; slow ones are
   logged as they happen) — read it first when the highlighting or the page turning lags.
+- The word and its line are drawn by the page itself (`Reader/SpokenMarkScript.swift`, the `offsets` half Linux-checked): the sentence is found once
+  (its characters, spaces left out, inside the element its `cssSelector` names), a word is then two UTF-16 counts into it, and one call moves two boxes
+  that are already there and answers "on"/"off" the page — no 45 ms wait, no second ask, about a tenth of what a Readium decoration per word costs in a
+  long chapter. The boxes sit in a container that looks like Readium's (`data-group="tts-word"`, children with `data-writing-mode`, the band first) and
+  are taken out of the document when hidden, so `markScript` and `keepSpokenInView` find either kind. `ReadAloud.markInPage` answers nil — and the marks
+  are Readium's decorations as before — when the voice is in another chapter than the page, the sentence is not found, the writing is vertical, or it is
+  Low Power Mode; four sentences refused in a row (fixed layout) and it is not tried again. The sentence mark is always Readium's. The script was run in
+  headless Chromium beside Readium's own `readium-reflowable.js` and Readium CSS: same rectangles as its decorations for the same words.
+- The neural voice's words: `SpokenWords.Timeline` (when each word starts, and where it is in the page's text; Linux-checked) is made with the sound, in
+  the make-ahead task and off the main thread (`NeuralTTSEngine.timeline`). `NeuralPlayer`'s `progress` answers how long until the next word starts and
+  the ticker wakes then, not at the next 66 ms. Sentences made ahead run at `.utility` on `NeuralSynth`'s queue; `hurry()` (an empty urgent block behind
+  them — a serial queue lends its priority) is called when one is waited for, or when the sentence being said has under 2.5 s left.
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the

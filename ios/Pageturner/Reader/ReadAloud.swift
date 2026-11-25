@@ -257,7 +257,7 @@ final class ReadAloud: NSObject, ObservableObject {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.updateWordReporting()
-                    if self.onScreen { self.paint(self.spoken, as: self.highlights, on: decorable) }
+                    if self.onScreen { self.syncMarks() }
                 }
             }
         }
@@ -612,6 +612,7 @@ final class ReadAloud: NSObject, ObservableObject {
         stallWatch?.cancel()
         stallWatch = nil
         markState = "none"
+        clearInPage()
         synthesizer.stop()
         // cut here and now, not left to the cancelled sentence's own hop to the player: a voice started straight
         // after must not find the old one's audio still queued
@@ -730,7 +731,8 @@ final class ReadAloud: NSObject, ObservableObject {
                 // painted afresh: what the page holds may be a page that was reloaded behind the lock
                 self.painted = ([], [])
                 self.markState = "none"
-                self.paint(self.spoken, as: self.highlights, on: decorable)
+                self.pageSentence = nil
+                self.paint(self.spoken, as: self.highlights, on: decorable, marks: !self.inPage)
             }
             if self.scrolls {
                 if let sentence = self.spoken.sentence {
@@ -828,8 +830,25 @@ final class ReadAloud: NSObject, ObservableObject {
 
     /// Whether the page itself has said the voice's mark is on it — then the page is right, whatever else.
     private var pageHasTheMark: Bool {
-        fastFollowAllowed && markState == "on" && !painted.marks.isEmpty && !scrolls
+        fastFollowAllowed && markState == "on" && hasMarks && !scrolls
     }
+
+    // The word and its line, drawn by the page itself (`SpokenMarkScript`) where it can be.
+
+    /// The page holds marks of its own drawing.
+    private var inPage = false
+    /// The sentence the page was last given, the number it knows it by, and the look it was told.
+    private var pageSentence: (locator: Locator, id: Int, look: SpokenMarkScript.Look)?
+    private var pageSentenceCount = 0
+    /// A sentence the page could not find: its marks are Readium's.
+    private var refusedSentence: Locator?
+    /// Sentences refused one after another. A book the page cannot do this for at all (fixed layout, vertical
+    /// writing) is not asked again with every sentence.
+    private var refusals = 0
+    private var inPageAllowed: Bool { refusals < 4 }
+
+    /// A mark moves per word, in the page or by Readium.
+    private var hasMarks: Bool { inPage || !painted.marks.isEmpty }
 
     /// The first mark the voice has painted (the line's band, else the word's, else the sentence's), and whether it is
     /// inside the page's width: the page of a paginated chapter is a column, and the ones beyond it lie off to a side.
@@ -861,10 +880,106 @@ final class ReadAloud: NSObject, ObservableObject {
                 syncAgain = false
                 rounds += 1
                 marksSent += 1
-                paint(spoken, as: highlights, on: decorable)
-                await lookAtPage()
+                await putOnPage(decorable)
             } while syncAgain && onScreen && !settling && isActive && rounds < 500
             syncing = false
+        }
+    }
+
+    /// The sentence is Readium's to mark. The word and its line the page draws itself, and says in the same answer
+    /// whether they are on the page being shown; where it cannot, they are Readium's too and the page is asked after.
+    private func putOnPage(_ decorable: DecorableNavigator) async {
+        let spoken = spoken, highlights = highlights
+        paint(spoken, as: highlights, on: decorable, marks: false, clearing: false)
+        if let answer = await markInPage(spoken, highlights) {
+            // Readium's word marks, if the last word had them, go
+            paint(spoken, as: highlights, on: decorable, marks: false)
+            markState = answer
+            act(on: answer)
+            return
+        }
+        paint(spoken, as: highlights, on: decorable)
+        await lookAtPage()
+    }
+
+    /// Have the page mark the word. Answers "on", "off" or "none" as `markScript` does; nil when this word is not
+    /// the page's to mark (no word marks wanted, the voice in another chapter, a sentence the page cannot find).
+    private func markInPage(_ spoken: Spoken, _ highlights: ReadAloudHighlights) async -> String? {
+        guard inPageAllowed, !LowPower.on, highlights.line || highlights.word, !spoken.wordIsTheSentence,
+              let epub = navigator as? EPUBNavigatorViewController,
+              let sentence = spoken.sentence, let word = spoken.word, sentence != refusedSentence,
+              epub.currentLocation?.href.isEquivalentTo(sentence.href) == true,
+              let text = sentence.text.highlight, let said = word.text.highlight,
+              let at = SpokenMarkScript.offsets(sentence: text, before: sentence.text.before, word: said, beforeWord: word.text.before)
+        else {
+            clearInPage()
+            return nil
+        }
+        let look = SpokenMarkScript.Look(
+            word: highlights.word ? UIColor.systemOrange.cssRGBA(alpha: HTMLDecorationTemplate.spokenWordAlpha) : nil,
+            line: highlights.line ? HTMLDecorationTemplate.spokenLineOpacity : nil)
+        let known = pageSentence.flatMap { $0.locator == sentence && $0.look == look ? $0.id : nil }
+        let id: Int
+        if let known {
+            id = known
+        } else {
+            pageSentenceCount += 1
+            id = pageSentenceCount
+            pageSentence = (sentence, id, look)
+        }
+        let started = Date()
+        func ask(_ script: String) async -> SpokenMarkScript.Answer? {
+            await bounded(3, {
+                ((try? await epub.evaluateJavaScript(script).get()) as? String).flatMap(SpokenMarkScript.Answer.init(rawValue:)) ?? .missing
+            })
+        }
+        func give(install: Bool) -> String {
+            let anchored = sentence.anchorable
+            return SpokenMarkScript.give(
+                .init(id: id, text: text, before: sentence.text.before, cssSelector: anchored.locations.otherLocations["cssSelector"]?.string),
+                look: look, from: at.from, to: at.to, install: install)
+        }
+        // a sentence the page has not been given is given with its first word, not asked after first
+        var answer = await ask(known == nil ? give(install: false) : SpokenMarkScript.word(sentence: id, from: at.from, to: at.to))
+        if answer == .stale { answer = await ask(give(install: false)) }
+        if answer == .install { answer = await ask(give(install: true)) }
+        noteLook(Date().timeIntervalSince(started))
+        switch answer {
+        case .on, .off:
+            inPage = true
+            refusals = 0
+            return answer?.rawValue
+        case nil:
+            // no answer in 3 s: nothing more is asked of the page for this word
+            return "none"
+        default:
+            // not found in this page, or not a page this can be done in
+            refusedSentence = sentence
+            refusals += 1
+            if !inPageAllowed { Log.event("readaloud", "the page cannot mark the words itself in this book — Readium's marks it is") }
+            clearInPage()
+            return nil
+        }
+    }
+
+    /// Take the page's own marks off (Readium's are about to go on, or the voice has stopped).
+    private func clearInPage() {
+        pageSentence = nil
+        guard inPage else { return }
+        inPage = false
+        guard let epub = navigator as? EPUBNavigatorViewController else { return }
+        Task { @MainActor in _ = await bounded(3, { await epub.evaluateJavaScript(SpokenMarkScript.clear) }) }
+    }
+
+    /// How long the page took to answer, for the log.
+    private func noteLook(_ took: TimeInterval) {
+        slowestLook = max(slowestLook, took)
+        guard took > 0.25 else { return }
+        slowLooks += 1
+        if lastSlowLog.map({ Date().timeIntervalSince($0) > 20 }) ?? true {
+            lastSlowLog = Date()
+            let ms = Int(took * 1000)
+            Log.event("readaloud", "the page took \(ms) ms to answer — its marks are that far behind the voice")
         }
     }
 
@@ -881,22 +996,18 @@ final class ReadAloud: NSObject, ObservableObject {
         let answer = await bounded(3, {
             ((try? await epub.evaluateJavaScript(Self.markScript).get()) as? String) ?? "none"
         })
-        let took = Date().timeIntervalSince(started)
-        slowestLook = max(slowestLook, took)
-        if took > 0.25 {
-            slowLooks += 1
-            if lastSlowLog.map({ Date().timeIntervalSince($0) > 20 }) ?? true {
-                lastSlowLog = Date()
-                let ms = Int(took * 1000)
-                Log.event("readaloud", "the page took \(ms) ms to answer — its marks are that far behind the voice")
-            }
-        }
+        noteLook(Date().timeIntervalSince(started))
         guard let answer else {
             markState = "none"   // no answer in 3 s: the old way (a `go` a second) is all there is
             return
         }
         markState = answer
-        guard !scrolls, isActive, !painted.marks.isEmpty, fastFollowAllowed else { return }
+        act(on: answer)
+    }
+
+    /// What the page said of the voice's mark, acted on: off the page, the page is turned at once.
+    private func act(on answer: String) {
+        guard !scrolls, isActive, hasMarks, fastFollowAllowed else { return }
         switch answer {
         case "on":
             sawMarkOnSinceFollow = true
@@ -972,14 +1083,19 @@ final class ReadAloud: NSObject, ObservableObject {
     }
 
     /// Put the sentence, line and word being said on the page as chosen — and take away the rest.
-    private func paint(_ spoken: Spoken, as highlights: ReadAloudHighlights, on navigator: DecorableNavigator) {
+    /// `marks` false leaves the word and its line out (the page draws those itself); with `clearing` false too, the
+    /// ones Readium has drawn are left as they are for now.
+    private func paint(
+        _ spoken: Spoken, as highlights: ReadAloudHighlights, on navigator: DecorableNavigator,
+        marks wanted: Bool = true, clearing: Bool = true
+    ) {
         var sentence: [Decoration] = [], marks: [Decoration] = []
         if highlights.sentence, let locator = spoken.sentence {
             sentence = [Decoration(id: markID("tts", locator), locator: locator.paintable, style: .highlight(tint: .systemOrange))]
         }
         // Low Power Mode: the marks that move for every word — the word itself
         // and the line band it sits on — are the per-word cost; drop them both.
-        if let locator = spoken.word, !spoken.wordIsTheSentence, !LowPower.on {
+        if wanted, let locator = spoken.word, !spoken.wordIsTheSentence, !LowPower.on {
             // the band goes in first so the word mark draws on top and the follow query finds it
             if highlights.line, navigator.supports(decorationStyle: .spokenLine) {
                 marks.append(Decoration(id: markID("tts-line", locator), locator: locator.paintable, style: .spokenLine))
@@ -995,7 +1111,7 @@ final class ReadAloud: NSObject, ObservableObject {
             navigator.apply(decorations: sentence, in: "tts")
             painted.sentence = sentence
         }
-        if marks != painted.marks {
+        if wanted || clearing, marks != painted.marks {
             navigator.apply(decorations: marks, in: "tts-word")
             painted.marks = marks
         }
@@ -1163,6 +1279,10 @@ extension ReadAloud: SpeechSynthesizerDelegate {
             publishNowPlaying()
             noteProgression(utterance.locator)
             // stays where it was if this is the sentence that was being said
+            // the page's own marks stay while it is paused, however long
+            if inPage, let epub = navigator as? EPUBNavigatorViewController {
+                Task { @MainActor in _ = await bounded(3, { await epub.evaluateJavaScript(SpokenMarkScript.hold) }) }
+            }
             let stayed = spoken.sentence == utterance.locator ? spoken.word : nil
             spoken = Spoken(sentence: utterance.locator, word: stayed ?? firstWord(of: utterance))
         }

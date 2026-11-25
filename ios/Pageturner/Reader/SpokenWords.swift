@@ -9,7 +9,7 @@ import Foundation
 /// words and within two tenths for 85%. Pure logic, so it is checked off-device (ios/Checks/bookmaster).
 enum SpokenWords {
     /// A word to light: where it is in the sentence, and when it starts.
-    struct Word: Equatable {
+    struct Word: Equatable, Sendable {
         /// The word without the punctuation around it.
         var range: Range<String.Index>
         /// Seconds into the audio at the voice's own pace — what the player reports.
@@ -207,6 +207,42 @@ enum SpokenWords {
         guard low + 1 < anchors.count else { return a.time }
         let b = anchors[low + 1]
         return a.time + (b.time - a.time) * (weight - a.weight) / (b.weight - a.weight)
+    }
+
+    // MARK: A sentence, timed
+
+    /// All the following of a sentence needs, worked out once — away from the main thread, while the sentence
+    /// before it is still being said: when each word the voice says starts, and where that word is in the text
+    /// on the page.
+    struct Timeline: Sendable {
+        /// The words of the text the voice was given, and when each starts.
+        let words: [Word]
+        /// Where each is in the page's text; nil for a word that was never written ("for example" for "e.g.").
+        let written: [Range<String.Index>?]
+
+        /// `spoken` is what the voice was given, `original` the page's text it was made from.
+        init(spoken: String, original: String, samples: [Float], sampleRate: Double,
+             split: ((String) -> [Range<String.Index>])? = nil) {
+            let speech = SpokenWords.measure(in: samples, sampleRate: sampleRate)
+            let words = SpokenWords.schedule(SpokenWords.tokens(in: spoken, split: split), speech: speech.bounds, gaps: speech.gaps)
+            let map = SpeechText.WordMap(spoken: spoken, original: original)
+            self.words = words
+            written = words.map { map.originalRange(of: $0.range) }
+        }
+
+        /// The word being said `seconds` in.
+        func index(at seconds: TimeInterval) -> Int? {
+            SpokenWords.index(at: seconds, in: words)
+        }
+
+        /// How long after `seconds` the next word starts; nil when the last one has.
+        func untilNextWord(after seconds: TimeInterval) -> TimeInterval? {
+            guard let now = index(at: seconds) else { return nil }
+            // before the first has started, the first is the next
+            if words[now].start > seconds { return words[now].start - seconds }
+            guard now + 1 < words.count else { return nil }
+            return max(words[now + 1].start - seconds, 0)
+        }
     }
 
     /// The word being said `time` seconds in: the last that has started — the first until any has.

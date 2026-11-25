@@ -7,7 +7,7 @@ import SherpaOnnx
 final class NeuralSynth: @unchecked Sendable {
     static let shared = NeuralSynth()
 
-    struct Audio {
+    struct Audio: Sendable {
         var samples: [Float]
         var sampleRate: Double
     }
@@ -26,7 +26,10 @@ final class NeuralSynth: @unchecked Sendable {
         }
     }
 
-    private let queue = DispatchQueue(label: "io.github.possiblypengu.pageturner.neural", qos: .userInitiated)
+    /// A sentence made ahead of its turn is made at a low priority, so that it does not take the processor from the
+    /// page (a turn, a mark) while there is still sound queued; one that is waited for is made at once. The queue
+    /// itself is the low one — a block can ask for more than its queue's priority, never for less.
+    private let queue = DispatchQueue(label: "io.github.possiblypengu.pageturner.neural", qos: .utility)
     private var loaded: (key: String, tts: SherpaOnnxOfflineTtsWrapper)?
     /// Sentences made with the model now loaded. ONNX Runtime keeps memory it grew for one length of sentence to
     /// reuse for the next, and over hours of every length that only climbs; a fresh load every so often hands it
@@ -40,11 +43,14 @@ final class NeuralSynth: @unchecked Sendable {
 
     /// Speech for `text` in the voice at `directory` (see `NeuralVoiceFormat.install`) at its
     /// natural pace — `sid` picks a speaker of a multi-speaker voice.
-    func generate(text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int = 0) async throws -> Audio {
+    /// `ahead`: nobody is waiting for it yet (see `hurry`).
+    func generate(
+        text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int = 0, ahead: Bool = false
+    ) async throws -> Audio {
         let cancelled = CancelFlag()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                queue.async {
+                queue.async(qos: ahead ? .utility : .userInitiated, flags: ahead ? [] : .enforceQoS) {
                     // abandoned while it waited its turn (a skip): don't spend the queue on it
                     if cancelled.isSet {
                         continuation.resume(throwing: CancellationError())
@@ -62,10 +68,16 @@ final class NeuralSynth: @unchecked Sendable {
         }
     }
 
+    /// What is being made ahead is now waited for (or soon will be): the queue is serial, so something urgent put
+    /// behind the sentence being made lends it its priority until it is done.
+    func hurry() {
+        queue.async(qos: .userInitiated, flags: .enforceQoS) {}
+    }
+
     /// Load the voice's model now, so the first sentence asked for doesn't wait for it.
     /// Best-effort: a model that can't be loaded is found out when a sentence is made, as before.
     func warm(directory: URL, info: NeuralVoiceFormat.Installed) {
-        queue.async {
+        queue.async(qos: .userInitiated, flags: .enforceQoS) {
             self.unloadWork?.cancel()
             if self.loaded?.key != info.key {
                 self.loaded = nil

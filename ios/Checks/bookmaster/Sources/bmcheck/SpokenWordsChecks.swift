@@ -270,4 +270,71 @@ func runPlayheadChecks() {
     junk.advance(seconds: 1, speed: 0, sampleRate: 1000, pieceFrames: 100)
     junk.advance(seconds: .nan, speed: 1, sampleRate: 1000, pieceFrames: 100)
     check("time going backwards, no speed or no time moves nothing", junk.into == 0 && junk.seconds(sentenceStart: 0, frames: 100, sampleRate: 0) == 0)
+
+    section("Read-aloud: a sentence timed ahead, and its words on the page")
+    // a second of sound at 1 kHz: speech from 0.1 to 0.9 s with a silence in the middle
+    var sound = [Float](repeating: 0, count: 1000)
+    for i in 100 ..< 900 where !(450 ..< 550).contains(i) { sound[i] = i % 2 == 0 ? 0.5 : -0.5 }
+    let page = "“Wait,” he said, e.g. now."
+    let voiced = SpeechText.spoken(page)
+    let line = SpokenWords.Timeline(spoken: voiced, original: page, samples: sound, sampleRate: 1000)
+    let old = SpokenWords.schedule(SpokenWords.tokens(in: voiced), speech: SpokenWords.measure(in: sound, sampleRate: 1000).bounds,
+                                   gaps: SpokenWords.measure(in: sound, sampleRate: 1000).gaps)
+    let oldMap = SpeechText.WordMap(spoken: voiced, original: page)
+    check("the timeline is the schedule that was made on the main thread", line.words == old && !old.isEmpty)
+    check("…and each word is where the word map put it", line.written == old.map { oldMap.originalRange(of: $0.range) })
+    check("a written word comes back as it is on the page", line.written.first.flatMap { $0 }.map { String(page[$0]) } == "Wait")
+    check("the next word is asked for when it starts, not at the next tick", {
+        guard line.words.count > 2 else { return false }
+        let second = line.words[1].start, third = line.words[2].start
+        let mid = (second + third) / 2
+        return abs((line.untilNextWord(after: mid) ?? -1) - (third - mid)) < 1e-9
+            && line.index(at: mid) == 1
+            && line.untilNextWord(after: line.words[line.words.count - 1].start + 0.01) == nil
+    }())
+    check("before the first word, the first is the next", {
+        guard let first = line.words.first, first.start > 0.01 else { return true }
+        return abs((line.untilNextWord(after: 0) ?? -1) - first.start) < 1e-9
+    }())
+    check("no sound, no words, nothing to wait for", {
+        let none = SpokenWords.Timeline(spoken: "", original: "", samples: [], sampleRate: 0)
+        return none.words.isEmpty && none.untilNextWord(after: 1) == nil && none.index(at: 0) == nil
+    }())
+    var seed: UInt64 = 42
+    func roll(_ n: Int) -> Int { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Int((seed >> 33) % UInt64(n)) }
+    let letters = Array("ab é—,.! \n“”1२字🙂e.g.")
+    var fuzzOK = true
+    for _ in 0 ..< 3000 {
+        let text = String((0 ..< roll(40)).map { _ in letters[roll(letters.count)] })
+        let samples = (0 ..< roll(600)).map { _ in Float(roll(100)) / 100 - 0.5 }
+        let t = SpokenWords.Timeline(spoken: SpeechText.spoken(text), original: text, samples: samples, sampleRate: Double(roll(3)) * 500)
+        if t.words.count != t.written.count { fuzzOK = false }
+        for r in t.written { if let r, r.upperBound > text.endIndex { fuzzOK = false } }
+        if let u = t.untilNextWord(after: Double(roll(100)) / 100), u < 0 { fuzzOK = false }
+    }
+    check("3000 random sentences and sounds are timed without a fault", fuzzOK)
+
+    section("Read-aloud: the word the page marks itself")
+    let s1 = "It was the best of times."
+    func cut(_ word: String, before: String = "Intro. ") -> (from: Int, to: Int)? {
+        guard let r = s1.range(of: word) else { return nil }
+        return SpokenMarkScript.offsets(sentence: s1, before: before, word: word, beforeWord: before + s1[..<r.lowerBound])
+    }
+    check("a word is where it is in its sentence", cut("best").map { [$0.from, $0.to] } == [11, 15])
+    check("the first word is at 0", cut("It").map { [$0.from, $0.to] } == [0, 2])
+    check("with nothing before the sentence too", SpokenMarkScript.offsets(sentence: s1, before: nil, word: "It", beforeWord: nil).map { [$0.from, $0.to] } == [0, 2])
+    check("offsets are UTF-16, as the page counts", SpokenMarkScript.offsets(sentence: "🙂 ok", before: nil, word: "ok", beforeWord: "🙂 ").map { [$0.from, $0.to] } == [3, 5])
+    check("a word that is not cut from this sentence is refused",
+          SpokenMarkScript.offsets(sentence: s1, before: "Intro. ", word: "worst", beforeWord: "Intro. It was the ") == nil
+          && SpokenMarkScript.offsets(sentence: s1, before: "Intro. ", word: "best", beforeWord: "It") == nil
+          && SpokenMarkScript.offsets(sentence: s1, before: "Intro. ", word: "best", beforeWord: "Intro. It is the ") == nil
+          && SpokenMarkScript.offsets(sentence: s1, before: nil, word: "", beforeWord: nil) == nil)
+    let given = SpokenMarkScript.give(.init(id: 7, text: "He said \"no\"\u{2028}</script>", before: nil, cssSelector: "#a\\31 b"),
+                                      look: .init(word: "rgba(1, 2, 3, 0.5)", line: 0.16), from: 3, to: 7, install: false)
+    check("the sentence is handed over as JSON, quotes and line ends escaped",
+          given.contains("\\\"no\\\"") && given.contains("\\u2028") && !given.contains("\u{2028}") && given.contains("p.word(7,3,7)"))
+    check("the script is sent only when the page asks for it",
+          !given.contains("createTreeWalker") && SpokenMarkScript.give(.init(id: 1, text: "a", before: nil, cssSelector: nil), look: .init(word: nil, line: nil), from: 0, to: 1, install: true).contains("createTreeWalker"))
+    check("the page's answers are the ones the app knows",
+          ["on", "off", "none", "stale", "install", "unsupported"].allSatisfy { SpokenMarkScript.Answer(rawValue: $0) != nil })
 }

@@ -20,7 +20,11 @@ extension Decoration.Style {
 }
 
 extension HTMLDecorationTemplate {
-    static func spokenWord(alpha: Double = 0.55) -> HTMLDecorationTemplate {
+    /// The looks, shared with the marks the page draws itself (`SpokenMarkScript`).
+    static let spokenWordAlpha = 0.55
+    static let spokenLineOpacity = 0.16
+
+    static func spokenWord(alpha: Double = spokenWordAlpha) -> HTMLDecorationTemplate {
         HTMLDecorationTemplate(
             layout: .boxes,
             width: .wrap,
@@ -43,7 +47,7 @@ extension HTMLDecorationTemplate {
     /// The look is in the element's own `style`, not in the stylesheet: Readium CSS gives every element
     /// `background-color: transparent !important` whenever the reader has chosen a page colour (always,
     /// here), and only a declaration on the element itself gets past that.
-    static func spokenLine(opacity: Double = 0.16) -> HTMLDecorationTemplate {
+    static func spokenLine(opacity: Double = spokenLineOpacity) -> HTMLDecorationTemplate {
         HTMLDecorationTemplate(
             layout: .boxes,
             width: .page,
@@ -56,7 +60,7 @@ extension HTMLDecorationTemplate {
     }
 }
 
-private extension UIColor {
+extension UIColor {
     func cssRGBA(alpha: Double) -> String {
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, ignored: CGFloat = 0
         getRed(&red, green: &green, blue: &blue, alpha: &ignored)

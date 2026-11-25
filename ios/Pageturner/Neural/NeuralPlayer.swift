@@ -31,7 +31,7 @@ final class NeuralPlayer {
         /// Frames queued before this sentence's first.
         let start: Double
         let frames: Double
-        let report: @MainActor (TimeInterval) -> Void
+        let report: @MainActor (TimeInterval) -> TimeInterval?
     }
 
     private let engine = AVAudioEngine()
@@ -55,6 +55,8 @@ final class NeuralPlayer {
     private var lastTick: Date?
     private var ticker: Task<Void, Never>?
     private var follower: Follower?
+    /// How long from the last report (at the voice's own pace) the follower's next word starts.
+    private var nextReport: TimeInterval?
 
     /// 1 is the voice's own pace. Applies at once, even in the middle of a sentence.
     var speed: Double = 1 {
@@ -117,12 +119,13 @@ final class NeuralPlayer {
     /// false when the engine could not be started.
     ///
     /// `started` is told once the sound has been started; `progress` hears how far the voice has got
-    /// — seconds into `samples` at the voice's own pace, not the stretched one — about 30 times a
-    /// second while it plays.
+    /// — seconds into `samples` at the voice's own pace, not the stretched one — and answers how long
+    /// from then (at that pace) it next wants to hear: it is told then, not at the next regular look,
+    /// so a word is marked when it starts and not up to a tick late.
     func enqueue(
         _ samples: [Float], sampleRate: Double, lead: TimeInterval,
         started: (@MainActor () -> Void)? = nil,
-        progress: (@MainActor (TimeInterval) -> Void)? = nil
+        progress: (@MainActor (TimeInterval) -> TimeInterval?)? = nil
     ) async -> Bool {
         guard !Task.isCancelled, !samples.isEmpty, sampleRate > 0,
               let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)
@@ -145,7 +148,7 @@ final class NeuralPlayer {
         // the ticker is for whoever follows the voice, or returns early
         if progress != nil || lead > 0 { startTicker() }
         started?()
-        progress?(0)
+        nextReport = progress?(0)
         return await wait(untilRemainingAtMost: lead)
     }
 
@@ -172,6 +175,7 @@ final class NeuralPlayer {
         pending.removeAll()
         clock.reset()
         follower = nil
+        nextReport = nil
     }
 
     /// Waiting for "all of it" means every piece has been heard; for a lead, that little time is left.
@@ -254,8 +258,13 @@ final class NeuralPlayer {
                 // the word timing is fitted to ~105ms, so 15Hz is already finer
                 // than the marks can show; a lead-only wait doesn't need that, and
                 // Low Power Mode trades it all for wakeups
-                let interval: UInt64 = LowPower.on ? 200_000_000
+                var interval: UInt64 = LowPower.on ? 200_000_000
                     : self.follower != nil ? 66_000_000 : 120_000_000
+                // sooner, when whoever follows the voice has said when its next word starts
+                if !LowPower.on, self.follower != nil, let next = self.nextReport {
+                    let wait = max(next, 0) / max(self.speed, 0.25)
+                    interval = min(interval, max(UInt64(wait * 1_000_000_000), 4_000_000))
+                }
                 try? await Task.sleep(nanoseconds: interval)
             }
             self?.ticker = nil
@@ -273,7 +282,7 @@ final class NeuralPlayer {
         }
         wake()
         if let follower {
-            follower.report(clock.seconds(sentenceStart: follower.start, frames: follower.frames, sampleRate: wiredRate))
+            nextReport = follower.report(clock.seconds(sentenceStart: follower.start, frames: follower.frames, sampleRate: wiredRate))
         }
     }
 

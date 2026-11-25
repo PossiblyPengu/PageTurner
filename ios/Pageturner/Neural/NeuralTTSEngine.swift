@@ -64,10 +64,22 @@ final class NeuralTTSEngine {
     @MainActor var watched = true
 
     /// Sentences that have been made ahead of being asked for, by voice and text…
-    @MainActor private var made: [String: Task<NeuralSynth.Audio, Error>] = [:]
+    @MainActor private var made: [String: Task<Made, Error>] = [:]
     /// …and the one that was said last, so that picking up after a pause (which starts the sentence
     /// again) doesn't make it twice.
-    @MainActor private var recent: (key: String, audio: NeuralSynth.Audio)?
+    @MainActor private var recent: (key: String, made: Made)?
+    /// Bumped with every sentence that starts playing: a `hurry` set for an earlier one has nothing to say.
+    @MainActor private var playing = 0
+
+    /// A sentence ready to be said: its sound, and — when words are followed — when each word starts and where it
+    /// is on the page, worked out with the sound, off the main thread.
+    private struct Made: Sendable {
+        var audio: NeuralSynth.Audio
+        var timeline: SpokenWords.Timeline?
+    }
+
+    /// With this much of a sentence still to be heard, what is being made ahead is no longer made at leisure.
+    private static let hurryAt: TimeInterval = 2.5
     /// Bumped by `reset`, so a lookahead still in flight can tell it is stale.
     @MainActor private var generation = 0
 
@@ -110,31 +122,44 @@ final class NeuralTTSEngine {
         // cold start (a walk from scratch) doesn't hold the sound up behind it
         async let nextAsked = makeNext(after: text, entry: entry)
         do {
-            let audio = try await sentence(text, spoken: spoken, entry: entry)
+            var ready = try await sentence(text, spoken: spoken, entry: entry)
             // paused, skipped or stopped while it was being made
             if Task.isCancelled { return .success(()) }
+            // words turned on since it was made (or it was made before they were wanted): timed now, still off
+            // the main thread
+            if reportsWords, ready.timeline == nil {
+                ready.timeline = await NeuralTTSEngine.timeline(text, spoken: spoken, audio: ready.audio)
+                if recent?.key == Self.key(text, entry) { recent?.made = ready }
+                if Task.isCancelled { return .success(()) }
+            }
+            let audio = ready.audio
             let player = NeuralPlayer.shared
             player.speed = speed
             // whether the next thing heard is in this voice decides if this sentence's
             // tail may be handed back early to make room for it
             let hasNext = await nextAsked
+            if Task.isCancelled { return .success(()) }
 
             // the word being spoken, as far into the audio as the player says it has got —
-            // timed on the cleaned text the voice was given
-            let words = reportsWords ? Self.schedule(spoken, audio: audio) : []
-            // the spoken↔page word walk is done once here, not per word report
-            let wordMap = reportsWords ? SpeechText.WordMap(spoken: spoken, original: text) : nil
-            Self.log("playing \(String(format: "%.2f", Double(audio.samples.count) / audio.sampleRate)) s, \(words.count) words timed")
+            // timed on the cleaned text the voice was given, and put back on the page's own
+            let timeline = reportsWords ? ready.timeline : nil
+            let words = timeline?.words ?? []
+            let seconds = Double(audio.samples.count) / audio.sampleRate
+            Self.log("playing \(String(format: "%.2f", seconds)) s, \(words.count) words timed")
+            hurryLater(after: seconds)
             var lit = -1
             let cancellation = Cancellation()
-            func follow(_ seconds: TimeInterval) {
-                guard !cancellation.isSet, watched, let next = SpokenWords.index(at: seconds, in: words), next != lit else { return }
+            func follow(_ seconds: TimeInterval) -> TimeInterval? {
+                guard !cancellation.isSet, let timeline else { return nil }
+                let until = timeline.untilNextWord(after: seconds)
+                guard watched, let next = timeline.index(at: seconds), next != lit else { return until }
                 lit = next
-                // back onto the page's own text; a word with no counterpart there ("to" of a year
-                // range, say) keeps the last mark lit rather than the whole sentence flashing over it
-                if let range = wordMap?.originalRange(of: words[next].range) {
+                // a word with no counterpart on the page ("to" of a year range, say) keeps the last
+                // mark lit rather than the whole sentence flashing over it
+                if let range = timeline.written[next] {
                     onSpeakRange(range)
                 }
+                return until
             }
             // Without words to follow (only the sentence is marked), the sentence is the range: that is
             // what has the page follow the narration, and what shows the voice works
@@ -191,22 +216,46 @@ final class NeuralTTSEngine {
     // MARK: Making sentences
 
     @MainActor
-    private func sentence(_ text: String, spoken: String, entry: NeuralVoiceIndex.Entry) async throws -> NeuralSynth.Audio {
+    private func sentence(_ text: String, spoken: String, entry: NeuralVoiceIndex.Entry) async throws -> Made {
         let key = Self.key(text, entry)
         if let recent, recent.key == key {
             Self.log("sentence again, from memory")
-            return recent.audio
+            return recent.made
         }
         let started = Date()
-        if let ahead = made.removeValue(forKey: key), let audio = try? await ahead.value {
-            recent = (key, audio)
-            Self.log("sentence made ahead, waited \(Self.ms(since: started)) ms")
-            return audio
+        if let ahead = made.removeValue(forKey: key) {
+            // waited for now: no longer made at leisure
+            NeuralSynth.shared.hurry()
+            if let ready = try? await ahead.value {
+                recent = (key, ready)
+                Self.log("sentence made ahead, waited \(Self.ms(since: started)) ms")
+                return ready
+            }
         }
         let audio = try await NeuralSynth.shared.generate(text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid)
-        recent = (key, audio)
+        let ready = Made(audio: audio, timeline: reportsWords ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil)
+        recent = (key, ready)
         Self.log("sentence made on the spot in \(Self.ms(since: started)) ms")
-        return audio
+        return ready
+    }
+
+    /// A sentence of `seconds` has started: what is made ahead meanwhile takes its time while there is plenty of
+    /// this one left to hear, and is hurried when there is not — it must be there when this one ends.
+    @MainActor
+    private func hurryLater(after seconds: TimeInterval) {
+        playing += 1
+        let mine = playing
+        let wait = seconds / max(speed, 0.25) - Self.hurryAt
+        guard wait > 0 else {
+            NeuralSynth.shared.hurry()
+            return
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            // still that sentence, and still something being made ahead
+            guard let self, self.playing == mine, !self.made.isEmpty else { return }
+            NeuralSynth.shared.hurry()
+        }
     }
 
     /// What the simulator run reads back to see whether sentences really follow without a wait.
@@ -274,8 +323,11 @@ final class NeuralTTSEngine {
             made.values.forEach { $0.cancel() }
             made.removeAll()
         }
+        let timed = reportsWords
         made[key] = Task {
-            try await NeuralSynth.shared.generate(text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid)
+            let audio = try await NeuralSynth.shared.generate(
+                text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid, ahead: true)
+            return Made(audio: audio, timeline: timed ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil)
         }
     }
 
@@ -285,11 +337,13 @@ final class NeuralTTSEngine {
 
     // MARK: Words
 
-    /// When each word of `text` is spoken in `audio`: spread over the speech, with the pauses
-    /// the punctuation asked for pinned to the silences the voice actually took.
-    private static func schedule(_ text: String, audio: NeuralSynth.Audio) -> [SpokenWords.Word] {
-        let speech = SpokenWords.measure(in: audio.samples, sampleRate: audio.sampleRate)
-        return SpokenWords.schedule(SpokenWords.words(in: text), speech: speech.bounds, gaps: speech.gaps)
+    /// When each word of `spoken` (what the voice was given) starts in `audio`, and where each is in `text` (the
+    /// page's): the sound is listened through for its silences and the two texts are walked word by word — work
+    /// that held the main thread at the start of every sentence, done here on a thread of its own.
+    private static func timeline(_ text: String, spoken: String, audio: NeuralSynth.Audio) async -> SpokenWords.Timeline {
+        await Task.detached(priority: .userInitiated) {
+            SpokenWords.timeline(spoken: spoken, original: text, samples: audio.samples, sampleRate: audio.sampleRate)
+        }.value
     }
 }
 
