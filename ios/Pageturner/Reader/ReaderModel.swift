@@ -278,44 +278,19 @@ final class ReaderModel: ObservableObject {
                 )
                 // custom action on the selection menu — handled by
                 // ReaderContainerViewController in the responder chain
-                var actions = EditingAction.defaultActions + [
+                // iOS's own (Copy, Look Up, Translate, Share), Highlight, and More… for the rest — Save Word, Read
+                // Aloud from here, Pronounce, Who's This?, Quote — in a sheet (`SelectionChoicesSheet`): eleven items
+                // in the menu paged it twice
+                config.editingActions = EditingAction.defaultActions + [
                     EditingAction(
                         title: "Highlight",
                         action: #selector(ReaderContainerViewController.highlightSelection)
                     ),
                     EditingAction(
-                        title: "Save Word",
-                        action: #selector(ReaderContainerViewController.saveWordSelection)
+                        title: "More…",
+                        action: #selector(ReaderContainerViewController.moreSelection)
                     ),
                 ]
-                if BookMaster.shared.isLinked {
-                    actions.append(EditingAction(
-                        title: "Quote",
-                        action: #selector(ReaderContainerViewController.quoteSelection)
-                    ))
-                }
-                actions += [
-                    EditingAction(
-                        title: "Read Aloud",
-                        action: #selector(ReaderContainerViewController.readAloudSelection)
-                    ),
-                    EditingAction(
-                        title: "Look Up",
-                        action: #selector(ReaderContainerViewController.lookUpSelection)
-                    ),
-                    EditingAction(
-                        title: "Pronounce",
-                        action: #selector(ReaderContainerViewController.pronounceSelection)
-                    ),
-                ]
-                // Apple's on-device model, where the iPhone has one
-                if StoryAI.isAvailable {
-                    actions.append(EditingAction(
-                        title: "Who’s This?",
-                        action: #selector(ReaderContainerViewController.whoSelection)
-                    ))
-                }
-                config.editingActions = actions
                 // how read-aloud lights the word and the line it is on
                 config.decorationTemplates[.spokenWord] = .spokenWord()
                 config.decorationTemplates[.spokenLine] = .spokenLine()
@@ -397,6 +372,7 @@ final class ReaderModel: ObservableObject {
         container.onLookUpSelection = { [weak self] in self?.lookUpSelection() }
         container.onPronounceSelection = { [weak self] in self?.pronounceSelection() }
         container.onWhoSelection = { [weak self] in self?.whoSelection() }
+        container.onMoreSelection = { [weak self] in self?.moreSelection() }
         navigatorController = container
 
         // which side of the page was tapped, for the way a page turn leaves (the adapter's own callback has no side)
@@ -1193,14 +1169,15 @@ final class ReaderModel: ObservableObject {
 
     /// Send the selected passage to BookMaster as a quote on this book.
     private func quoteSelection() {
-        guard let selectable = navigator as? SelectableNavigator,
-              let selection = selectable.currentSelection,
-              let text = selection.locator.text.highlight?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !text.isEmpty
+        guard let picked = takeSelection() else { return }
+        quote(picked)
+    }
+
+    private func quote(_ picked: Locator) {
+        guard let text = picked.text.highlight?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty
         else { return }
         let ref = book.bookMasterRef
-        let progression = selection.locator.locations.totalProgression
-        selectable.clearSelection()
+        let progression = picked.locations.totalProgression
         Task {
             let ok = await BookMaster.shared.postQuote(ref: ref, content: text, percent: progression)
             notice = ok.message
@@ -1209,11 +1186,12 @@ final class ReaderModel: ObservableObject {
 
     /// "Save Word" in the selection menu — the word and the line around it, kept with the book.
     private func saveWordSelection() {
-        guard let selectable = navigator as? SelectableNavigator,
-              let selection = selectable.currentSelection
-        else { return }
-        let text = selection.locator.text
-        selectable.clearSelection()
+        guard let picked = takeSelection() else { return }
+        saveWord(picked)
+    }
+
+    private func saveWord(_ picked: Locator) {
+        let text = picked.text
         guard let word = SavedWord.clean(text.highlight ?? "") else {
             notice = "Select a word or a short phrase to save"
             return
@@ -1225,7 +1203,7 @@ final class ReaderModel: ObservableObject {
         let saved = SavedWord(
             word: word,
             context: SavedWord.context(before: text.before, word: word, after: text.after),
-            chapter: chapterTitle(for: selection.locator)
+            chapter: chapterTitle(for: picked)
         )
         book.words.append(saved)
         flushSave()
@@ -1262,11 +1240,11 @@ final class ReaderModel: ObservableObject {
 
     /// "Read Aloud" in the selection menu — the voice starts at the selected passage.
     private func readAloudSelection() {
-        guard let selectable = navigator as? SelectableNavigator,
-              let selection = selectable.currentSelection
-        else { return }
-        let start = selection.locator
-        selectable.clearSelection()
+        guard let start = takeSelection() else { return }
+        speakFrom(start)
+    }
+
+    private func speakFrom(_ start: Locator) {
         if let readAloud {
             readAloud.start(from: start)
         } else {
@@ -1288,11 +1266,12 @@ final class ReaderModel: ObservableObject {
     /// "Pronounce" in the selection menu — teach the voice how to say the selected word. What it knew already is
     /// what the sheet starts from; a new one is for this book until the toggle says every book.
     private func pronounceSelection() {
-        guard let selectable = navigator as? SelectableNavigator,
-              let selection = selectable.currentSelection
-        else { return }
-        let picked = selection.locator.text.highlight ?? ""
-        selectable.clearSelection()
+        guard let picked = takeSelection() else { return }
+        pronounce(picked)
+    }
+
+    private func pronounce(_ locator: Locator) {
+        let picked = locator.text.highlight ?? ""
         guard let word = Pronunciations.cleaned(picked) else {
             notice = "Select a word or a name to teach the voice"
             return
@@ -1303,16 +1282,66 @@ final class ReaderModel: ObservableObject {
 
     /// "Who's This?" in the selection menu — the name, asked about in a sheet (`WhoSheet`).
     private func whoSelection() {
-        guard let selectable = navigator as? SelectableNavigator,
-              let selection = selectable.currentSelection
-        else { return }
-        let picked = (selection.locator.text.highlight ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        selectable.clearSelection()
+        guard let picked = takeSelection() else { return }
+        askWho(picked)
+    }
+
+    private func askWho(_ locator: Locator) {
+        let picked = (locator.text.highlight ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard let name = Pronunciations.cleaned(picked) else {
             notice = "Select a name to ask about"
             return
         }
         askingWho = WhoQuestion(name: name)
+    }
+
+    /// The selection, taken off the page: what it was, and the page no longer showing it.
+    private func takeSelection() -> Locator? {
+        guard let selectable = navigator as? SelectableNavigator,
+              let selection = selectable.currentSelection
+        else { return nil }
+        selectable.clearSelection()
+        return selection.locator
+    }
+
+    // MARK: More… on a selection
+
+    /// The less used things to do with a selection, in a sheet ("More…" in the selection menu): the selection's
+    /// menu has room for Highlight and iOS's own (Copy, Look Up, Translate, Share) without paging.
+    struct PickedText: Identifiable {
+        let id = UUID()
+        let locator: Locator
+        var text: String { (locator.text.highlight ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+        /// A word or a short name — what saving, teaching the voice and "who's this" are for.
+        var isWord: Bool { Pronunciations.cleaned(text) != nil }
+    }
+
+    enum SelectionChoice {
+        case saveWord, readAloud, pronounce, who, quote
+    }
+
+    @Published var picked: PickedText?
+
+    private func moreSelection() {
+        guard let locator = takeSelection() else { return }
+        picked = PickedText(locator: locator)
+    }
+
+    /// One of the sheet's choices, on the text it was opened with — after the sheet is down, for those that open
+    /// one of their own.
+    func act(_ choice: SelectionChoice, on picked: PickedText) {
+        self.picked = nil
+        let locator = picked.locator
+        switch choice {
+        case .saveWord: saveWord(locator)
+        case .readAloud: speakFrom(locator)
+        case .quote: quote(locator)
+        case .pronounce, .who:
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                if choice == .pronounce { self?.pronounce(locator) } else { self?.askWho(locator) }
+            }
+        }
     }
 
     /// The book up to the reader's place, for the on-device model (`StoryTeller`): each chapter of the reading

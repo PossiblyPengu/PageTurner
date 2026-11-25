@@ -13,6 +13,7 @@ final class ReaderContainerViewController: UIViewController {
     var onLookUpSelection: (() -> Void)?
     var onPronounceSelection: (() -> Void)?
     var onWhoSelection: (() -> Void)?
+    var onMoreSelection: (() -> Void)?
 
     private let contentController: UIViewController
 
@@ -186,6 +187,11 @@ final class ReaderContainerViewController: UIViewController {
     /// "Who's This?" item — what the book so far says about the selected name.
     @objc func whoSelection() {
         onWhoSelection?()
+    }
+
+    /// "More…" item — the less used things to do with the selection, in a sheet.
+    @objc func moreSelection() {
+        onMoreSelection?()
     }
 
     // MARK: Page curl — the leaf that follows the finger

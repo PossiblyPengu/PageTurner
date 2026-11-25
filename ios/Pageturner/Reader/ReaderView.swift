@@ -8,7 +8,6 @@ struct ReaderView: View {
     @Environment(AppRouter.self) private var router
     @State private var showContents = false
     @State private var showSettings = false
-    @State private var showSearch = false
     @State private var showVoices = false
     @State private var showGoTo = false
     @State private var showLight = false
@@ -129,9 +128,9 @@ struct ReaderView: View {
 
     /// Something is over the page: a sheet, a footnote, a highlight or a word being edited.
     private var sheetUp: Bool {
-        if showContents || showSettings || showSearch || showVoices || showStory { return true }
+        if showContents || showSettings || showVoices || showStory { return true }
         if exportFile != nil || model.footnote != nil || model.editingHighlight != nil { return true }
-        return model.pronouncing != nil || model.askingWho != nil
+        return model.pronouncing != nil || model.askingWho != nil || model.picked != nil
     }
 
     /// The volume buttons turn pages: asked for, the book in front with nothing over it, the app active, and no
@@ -245,11 +244,14 @@ struct ReaderView: View {
                 switch sheet {
                 case "pdfsearch":
                     model.search("fox")
-                    showSearch = true
+                    contentsTab = .search
+                    showContents = true
                 case "contents": showContents = true
                 case "settings": showSettings = true
                 case "voices": showVoices = true
-                case "search": showSearch = true
+                case "search":
+                    contentsTab = .search
+                    showContents = true
                 case "hidechrome": model.toggleChrome()
                 // read aloud with the highlights and voice the launch asks for, to see them on the page
                 case "readaloud":
@@ -299,9 +301,6 @@ struct ReaderView: View {
                 QuickLightSheet(settings: $model.settings)
                     .preferredColorScheme(scheme)
             }
-            .sheet(isPresented: $showSearch, onDismiss: model.revealChrome) {
-                searchSheet.preferredColorScheme(scheme)
-            }
             .sheet(isPresented: $showGoTo, onDismiss: model.revealChrome) {
                 GoToSheet(at: shownProgress) { model.go(toProgression: $0) }
                     .preferredColorScheme(scheme)
@@ -313,6 +312,12 @@ struct ReaderView: View {
             .sheet(isPresented: $showStory) {
                 StorySoFarSheet(bookID: model.book.id, title: model.book.title) { await model.textSoFar() }
                     .preferredColorScheme(scheme)
+            }
+            .sheet(item: $model.picked) { picked in
+                SelectionChoicesSheet(picked: picked, canQuote: BookMaster.shared.isLinked) { choice in
+                    model.act(choice, on: picked)
+                }
+                .preferredColorScheme(scheme)
             }
             .sheet(item: $model.askingWho) { question in
                 WhoSheet(name: question.name, book: model.book.title) { await model.textSoFar() }
@@ -442,9 +447,6 @@ struct ReaderView: View {
                 HStack(spacing: 0) {
                     if model.book.ext == "pdf" || hasOriginalPDF {
                         versionButton
-                    }
-                    if model.isSearchable {
-                        toolButton("magnifyingglass", label: "Search in book") { model.holdChrome(); showSearch = true }
                     }
                     toolButton(
                         model.isCurrentLocationBookmarked ? "bookmark.fill" : "bookmark",
@@ -774,6 +776,8 @@ struct ReaderView: View {
         // always offered — its "Bookmark this page" is how the first one gets made
         case .bookmarks: return true
         case .highlights: return !model.book.highlights.isEmpty
+        // searching the book is finding a place in it: here, not a button of its own on the page
+        case .search: return model.isSearchable
         }
     }
 
@@ -800,6 +804,9 @@ struct ReaderView: View {
                 ScrollViewReader { proxy in
                     VStack(spacing: 0) {
                     contentsPicker
+                    if tab == .search {
+                        SearchResultsView(model: model) { showContents = false }
+                    } else {
                     List {
                         if tab == .highlights {
                             Section {
@@ -865,6 +872,7 @@ struct ReaderView: View {
                     .onChange(of: contentsTabNow) { _, now in
                         guard now == .chapters, let current = model.currentChapterID else { return }
                         DispatchQueue.main.async { proxy.scrollTo("toc-" + current, anchor: .center) }
+                    }
                     }
                     }
                 }
@@ -955,27 +963,13 @@ struct ReaderView: View {
         }
     }
 
-    private var searchSheet: some View {
-        NavigationStack {
-            SearchResultsView(model: model) {
-                showSearch = false
-            }
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showSearch = false }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-    }
-
     /// Who reads aloud — reachable from the read-aloud bar, so a voice can be tried mid-page.
+    /// The read-aloud bar's settings: speed, voice, dimming, highlighting, pronunciations (`ReadAloudSheetContent`).
     private var voiceSheet: some View {
         NavigationStack {
-            VoiceListView(selection: $model.settings.voiceIdentifier, rate: model.settings.speechRate)
+            ReadAloudSheetContent(settings: $model.settings)
+                .navigationTitle("Read Aloud")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { showVoices = false }
@@ -1091,7 +1085,7 @@ private struct ReadAloudBar: View {
             HStack(spacing: 4) {
                 transportControls
                 rateButton
-                barButton("person.wave.2", label: "Voice", action: onVoice)
+                barButton("person.wave.2", label: "Voice and highlighting", action: onVoice)
                 sleepMenu
                 barButton("xmark", label: "Stop reading aloud", action: onStop)
             }
@@ -1099,7 +1093,7 @@ private struct ReadAloudBar: View {
                 transportControls
                 rateButton
                 Menu {
-                    Button("Voice", systemImage: "person.wave.2", action: onVoice)
+                    Button("Voice and Highlighting", systemImage: "person.wave.2", action: onVoice)
                     Divider()
                     sleepChoices
                 } label: {
@@ -1287,13 +1281,14 @@ private struct SearchResultsView: View {
 
 /// The sections of the Contents sheet.
 enum ContentsTab: String, CaseIterable, Identifiable {
-    case chapters, bookmarks, highlights
+    case chapters, bookmarks, highlights, search
     var id: String { rawValue }
     var label: String {
         switch self {
         case .chapters: return "Chapters"
         case .bookmarks: return "Bookmarks"
         case .highlights: return "Highlights"
+        case .search: return "Search"
         }
     }
 }
