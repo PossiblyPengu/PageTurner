@@ -332,7 +332,8 @@ final class NeuralTTSEngine {
     }
 
     private static func key(_ text: String, _ entry: NeuralVoiceIndex.Entry) -> String {
-        entry.voice.id + "@" + String(entry.sid) + "\n" + text
+        // by its bytes: two texts Swift calls equal (é written two ways) do not share word ranges
+        entry.voice.id + "@" + String(entry.sid) + "\n" + Data(text.utf8).base64EncodedString()
     }
 
     // MARK: Words
