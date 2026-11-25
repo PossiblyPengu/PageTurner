@@ -99,6 +99,12 @@ final class ReaderModel: ObservableObject {
     @Published var editingHighlight: Highlight?
     /// The word being taught to the voice ("Pronounce" in the selection menu).
     @Published var pronouncing: Pronunciation?
+    /// The name asked about ("Who's This?" in the selection menu).
+    @Published var askingWho: WhoQuestion?
+    struct WhoQuestion: Identifiable, Equatable {
+        let name: String
+        var id: String { name }
+    }
 
     private let library: LibraryStore
     private var publication: Publication?
@@ -302,6 +308,13 @@ final class ReaderModel: ObservableObject {
                         action: #selector(ReaderContainerViewController.pronounceSelection)
                     ),
                 ]
+                // Apple's on-device model, where the iPhone has one
+                if StoryAI.isAvailable {
+                    actions.append(EditingAction(
+                        title: "Who’s This?",
+                        action: #selector(ReaderContainerViewController.whoSelection)
+                    ))
+                }
                 config.editingActions = actions
                 // how read-aloud lights the word and the line it is on
                 config.decorationTemplates[.spokenWord] = .spokenWord()
@@ -383,6 +396,7 @@ final class ReaderModel: ObservableObject {
         container.onReadAloudSelection = { [weak self] in self?.readAloudSelection() }
         container.onLookUpSelection = { [weak self] in self?.lookUpSelection() }
         container.onPronounceSelection = { [weak self] in self?.pronounceSelection() }
+        container.onWhoSelection = { [weak self] in self?.whoSelection() }
         navigatorController = container
 
         // which side of the page was tapped, for the way a page turn leaves (the adapter's own callback has no side)
@@ -1285,6 +1299,48 @@ final class ReaderModel: ObservableObject {
         }
         pronouncing = PronunciationStore.shared.entry(for: word, book: book.id)
             ?? Pronunciation(written: word, said: "", bookID: book.id)
+    }
+
+    /// "Who's This?" in the selection menu — the name, asked about in a sheet (`WhoSheet`).
+    private func whoSelection() {
+        guard let selectable = navigator as? SelectableNavigator,
+              let selection = selectable.currentSelection
+        else { return }
+        let picked = (selection.locator.text.highlight ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        selectable.clearSelection()
+        guard let name = Pronunciations.cleaned(picked) else {
+            notice = "Select a name to ask about"
+            return
+        }
+        askingWho = WhoQuestion(name: name)
+    }
+
+    /// The book up to the reader's place, for the on-device model (`StoryTeller`): each chapter of the reading
+    /// order before it whole, the one the reader is in cut at their place, with the contents' name for each — and
+    /// those with next to no text (a title page, a dedication) left out. Nothing past the place is read.
+    func textSoFar() async -> [StoryChapter] {
+        guard let publication, let here = navigator?.currentLocation ?? currentLocator else { return [] }
+        let order = publication.readingOrder
+        guard let at = order.firstIndex(where: { $0.url().isEquivalentTo(here.href) }) else { return [] }
+        // each file's name from the contents, the first entry that points into it
+        func flatten(_ links: [ReadiumShared.Link]) -> [ReadiumShared.Link] { links.flatMap { [$0] + flatten($0.children) } }
+        let entries = flatten(toc)
+        var files: [(href: String, title: String, data: Data, cut: Double?)] = []
+        for i in 0 ... at {
+            let link = order[i]
+            guard let resource = publication.get(link), let data = try? await resource.read().get() else { continue }
+            let title = entries.first { $0.url().removingFragment().isEquivalentTo(link.url()) }?.title
+                ?? link.title ?? "Section \(i + 1)"
+            files.append((link.url().string, title, data, i == at ? (here.locations.progression ?? 0) : nil))
+        }
+        return await Task.detached {
+            files.compactMap { file -> StoryChapter? in
+                var text = BookText.plain(fromHTML: String(decoding: file.data, as: UTF8.self))
+                if let cut = file.cut { text = StoryRecap.upTo(cut, of: text) }
+                guard text.count >= 200 || file.cut != nil, !text.isEmpty else { return nil }
+                return StoryChapter(href: file.href, title: file.title, text: text, partial: file.cut != nil)
+            }
+        }.value
     }
 
     /// With "Send new highlights as quotes" on, a new highlight goes to BookMaster as well — once. A passage

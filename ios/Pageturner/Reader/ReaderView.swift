@@ -12,6 +12,7 @@ struct ReaderView: View {
     @State private var showVoices = false
     @State private var showGoTo = false
     @State private var showLight = false
+    @State private var showStory = false
     /// The scrubber's value while the finger is on it (or until the page catches up).
     @State private var scrubbing: Double?
     @AppStorage("readerShowsTimeLeft") private var showsTimeLeft = false
@@ -123,25 +124,26 @@ struct ReaderView: View {
     /// light. Chrome showing means a touch within a few seconds; a sheet must stay readable.
     private var wantsDim: Bool {
         visible && model.settings.dimWhileNarrating && model.readAloudPlaying
-            && !model.showChrome
-            && !showContents && !showSettings && !showSearch && !showVoices
-            && exportFile == nil && model.footnote == nil && model.editingHighlight == nil && model.pronouncing == nil
-            && model.notice == nil
+            && !model.showChrome && !sheetUp && model.notice == nil
+    }
+
+    /// Something is over the page: a sheet, a footnote, a highlight or a word being edited.
+    private var sheetUp: Bool {
+        if showContents || showSettings || showSearch || showVoices || showStory { return true }
+        if exportFile != nil || model.footnote != nil || model.editingHighlight != nil { return true }
+        return model.pronouncing != nil || model.askingWho != nil
     }
 
     /// The volume buttons turn pages: asked for, the book in front with nothing over it, the app active, and no
     /// voice of ours speaking (the buttons are volume then).
     private var wantsVolumeTurns: Bool {
         visible && scenePhase == .active && model.phase == .ready && model.settings.volumeTurns && !model.readAloudPlaying
-            && !showContents && !showSettings && !showSearch && !showVoices
-            && exportFile == nil && model.footnote == nil && model.editingHighlight == nil && model.pronouncing == nil
+            && !sheetUp
     }
 
     /// Pages turned hands-free wait while something is over the page or the app is away.
     private var holdsHandsFree: Bool {
-        !(visible && scenePhase == .active)
-            || showContents || showSettings || showSearch || showVoices
-            || exportFile != nil || model.footnote != nil || model.editingHighlight != nil || model.pronouncing != nil
+        !(visible && scenePhase == .active) || sheetUp
     }
 
     /// Turn the screen down once the hands have been off for a while (`NarrationDim.delay`), and back up at once
@@ -306,6 +308,14 @@ struct ReaderView: View {
             }
             .sheet(item: $model.footnote) { note in
                 FootnoteSheet(note: note) { model.goToFootnote(note) }
+                    .preferredColorScheme(scheme)
+            }
+            .sheet(isPresented: $showStory) {
+                StorySoFarSheet(bookID: model.book.id, title: model.book.title) { await model.textSoFar() }
+                    .preferredColorScheme(scheme)
+            }
+            .sheet(item: $model.askingWho) { question in
+                WhoSheet(name: question.name, book: model.book.title) { await model.textSoFar() }
                     .preferredColorScheme(scheme)
             }
             .sheet(item: $model.pronouncing) { entry in
@@ -703,6 +713,11 @@ struct ReaderView: View {
             if let audio = model.companion {
                 Button { listen(to: audio) } label: {
                     Label("Listen from Here", systemImage: "headphones")
+                }
+            }
+            if StoryAI.isAvailable {
+                Button { model.holdChrome(); showStory = true } label: {
+                    Label("The Story So Far", systemImage: "text.book.closed")
                 }
             }
             if model.handsFree == nil {

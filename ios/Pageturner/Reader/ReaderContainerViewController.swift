@@ -12,6 +12,7 @@ final class ReaderContainerViewController: UIViewController {
     var onReadAloudSelection: (() -> Void)?
     var onLookUpSelection: (() -> Void)?
     var onPronounceSelection: (() -> Void)?
+    var onWhoSelection: (() -> Void)?
 
     private let contentController: UIViewController
 
@@ -180,6 +181,11 @@ final class ReaderContainerViewController: UIViewController {
     /// "Pronounce" item — teach the voice how to say the selected word.
     @objc func pronounceSelection() {
         onPronounceSelection?()
+    }
+
+    /// "Who's This?" item — what the book so far says about the selected name.
+    @objc func whoSelection() {
+        onWhoSelection?()
     }
 
     // MARK: Page curl — the leaf that follows the finger

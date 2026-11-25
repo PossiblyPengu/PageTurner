@@ -141,6 +141,7 @@ func runData() async {
     runSeriesShelfChecks()
     runWordStudyChecks()
     runCompanionChecks()
+    runStoryRecapChecks()
     runShelfChecks()
     runChatChecks()
     runWebAppsChecks()

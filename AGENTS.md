@@ -406,6 +406,16 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (`navigator(_:setupUserScripts:)`), reversible, checked in headless Chromium. OpenDyslexic is Readium's own bundled font.
 - Online catalogues (`Library/OPDSFeed.swift` parses, Linux-checked; `OPDSBrowser.swift` browses and downloads through the
   normal importer; passwords in the Keychain). Plain http is allowed only on the local network (Info.plist).
+- The Story So Far and Who's This? (`Reader/StoryTeller.swift`, `StoryViews.swift`; the text handling and every
+  prompt in `StoryRecap.swift`, Linux-checked): Apple's on-device model (`FoundationModels`, iOS 26 with Apple
+  Intelligence — weak-linked in `project.yml`, every use behind `#available` and `StoryAI.isAvailable`, and neither is
+  offered where it can't run). Only text up to the reader's place goes in (`ReaderModel.textSoFar`: reading-order
+  files before the place whole, the current one cut at it), so nothing it says can give the book away. The window is
+  about 4,000 tokens in all, so a request carries at most `StoryRecap.pieceLength` characters; a long chapter is
+  recapped piece by piece and joined; a fresh session per request. Recaps of whole chapters are kept
+  (`Application Support/Recaps/<book>.json`, keyed by file, dropped when `StoryRecap.version` changes); by default only
+  the latest `StoryTeller.recent` chapters are made fresh, the rest on "Recap From the Beginning". Who's This? gives
+  the model the sentences naming the person (`StoryRecap.mentions`: the first few and the latest).
 - Ebook and audiobook of one book (`Library/Companion.swift`, Linux-checked): `Companion.match` finds the other
   edition (same title by `BMShelf.titlesAgree`, authors agreeing either way round, the very same title first). The
   reader's More menu has "Listen from Here" and Now Playing's "Read from Here": the place goes over as a chapter name,
