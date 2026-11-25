@@ -564,6 +564,8 @@ final class ReadAloud: NSObject, ObservableObject {
             other.stop()
         }
         Self.current = self
+        // the words taught for this book, over every book's
+        PronunciationStore.shared.reading(bookID)
         startStallWatch()
         rearmChapterBell()
         registerAudio()

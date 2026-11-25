@@ -5,21 +5,34 @@ enum SpeechText {
     /// reader says them. The same source is cleaned a few times per sentence — the route check,
     /// the utterance itself, the lookahead's probe — so the last few answers are kept. NSCache is
     /// thread-safe: the engines call this off the main actor.
-    static func spoken(_ source: String) -> String {
-        let key = source as NSString
-        if let hit = spokenCache.object(forKey: key) { return hit as String }
-        let text = cleaned(source)
-        spokenCache.setObject(text as NSString, forKey: key)
-        return text
+    static func spoken(_ source: String) -> String { prepared(source).text }
+
+    /// What `spoken` gives, and where the words the reader taught the voice went in it (`Pronunciations`).
+    final class Prepared: NSObject, @unchecked Sendable {
+        let text: String
+        let respelled: [Pronunciations.Respelled]
+        init(text: String, respelled: [Pronunciations.Respelled] = []) {
+            self.text = text
+            self.respelled = respelled
+        }
     }
 
-    private static let spokenCache: NSCache<NSString, NSString> = {
-        let cache = NSCache<NSString, NSString>()
+    /// The same, cached: keyed on the taught words' generation too, so teaching one is heard at the next sentence.
+    static func prepared(_ source: String) -> Prepared {
+        let key = "\(Pronunciations.generation)\u{1}\(source)" as NSString
+        if let hit = spokenCache.object(forKey: key) { return hit }
+        let made = cleaned(source)
+        spokenCache.setObject(made, forKey: key)
+        return made
+    }
+
+    private static let spokenCache: NSCache<NSString, Prepared> = {
+        let cache = NSCache<NSString, Prepared>()
         cache.countLimit = 16
         return cache
     }()
 
-    private static func cleaned(_ source: String) -> String {
+    private static func cleaned(_ source: String) -> Prepared {
         var text = source.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .replacingOccurrences(of: "\u{00AD}", with: "")
@@ -37,10 +50,13 @@ enum SpeechText {
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // a running page number ("42", "- 42 -", "Page 42") is not part of the story — judged
         // before a roman heading numeral becomes digits, so "XLII" is still a chapter
-        if AppPrefs.speechSkipsPageNumbers, isPageNumber(text) { return "" }
+        if AppPrefs.speechSkipsPageNumbers, isPageNumber(text) { return Prepared(text: "") }
         text = romanNumerals(in: text)
         text = dates(in: text)
-        return spaceBeforePunctuation.stringByReplacingMatches(in: text, range: nsRange(text), withTemplate: "$1")
+        text = spaceBeforePunctuation.stringByReplacingMatches(in: text, range: nsRange(text), withTemplate: "$1")
+        // the words the reader taught it go in last, so nothing above changes them or where they are
+        let respelled = Pronunciations.respell(text)
+        return Prepared(text: respelled.text, respelled: respelled.respelled)
     }
 
     /// Only digits (at most four), or "page" and digits, or those between dashes or brackets.
@@ -120,15 +136,36 @@ enum SpeechText {
                 mapped = [Range<String.Index>?](repeating: nil, count: spokenWords.count)
                 return
             }
-            let said = spokenWords.map { SpeechText.folded(spoken[$0]) }
+            var said = spokenWords.map { SpeechText.folded(spoken[$0]) }
             let written = originalWords.map { SpeechText.folded(original[$0]) }
+            // a word the reader taught the voice is said as other words: the first of them stands for the written
+            // word, and the rest are marked as it is (a "\u{1}" matches nothing on the page)
+            var follows = [Int?](repeating: nil, count: spokenWords.count)
+            let prepared = SpeechText.prepared(original)
+            if prepared.text == spoken {
+                for place in prepared.respelled {
+                    // the same text, but perhaps not the same string: its place by offset, in this one
+                    let range = String.Index(utf16Offset: place.said.lowerBound.utf16Offset(in: prepared.text), in: spoken)
+                        ..< String.Index(utf16Offset: place.said.upperBound.utf16Offset(in: prepared.text), in: spoken)
+                    let inside = spokenWords.indices.filter { spokenWords[$0].overlaps(range) }
+                    guard let first = inside.first,
+                          let word = SpeechText.wordRanges(in: place.written).first
+                    else { continue }
+                    said[first] = SpeechText.folded(place.written[word])
+                    for k in inside.dropFirst() {
+                        said[k] = "\u{1}"
+                        follows[k] = first
+                    }
+                }
+            }
             let walked = SpeechText.align(said, with: written)
-            mapped = (0 ..< said.count).map { k in
+            let own: [Range<String.Index>?] = (0 ..< said.count).map { k in
                 // same count and the word itself survived: the same index it had (the walk may
                 // pair a repeat somewhere else) — `originalRange` judged it that way too
                 if said.count == written.count, written[k] == said[k] { return originalWords[k] }
                 return walked[k].map { originalWords[$0] }
             }
+            mapped = (0 ..< said.count).map { k in follows[k].map { own[$0] } ?? own[k] }
         }
 
         /// Where a reported `range` (into the spoken text this map was built with) sits in the

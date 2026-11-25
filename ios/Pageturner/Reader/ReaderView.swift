@@ -115,7 +115,7 @@ struct ReaderView: View {
         visible && model.settings.dimWhileNarrating && model.readAloudPlaying
             && !model.showChrome
             && !showContents && !showSettings && !showSearch && !showVoices
-            && exportFile == nil && model.footnote == nil && model.editingHighlight == nil
+            && exportFile == nil && model.footnote == nil && model.editingHighlight == nil && model.pronouncing == nil
             && model.notice == nil
     }
 
@@ -277,6 +277,14 @@ struct ReaderView: View {
             .sheet(item: $model.footnote) { note in
                 FootnoteSheet(note: note) { model.goToFootnote(note) }
                     .preferredColorScheme(scheme)
+            }
+            .sheet(item: $model.pronouncing) { entry in
+                PronunciationEditor(
+                    entry: entry,
+                    book: .init(id: model.book.id, title: model.book.title),
+                    voiceID: model.settings.voiceIdentifier,
+                    rate: model.settings.fittedSpeechRate)
+                .preferredColorScheme(scheme)
             }
             .sheet(item: $model.editingHighlight) { highlight in
                 HighlightEditorSheet(

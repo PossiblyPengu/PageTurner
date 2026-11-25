@@ -338,7 +338,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   title ("Dr.") or before a lower-case continuation. Device voices go through `SystemTTSEngine` (ours, not
   Readium's `AVTTSEngine`, whose utterance text can't be changed): it speaks `SpeechText.spoken(text)` and maps
   each reported range back onto the page's text with `SpeechText.originalRange`; `NeuralTTSEngine` does the
-  same. The tokenizer never rewrites a segment's text — Readium slices `locator.text.highlight` with the
+  same. Words the reader taught the voice (`Reader/Pronunciations.swift`, Linux-checked; kept by
+  `PronunciationStore`, edited from the selection menu's "Pronounce" and Settings → Read Aloud → Pronunciations) go in
+  last, in `SpeechText.prepared`, which keeps where each went so `WordMap` marks every part of "her-MY-oh-nee" on the
+  printed "Hermione"; the cache is keyed on `Pronunciations.generation`, so a word taught is heard from the next
+  sentence. Every book's entries apply, and the voice's book's own over them (`ReadAloud.begin` says which book).
+  The tokenizer never rewrites a segment's text — Readium slices `locator.text.highlight` with the
   ranges the engine reports, so the two must be one string. Device voices: `SystemVoices.swift`; the shared list
   and the Settings/Reading-sheet rows: `VoiceListView.swift`; **always use `SpeechPreview.shared`** — an
   `AVSpeechSynthesizer` freed while iOS is still calling back into it crashes inside TextToSpeech.

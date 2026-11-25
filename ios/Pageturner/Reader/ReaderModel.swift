@@ -97,6 +97,8 @@ final class ReaderModel: ObservableObject {
     @Published var footnote: Footnote?
     /// The highlight whose colour and note are being edited.
     @Published var editingHighlight: Highlight?
+    /// The word being taught to the voice ("Pronounce" in the selection menu).
+    @Published var pronouncing: Pronunciation?
 
     private let library: LibraryStore
     private var publication: Publication?
@@ -295,6 +297,10 @@ final class ReaderModel: ObservableObject {
                         title: "Look Up",
                         action: #selector(ReaderContainerViewController.lookUpSelection)
                     ),
+                    EditingAction(
+                        title: "Pronounce",
+                        action: #selector(ReaderContainerViewController.pronounceSelection)
+                    ),
                 ]
                 config.editingActions = actions
                 // how read-aloud lights the word and the line it is on
@@ -376,6 +382,7 @@ final class ReaderModel: ObservableObject {
         container.onSaveWordSelection = { [weak self] in self?.saveWordSelection() }
         container.onReadAloudSelection = { [weak self] in self?.readAloudSelection() }
         container.onLookUpSelection = { [weak self] in self?.lookUpSelection() }
+        container.onPronounceSelection = { [weak self] in self?.pronounceSelection() }
         navigatorController = container
 
         // which side of the page was tapped, for the way a page turn leaves (the adapter's own callback has no side)
@@ -1090,6 +1097,22 @@ final class ReaderModel: ObservableObject {
               let container = navigatorController
         else { return }
         container.present(UIReferenceLibraryViewController(term: term), animated: true)
+    }
+
+    /// "Pronounce" in the selection menu — teach the voice how to say the selected word. What it knew already is
+    /// what the sheet starts from; a new one is for this book until the toggle says every book.
+    private func pronounceSelection() {
+        guard let selectable = navigator as? SelectableNavigator,
+              let selection = selectable.currentSelection
+        else { return }
+        let picked = selection.locator.text.highlight ?? ""
+        selectable.clearSelection()
+        guard let word = Pronunciations.cleaned(picked) else {
+            notice = "Select a word or a name to teach the voice"
+            return
+        }
+        pronouncing = PronunciationStore.shared.entry(for: word, book: book.id)
+            ?? Pronunciation(written: word, said: "", bookID: book.id)
     }
 
     /// With "Send new highlights as quotes" on, a new highlight goes to BookMaster as well — once. A passage

@@ -66,9 +66,9 @@ final class SpeechPreview: NSObject, ObservableObject, AVSpeechSynthesizerDelega
         synthesizer.delegate = self
     }
 
-    /// Play the sample in `voice` (nil: Automatic) at `rate`; asking again for
+    /// Play the sample (or `text`) in `voice` (nil: Automatic) at `rate`; asking again for
     /// the voice that is playing stops it.
-    func toggle(_ voice: SpeechVoice?, rate: Double) {
+    func toggle(_ voice: SpeechVoice?, rate: Double, text: String? = nil) {
         let key = voice?.id ?? ""
         let wasPlaying = playing == key
         halt()
@@ -76,7 +76,7 @@ final class SpeechPreview: NSObject, ObservableObject, AVSpeechSynthesizerDelega
 
         begin()
         let spoken = voice.flatMap { AVSpeechSynthesisVoice(identifier: $0.id) } ?? SystemVoices.automatic()
-        let utterance = AVSpeechUtterance(string: Self.sample(for: voice?.language ?? spoken?.language))
+        let utterance = AVSpeechUtterance(string: text ?? Self.sample(for: voice?.language ?? spoken?.language))
         utterance.voice = spoken
         utterance.rate = SpeechRateMap.avRate(forMultiplier: rate)
         current = utterance
@@ -86,7 +86,7 @@ final class SpeechPreview: NSObject, ObservableObject, AVSpeechSynthesizerDelega
 
     /// The same for a neural voice, which must be on this iPhone — `sid` hears one
     /// speaker of a multi-speaker voice.
-    func toggle(_ voice: NeuralVoice, rate: Double, sid: Int = 0) {
+    func toggle(_ voice: NeuralVoice, rate: Double, sid: Int = 0, text: String? = nil) {
         let key = voice.id(withSpeaker: sid)
         let wasPlaying = playing == key
         halt()
@@ -96,7 +96,7 @@ final class SpeechPreview: NSObject, ObservableObject, AVSpeechSynthesizerDelega
         playing = key
         neuralTask = Task { [weak self] in
             if let audio = try? await NeuralSynth.shared.generate(
-                text: Self.sample(for: voice.language), directory: entry.directory, info: entry.info, sid: entry.sid),
+                text: text ?? Self.sample(for: voice.language), directory: entry.directory, info: entry.info, sid: entry.sid),
                !Task.isCancelled
             {
                 NeuralPlayer.shared.speed = rate
@@ -109,6 +109,17 @@ final class SpeechPreview: NSObject, ObservableObject, AVSpeechSynthesizerDelega
             guard !Task.isCancelled else { return }
             self?.playing = nil
             self?.release()
+        }
+    }
+
+    /// Say `text` in the voice `id` names (nil: Automatic) — the neural one if it is on this iPhone, else the
+    /// device's — as `ReadAloudControls` hears it. Asking again while it speaks stops it.
+    func say(_ text: String, voiceID id: String?, rate: Double) {
+        let store = NeuralVoiceStore.shared
+        if let id, let chosen = store.catalog.voice(withID: id), store.isInstalled(chosen) {
+            toggle(chosen, rate: rate, sid: NeuralVoice.speaker(fromID: id) ?? 0, text: text)
+        } else {
+            toggle(id.flatMap { id in SystemVoices.installed().first { $0.id == id } }, rate: rate, text: text)
         }
     }
 

@@ -11,6 +11,7 @@ final class ReaderContainerViewController: UIViewController {
     var onSaveWordSelection: (() -> Void)?
     var onReadAloudSelection: (() -> Void)?
     var onLookUpSelection: (() -> Void)?
+    var onPronounceSelection: (() -> Void)?
 
     private let contentController: UIViewController
 
@@ -174,6 +175,11 @@ final class ReaderContainerViewController: UIViewController {
     /// "Look Up" item — the system dictionary on the selected words.
     @objc func lookUpSelection() {
         onLookUpSelection?()
+    }
+
+    /// "Pronounce" item — teach the voice how to say the selected word.
+    @objc func pronounceSelection() {
+        onPronounceSelection?()
     }
 
     // MARK: Page curl — the leaf that follows the finger
