@@ -139,6 +139,7 @@ func runData() async {
     runPronunciationChecks()
     runHandsFreeChecks()
     runSeriesShelfChecks()
+    runWordStudyChecks()
     runShelfChecks()
     runChatChecks()
     runWebAppsChecks()

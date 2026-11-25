@@ -1185,13 +1185,22 @@ final class ReaderModel: ObservableObject {
             notice = "“\(word)” is already saved"
             return
         }
-        book.words.append(SavedWord(
+        let saved = SavedWord(
             word: word,
             context: SavedWord.context(before: text.before, word: word, after: text.after),
             chapter: chapterTitle(for: selection.locator)
-        ))
+        )
+        book.words.append(saved)
         flushSave()
         notice = "Saved “\(word)”"
+        // its definition, kept with it — on the book this reader holds, so its next save doesn't undo it
+        Task { [weak self] in
+            guard let definition = await WordDefinitions.lookUp(word),
+                  let self, let i = self.book.words.firstIndex(where: { $0.id == saved.id })
+            else { return }
+            self.book.words[i].definition = definition
+            self.scheduleSave()
+        }
     }
 
     /// "Highlight" in the selection menu — stores the locator, notes where in the

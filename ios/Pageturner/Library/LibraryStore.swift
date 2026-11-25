@@ -155,6 +155,13 @@ struct SavedWord: Identifiable, Codable, Hashable {
     var context: String?
     var chapter: String?
     var createdAt: Date
+    /// A short definition (`WordStudy.definition`); "" when one was looked for and there is none, nil until then.
+    var definition: String?
+    /// What the reader wrote it means.
+    var meaning: String?
+    /// The review's box (`WordStudy.graded`) and when the word is due again; nil before its first review.
+    var box: Int?
+    var dueAt: Date?
 
     init(id: UUID = UUID(), word: String, context: String? = nil, chapter: String? = nil, createdAt: Date = Date()) {
         self.id = id

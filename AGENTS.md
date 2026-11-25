@@ -406,6 +406,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (`navigator(_:setupUserScripts:)`), reversible, checked in headless Chromium. OpenDyslexic is Readium's own bundled font.
 - Online catalogues (`Library/OPDSFeed.swift` parses, Linux-checked; `OPDSBrowser.swift` browses and downloads through the
   normal importer; passwords in the Keychain). Plain http is allowed only on the local network (Info.plist).
+- Saved words (`Library/SavedWordsView.swift`; pure parts in `WordStudy.swift`, Linux-checked): each word gets a short
+  definition from Wiktionary's REST API when saved (`WordDefinitions`, only the word is sent, a Wikimedia-style
+  User-Agent; "" marks "looked, none", nil "not asked yet", so a failure offline is retried when the list next opens).
+  In the reader the definition goes onto the reader's own `book` copy, or its next save would undo it. Review: boxes of
+  1/3/7/16/35/90 days (`WordStudy.graded`), a word not known comes round again in the same review. A swipe adds the
+  reader's own meaning.
 - Series (`Library/SeriesShelf.swift`, Linux-checked): the library's "Series" shelf chip shows each series under its
   name with "2 of 5 read" and a Next button, counted by volume (the ebook and audiobook of one number are one volume,
   read when either is). The finished-book sheet offers `SeriesShelf.next(after:)` — the next unread volume, the same
