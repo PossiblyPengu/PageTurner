@@ -138,6 +138,7 @@ func runData() async {
     runAuthorNamesChecks()
     runPronunciationChecks()
     runHandsFreeChecks()
+    runSeriesShelfChecks()
     runShelfChecks()
     runChatChecks()
     runWebAppsChecks()

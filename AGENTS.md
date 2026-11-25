@@ -406,6 +406,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (`navigator(_:setupUserScripts:)`), reversible, checked in headless Chromium. OpenDyslexic is Readium's own bundled font.
 - Online catalogues (`Library/OPDSFeed.swift` parses, Linux-checked; `OPDSBrowser.swift` browses and downloads through the
   normal importer; passwords in the Keychain). Plain http is allowed only on the local network (Info.plist).
+- Series (`Library/SeriesShelf.swift`, Linux-checked): the library's "Series" shelf chip shows each series under its
+  name with "2 of 5 read" and a Next button, counted by volume (the ebook and audiobook of one number are one volume,
+  read when either is). The finished-book sheet offers `SeriesShelf.next(after:)` — the next unread volume, the same
+  kind as the one finished when the library has both — and that alone makes the sheet worth showing.
 - Author lines (`Library/AuthorNames.swift`, Linux-checked): every place that builds one from several names (EPUB details,
   FB2, OPDS entries) goes through `AuthorNames.joined` — each person once, joined by " & " (a comma reads as "Last,
   First"). A book's details often name one person twice ("John doe" and "John Doe", "Doe, John" and "John Doe"), and the

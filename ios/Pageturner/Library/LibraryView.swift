@@ -44,6 +44,8 @@ struct LibraryView: View {
     /// Built-in shelf filters carry a "~" a shelf name can't start with.
     private static let allKey = "~all"
     private static let upNextKey = "~upnext"
+    /// Every series, each under its name with how far through it the reader is and the book that comes next.
+    private static let seriesKey = "~series"
 
     /// Shelves that fill themselves from what the books are. Each shows only when it holds some of the
     /// library but not all of it.
@@ -81,11 +83,12 @@ struct LibraryView: View {
 
     private var shelfKeys: [String] {
         let upNext = library.books.contains { $0.bmUpNext == true }
+        let series = library.books.contains { $0.series != nil }
         let smart = Self.smartShelves.filter { shelf in
             let n = library.books.filter(shelf.includes).count
             return n > 0 && n < library.books.count
         }.map(\.key)
-        return [Self.allKey] + (upNext ? [Self.upNextKey] : []) + library.shelves + smart
+        return [Self.allKey] + (upNext ? [Self.upNextKey] : []) + (series ? [Self.seriesKey] : []) + library.shelves + smart
     }
 
     /// The chosen shelf, unless it has since been deleted or emptied of its reason to exist.
@@ -97,6 +100,7 @@ struct LibraryView: View {
         switch key {
         case Self.allKey: return "All"
         case Self.upNextKey: return "Up next"
+        case Self.seriesKey: return "Series"
         default: return Self.smartShelves.first { $0.key == key }?.label ?? key
         }
     }
@@ -107,6 +111,8 @@ struct LibraryView: View {
         switch key {
         case Self.allKey: return library.books.count
         case Self.upNextKey: return library.books.filter { $0.bmUpNext == true }.count
+        // how many series, not books
+        case Self.seriesKey: return Set(library.books.compactMap { $0.series.map(SeriesShelf.key) }).count
         default:
             if let smart = Self.smartShelves.first(where: { $0.key == key }) {
                 return library.books.filter(smart.includes).count
@@ -128,6 +134,7 @@ struct LibraryView: View {
         switch activeShelfKey {
         case Self.allKey: break
         case Self.upNextKey: list = list.filter { $0.bmUpNext == true }
+        case Self.seriesKey: list = list.filter { $0.series != nil }
         default:
             if let smart = Self.smartShelves.first(where: { $0.key == activeShelfKey }) {
                 list = list.filter(smart.includes)
@@ -314,6 +321,8 @@ struct LibraryView: View {
                         }
                         .padding(.top, 40)
                     }
+                } else if activeShelfKey == Self.seriesKey, !searching {
+                    ForEach(SeriesShelf.groups(books)) { series in seriesSection(series) }
                 } else if order == .series, !searching {
                     // a series together, under its name
                     ForEach(seriesSections(books), id: \.title) { section in
@@ -336,6 +345,38 @@ struct LibraryView: View {
             if BookMaster.shared.isLinked {
                 _ = await BookMaster.shared.pullShelf(into: library)
             }
+        }
+    }
+
+    /// What a shelf chip's number counts.
+    private static func countNoun(_ key: String) -> String { key == seriesKey ? "series" : "books" }
+
+    /// One series: its name, how many of its volumes are read, a way straight into the next, and its books in order.
+    private func seriesSection(_ series: SeriesShelf.Series) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(series.name).font(.title3.weight(.semibold))
+                Spacer(minLength: 8)
+                Text(series.finished == series.volumes ? "All \(series.volumes) read" : "\(series.finished) of \(series.volumes) read")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .accessibilityElement(children: .combine)
+            if let next = series.next, !selecting {
+                Button { router.open(next, library: library) } label: {
+                    Label {
+                        Text("Next: \(next.title)").lineLimit(1)
+                    } icon: {
+                        Image(systemName: next.isAudio ? "headphones" : "book")
+                    }
+                    .font(.subheadline.weight(.medium))
+                }
+                .buttonStyle(.bordered)
+                .tint(.ptAccent)
+                .accessibilityHint(SeriesShelf.place(of: next) ?? "")
+            }
+            BookGrid(books: series.books, selection: selecting ? $selected : nil, listStyle: listView)
         }
     }
 
@@ -366,7 +407,7 @@ struct LibraryView: View {
                                 .foregroundStyle(active ? Color.ptOnAccent : Color.primary)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("\(shelfLabel(key)), \(shelfCount(key)) books")
+                        .accessibilityLabel("\(shelfLabel(key)), \(shelfCount(key)) \(Self.countNoun(key))")
                         .accessibilityAddTraits(active ? .isSelected : [])
                     }
                 }

@@ -52,8 +52,11 @@ struct FinishedBookSheet: View {
 
     /// Anything to ask at all: with nothing to rate and no file to free, the sheet would only say "well done".
     static func worthAsking(_ book: Book, library: LibraryStore) -> Bool {
-        canRate(book) || hasFiles(book, library: library)
+        canRate(book) || hasFiles(book, library: library) || SeriesShelf.next(after: book, in: library.books) != nil
     }
+
+    /// The book that comes after this one in its series, when the library has it and it isn't read yet.
+    private var nextInSeries: Book? { SeriesShelf.next(after: current, in: library.books) }
 
     private var size: String? {
         library.finishedBytes(of: current).map { AutoBackup.sizeText($0) }
@@ -64,6 +67,7 @@ struct FinishedBookSheet: View {
             ScrollView {
                 VStack(spacing: 16) {
                     header
+                    if let next = nextInSeries { nextCard(next) }
                     if Self.canRate(current) { rating }
                     if Self.hasFiles(current, library: library) { fileChoices }
                 }
@@ -114,6 +118,44 @@ struct FinishedBookSheet: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// "Next in the series" — one tap closes this and opens it.
+    private func nextCard(_ next: Book) -> some View {
+        Button {
+            dismiss()
+            // once this sheet is down: a book doesn't open under one
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { router.open(next, library: library) }
+        } label: {
+            HStack(spacing: 12) {
+                Group {
+                    if let cover = library.coverThumbnail(for: next, maxPixels: 180) {
+                        Image(uiImage: cover).resizable().scaledToFit()
+                    } else {
+                        Image(systemName: next.isAudio ? "headphones" : "book.closed.fill")
+                            .frame(width: 40, height: 60)
+                            .background(Color.ptAccent.opacity(0.2))
+                    }
+                }
+                .frame(width: 44, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Next in the series").font(.caption).foregroundStyle(.secondary)
+                    Text(next.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
+                    if let place = SeriesShelf.place(of: next) {
+                        Text(place).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens it")
     }
 
     private var rating: some View {
