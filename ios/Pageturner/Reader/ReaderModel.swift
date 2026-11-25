@@ -1333,8 +1333,10 @@ final class ReaderModel: ObservableObject {
                 ?? link.title ?? "Section \(i + 1)"
             files.append((link.url().string, title, data, i == at ? (here.locations.progression ?? 0) : nil))
         }
+        // the text is made off the main thread — a long book's chapters are a lot of HTML
+        let gathered = files
         return await Task.detached {
-            files.compactMap { file -> StoryChapter? in
+            gathered.compactMap { file -> StoryChapter? in
                 var text = BookText.plain(fromHTML: String(decoding: file.data, as: UTF8.self))
                 if let cut = file.cut { text = StoryRecap.upTo(cut, of: text) }
                 guard text.count >= 200 || file.cut != nil, !text.isEmpty else { return nil }
@@ -1512,6 +1514,12 @@ final class ReaderModel: ObservableObject {
         Log.event("readaloud", "reader in front — its voice: \(mine); the app's: \(ReadAloud.summary)")
         adoptStray()
         readAloud?.setOnScreen(true)
+        #if DEBUG
+        // CI's background-and-back run (ios/scripts/simulator-shots.sh, 69): the controls must now know what the app's
+        // voice is doing — a voice speaking that the reader called its own "none" was the second voice started over it
+        let after: String = readAloud.map { $0.isPlaying ? "speaking" : "paused" } ?? "none"
+        NSLog("PTInFront mine=%@ app=%@", after, ReadAloud.summary)
+        #endif
         if let place = catchUpOnWake, readAloud == nil {
             catchUpOnWake = nil
             catchUp(to: place)
