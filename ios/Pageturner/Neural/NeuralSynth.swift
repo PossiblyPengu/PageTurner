@@ -41,11 +41,22 @@ final class NeuralSynth: @unchecked Sendable {
     /// How long a model stays in memory after it was last used.
     private let keepAlive: TimeInterval = 45
 
+    /// What the loaded model was made from, so it can be loaded again with more threads (`needsMoreThreads`).
+    private var loadedFrom: (directory: URL, info: NeuralVoiceFormat.Installed)?
+    private var loadedThreads = 1
+
+    // What making speech has cost lately, for the log (`noteCost`) — kept on the queue.
+    private var costSentences = 0
+    private var costAhead = 0
+    private var costCompute: Double = 0
+    private var costAudio: Double = 0
+
     /// Speech for `text` in the voice at `directory` (see `NeuralVoiceFormat.install`) at its
     /// natural pace — `sid` picks a speaker of a multi-speaker voice.
     /// `ahead`: nobody is waiting for it yet (see `hurry`).
     func generate(
-        text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int = 0, ahead: Bool = false
+        text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int = 0, ahead: Bool = false,
+        pace: Double = 1
     ) async throws -> Audio {
         let cancelled = CancelFlag()
         return try await withTaskCancellationHandler {
@@ -57,7 +68,8 @@ final class NeuralSynth: @unchecked Sendable {
                         return
                     }
                     do {
-                        continuation.resume(returning: try self.run(text: text, directory: directory, info: info, sid: sid))
+                        continuation.resume(returning: try self.run(
+                            text: text, directory: directory, info: info, sid: sid, ahead: ahead, pace: pace))
                     } catch {
                         continuation.resume(throwing: error)
                     }
@@ -117,7 +129,9 @@ final class NeuralSynth: @unchecked Sendable {
 
     // MARK: On the queue
 
-    private func run(text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int) throws -> Audio {
+    private func run(
+        text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int, ahead: Bool, pace: Double = 1
+    ) throws -> Audio {
         unloadWork?.cancel()
         if loaded?.key != info.key {
             loaded = nil   // free the old one before the new one is made
@@ -127,12 +141,17 @@ final class NeuralSynth: @unchecked Sendable {
         }
         guard let tts = loaded?.tts else { throw Failure.loadFailed }
 
-        // sherpa turns a speed into length_scale = 1 / speed and then forgets the voice's own
-        // length_scale, so ask for the pace the voice was made for. Faster or slower is the
-        // player's job: stretching the audio is more exact than VITS's rounded durations.
+        // the voice's own pace, or faster (`NeuralPace`: the sound made is what it costs, and the player stretches by
+        // whatever the voice did not reach)
         let speaker = max(0, min(sid, info.speakers - 1))
-        let generated = tts.generate(text: text, sid: speaker, speed: Float(1 / max(info.lengthScale, 0.1)))
+        let began = DispatchTime.now().uptimeNanoseconds
+        let speed = NeuralPace.sherpaSpeed(pace: pace, lengthScale: Double(info.lengthScale))
+        let generated = tts.generate(text: text, sid: speaker, speed: Float(speed))
         let samples = generated.samples
+        if generated.sampleRate > 0 {
+            let compute = Double(DispatchTime.now().uptimeNanoseconds - began) / 1_000_000_000
+            noteCost(compute: compute, audio: Double(samples.count) / Double(generated.sampleRate), ahead: ahead, key: info.key)
+        }
         madeWithModel += 1
         if madeWithModel >= reloadEvery {
             // dropped now (after this sentence is made); the next sentence loads it afresh
@@ -158,13 +177,115 @@ final class NeuralSynth: @unchecked Sendable {
             let vits = sherpaOnnxOfflineTtsVitsModelConfig(
                 model: model, lexicon: "", tokens: tokens, dataDir: espeak,
                 noiseScale: info.noiseScale, noiseScaleW: info.noiseW, lengthScale: 1)
-            // Low Power Mode halves the synthesis threads — VITS still clears real time
+            let threads = self.threads(for: info.key)
             let modelConfig = sherpaOnnxOfflineTtsModelConfig(
-                vits: vits, numThreads: LowPower.on ? 1 : 2, debug: 0, provider: "cpu")
+                vits: vits, numThreads: threads, debug: 0, provider: "cpu")
             var config = sherpaOnnxOfflineTtsConfig(model: modelConfig, ruleFsts: "", maxNumSentences: 1)
+            let began = DispatchTime.now().uptimeNanoseconds
             let tts = SherpaOnnxOfflineTtsWrapper(config: &config)
             guard tts.tts != nil else { throw Failure.loadFailed }
+            let ms = Int(Double(DispatchTime.now().uptimeNanoseconds - began) / 1_000_000)
+            self.loadedFrom = (directory, info)
+            self.loadedThreads = threads
+            let on = threads == 1 ? "one thread" : String(threads) + " threads"
+            Log.event("neural", "voice \(info.key) loaded in \(ms) ms, \(on)")
             return tts
+        }
+    }
+
+    // MARK: Threads, and what it costs
+
+    /// How many threads ONNX Runtime makes a voice's sentences with. One, unless the voice has shown it cannot keep up
+    /// on one (`needsMoreThreads`) — and never more in Low Power Mode.
+    ///
+    /// Two threads were the rule, and they cost more than they gave: ONNX Runtime's second thread spins rather than
+    /// sleeps while it waits between the model's many small steps, so two threads can burn up to twice the processor
+    /// time of one for well under twice the speed — and a thread the queue does not run cannot be held to its priority, so what was
+    /// made ahead "at leisure" still ran on the fast, power-hungry cores. On one thread every step runs on the queue's
+    /// own thread, at the queue's priority: a sentence made ahead can go to the efficiency cores, and `hurry` lifts it
+    /// when it is needed.
+    private func threads(for key: String) -> Int {
+        if LowPower.on { return 1 }
+        return UserDefaults.standard.integer(forKey: Self.threadsKey(key)) >= 2 ? 2 : 1
+    }
+
+    private static func threadsKey(_ key: String) -> String { "neural-threads-" + key }
+
+    /// The voice could not keep up on one thread: sentences made ahead were still being made when they were needed,
+    /// with time to spare to make them. It is given two from now on (remembered per voice), loaded again at once.
+    func needsMoreThreads(forKey key: String) {
+        queue.async(qos: .userInitiated) {
+            guard !LowPower.on, UserDefaults.standard.integer(forKey: Self.threadsKey(key)) < 2 else { return }
+            UserDefaults.standard.set(2, forKey: Self.threadsKey(key))
+            Log.event("neural", "voice \(key) could not keep up on one thread — it uses two from now on")
+            guard self.loaded?.key == key, let from = self.loadedFrom else { return }
+            self.loaded = nil
+            if let tts = try? self.load(directory: from.directory, info: from.info) {
+                self.loaded = (key, tts)
+                self.madeWithModel = 0
+            }
+        }
+    }
+
+    /// Every hundred sentences, the log says how hard the voice works: seconds of speech made per second of
+    /// processor time, how many were made ahead of their turn, and on how many threads. 0.3 of real time is a voice
+    /// that is busy a third of the time it speaks.
+    private func noteCost(compute: Double, audio: Double, ahead: Bool, key: String) {
+        costSentences += 1
+        if ahead { costAhead += 1 }
+        costCompute += compute
+        costAudio += audio
+        guard costSentences >= 100 else { return }
+        let share = String(format: "%.2f", costAudio > 0 ? costCompute / costAudio : 0)
+        let on = loadedThreads == 1 ? "one thread" : String(loadedThreads) + " threads"
+        let power = LowPower.on ? ", Low Power Mode" : ""
+        let line = "voice \(key): \(costSentences) sentences, \(Int(costAudio)) s of speech made in \(Int(costCompute)) s "
+            + "(\(share) of real time), \(costAhead) made ahead, \(on)\(power)"
+        Log.event("neural", line)
+        costSentences = 0
+        costAhead = 0
+        costCompute = 0
+        costAudio = 0
+    }
+
+    // MARK: Faster paces
+
+    private static func paceKey(_ key: String, _ pace: Double) -> String {
+        "neural-pace-" + key + "-" + String(Int((pace * 100).rounded()))
+    }
+
+    /// How much faster a sentence made at `pace` really is, measured for this voice (`calibrate`); nil until it has
+    /// been, or when the pace made no worthwhile difference (stored as 1).
+    func achieved(pace: Double, key: String) -> Double? {
+        let stored = UserDefaults.standard.double(forKey: Self.paceKey(key, pace))
+        return stored > 1 ? stored : nil
+    }
+
+    /// Paces being measured now, so one is not measured twice at once (on the queue).
+    private var calibrating: Set<String> = []
+
+    /// Measure once what `pace` really gives this voice: a sample in its language made at its own pace and at `pace`,
+    /// at low priority, behind whatever is being made. Until it is done, sentences are made at the voice's own pace.
+    func calibrate(pace: Double, directory: URL, info: NeuralVoiceFormat.Installed, language: String) {
+        let key = Self.paceKey(info.key, pace)
+        queue.async(qos: .utility) {
+            guard UserDefaults.standard.object(forKey: key) == nil, !self.calibrating.contains(key) else { return }
+            self.calibrating.insert(key)
+            defer { self.calibrating.remove(key) }
+            // twice over: a longer sample evens out the rounding of each sound's length
+            let sample = SpeechSamples.text(for: language)
+            let text = sample + " " + sample
+            guard let natural = try? self.run(text: text, directory: directory, info: info, sid: 0, ahead: true),
+                  let faster = try? self.run(text: text, directory: directory, info: info, sid: 0, ahead: true, pace: pace)
+            else { return }
+            let measured = NeuralPace.achieved(
+                natural: Double(natural.samples.count) / natural.sampleRate,
+                made: Double(faster.samples.count) / faster.sampleRate, asked: pace)
+            // 1: measured, and not worth it — not measured again
+            UserDefaults.standard.set(measured ?? 1, forKey: key)
+            let got = measured.map { String(format: "%.2f×", $0) } ?? "no faster"
+            let asked = String(format: "%.2f×", pace)
+            Log.event("neural", "voice \(info.key) asked for \(asked) speaks \(got)")
         }
     }
 

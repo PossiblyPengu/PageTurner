@@ -77,7 +77,7 @@ enum TextBook {
             guard let book = FB2Book.parse(data) else { return nil }
             (sections, meta) = htmlSections(book.html)
             if !book.title.isEmpty { meta.title = book.title }
-            meta.author = book.authors.joined(separator: ", ")
+            meta.author = AuthorNames.joined(book.authors)  // each person once, " & " as everywhere else
             language = book.language.isEmpty ? detectLanguage(BookText.plain(fromHTML: book.html)) : book.language
             cover = book.cover
             summary = book.annotation

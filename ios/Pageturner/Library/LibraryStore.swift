@@ -396,7 +396,14 @@ final class LibraryStore: ObservableObject {
                     try? data.write(to: backup, options: .atomic)
                     Log.error("library", "\(list.count - good.count) of \(list.count) books could not be read; original kept as \(backup.lastPathComponent)")
                 }
-                books = good
+                // a book added before an author could only be credited once read "John doe & John Doe": each person
+                // once now, and written back if anything changed
+                var cleaned = good
+                for i in cleaned.indices {
+                    cleaned[i].author = AuthorNames.cleaned(cleaned[i].author)
+                }
+                books = cleaned
+                if cleaned != good { writer.write(cleaned, to: catalogueURL) }
             } else {
                 let backup = support.appendingPathComponent("library.corrupt-\(Int(Date().timeIntervalSince1970)).json")
                 try? data.write(to: backup, options: .atomic)
@@ -916,8 +923,9 @@ final class LibraryStore: ObservableObject {
     private func readDetails(of book: inout Book, at url: URL) async throws {
         let publication = try await Readium.shared.open(url: url)
         if let title = publication.metadata.title, !title.isEmpty { book.title = title }
-        // " & ", not ", ": a comma reads as "Last, First" to BookMaster
-        book.author = publication.metadata.authors.map(\.name).joined(separator: " & ")
+        // each person once (a book's details often name one twice), joined by " & " — a comma reads as "Last, First"
+        // to BookMaster
+        book.author = AuthorNames.joined(publication.metadata.authors.map(\.name))
         if let blurb = publication.metadata.description, !blurb.isEmpty {
             let text = BookText.plain(fromHTML: blurb)
             if !text.isEmpty { book.bookDescription = text }

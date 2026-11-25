@@ -24,6 +24,8 @@ struct ReaderView: View {
     @State private var contentsTab: ContentsTab = .chapters
     /// The switch to a PDF's text version (or back) is under way — making a text version takes a moment.
     @State private var switchingVersion = false
+    /// The wait before the screen is turned down while the voice reads (`applyDim`).
+    @State private var dimTask: Task<Void, Never>?
 
     /// The way out of the book: the Reading tab is the book's home, so leaving
     /// it is a tab switch, not a dismissal.
@@ -117,8 +119,20 @@ struct ReaderView: View {
             && model.notice == nil
     }
 
+    /// Turn the screen down once the hands have been off for a while (`NarrationDim.delay`), and back up at once
+    /// when they return — a tap shows the controls, which ends `wantsDim`.
     private func applyDim(_ dim: Bool) {
-        UIScreen.main.wantsSoftwareDimming = dim
+        dimTask?.cancel()
+        dimTask = nil
+        guard dim else {
+            ScreenDimmer.restore()
+            return
+        }
+        dimTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(NarrationDim.delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            ScreenDimmer.dim()
+        }
     }
 
     /// Opening, saving, and the sitting that BookMaster is told about.
@@ -163,6 +177,8 @@ struct ReaderView: View {
                 // the place from being lost whether this or the app's own .background flush runs
                 // first, and whether a .background ever arrives at all
                 case .inactive:
+                    // the brightness the reader turned down outlives the app on the home screen: given back first
+                    applyDim(false)
                     // the cover is a photograph of the page as it leaves the screen — on the way back in
                     // (background → inactive) the page may be the blank one it hides
                     if old == .active, visible { model.sleepCover(true) }

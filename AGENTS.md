@@ -172,6 +172,41 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Triggered by six turns in a row refused or unanswered, or the voice's mark off the page for ten seconds, at most once in 45 s, with the page then taken to
   the voice without the slide. Turns are made without the slide after any failure, too: a long smooth scroll to catch up left the web view half painted.
   The log says `the page is not following the voice (…)` and `laying the pages out again`.
+- Battery while it reads aloud: `ReadAloud.spoken` is a plain subject, not `@Published` (it changes per word and no SwiftUI view shows it — published,
+  the controls were laid out again per word); the place is written at most every 20 s while the voice moves it (`ReaderModel.scheduleSaveForVoice`; a
+  pause or leaving writes at once) instead of the whole catalogue per sentence; and the neural player's ticker runs at 120 ms, not per word, while
+  nobody is watching (`follow` answers nil when `watched` is false).
+  "Dim the screen while it reads" (on by default) really dims now: it used to set `UIScreen.wantsSoftwareDimming`, which only lets the screen
+  go below its lowest step and dims nothing, so with "Keep screen awake" (also on by default) a book read aloud held the screen at full
+  brightness for as long as the voice went on. Fifteen seconds hands-off (`NarrationDim.delay`; `ReaderView.wantsDim`: controls hidden, no
+  sheet) turns it down to about a third (`NarrationDim`, Linux-checked; `ScreenDimmer` moves `UIScreen.brightness`); a tap gives the light
+  back at once, unless the brightness was moved meanwhile (theirs stands). An app's brightness outlives it on the home screen, so it is
+  given back at `.inactive` and on leaving the reader. Also cut: the stall watch runs only while the voice goes and its page is watched (it
+  woke the app five times a second behind the lock); the lock screen's playback state is written when it changes, not per word; the
+  neural player passes its time-stretch unit by at 1× and ticks four times a second, not eight, with no word to come; and the device voice
+  reports only each sentence's first word while nobody watches (`SystemTTSEngine.watched`; the first still proves the voice works).
+- Neural voices' processor time (`NeuralSynth`): a voice is loaded with **one** ONNX Runtime thread unless it has shown it cannot keep up on one
+  (`threads(for:)`, remembered per voice in `neural-threads-<key>`). Two were the rule: ORT's second thread spins rather than sleeps between the
+  model's many small steps (sherpa-onnx does not expose `allow_spinning`), and a thread the queue does not run is not held to the queue's
+  priority — so sentences made ahead at `.utility` still ran on the performance cores. On one thread all of it runs on `NeuralSynth.queue`'s own
+  thread at the block's QoS, which `hurry()` lifts. A made-ahead sentence still being made at its turn after one of 3 s or more
+  (`NeuralTTSEngine.noteWait`, > 150 ms) twice in ten minutes gives that voice two threads for good (`needsMoreThreads`, reloaded at once; never in
+  Low Power Mode). The log says, per voice, how long each load took and on how many threads, and every 100 sentences the seconds of speech made
+  against the seconds of processor time it took ("0.30 of real time" = busy a third of the time it speaks) and how many were made ahead.
+  A voice listened to at 1.25× or more makes its sentences at that pace (`NeuralPace`, Linux-checked: quarter steps up to 1.75×), not at its own
+  pace for the player to squeeze: VITS's cost goes with the sound it makes, so at 1.5× it was making half as much sound again as was heard. VITS
+  does not reach the pace it is asked for exactly (each sound's length rounds up to a whole frame, the short gaps stay), so what a pace really
+  gives is measured once per voice and pace on the language's sample (`NeuralSynth.calibrate`, stored in `neural-pace-<key>-<pace×100>`; 1 = not
+  worth it) and the player stretches by the rest (`NeuralPace.stretch`), keeping the speed exact; until it is measured, sentences are made at the
+  voice's own pace as before. Each made sentence carries how much faster it was made (`Made.achieved`), so a speed change mid-listen stays exact.
+  The log line `voice … asked for 1.50× speaks 1.38×` is the measurement.
+  Read the cost line first when a long listen drains the battery: 50% in two hours with the screen off (an iPhone 15 Pro Max) is ~4 W, far above what
+  audio playback costs. "Stay connected" (`BackgroundKeepAlive`) looks every two minutes rather than every half minute while a book of ours
+  is playing (`BMKeepAlive.pollInterval(lowPower:bookPlaying:)`): the sound keeps the app running anyway, and a look every 30 s kept the radio
+  awake for the whole listen. While a voice reads, the reading place goes to BookMaster when the voice pauses (the lock screen, headphones, a
+  call — the playing sink in `ReaderModel.readAloud`, `pushProgress(every: 0)`, sent only if it moved) and when the listening ends (`endSession`
+  forces it), with a send every 15 minutes as the net for iOS ending the app mid-listen (`ReaderModel.voiceProgressEvery`,
+  `BookMaster.wantsProgress/syncProgress(every:)`; page turns keep 30 s). It moves every sentence, and a push every half minute did the same to the radio.
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the
@@ -353,6 +388,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (`navigator(_:setupUserScripts:)`), reversible, checked in headless Chromium. OpenDyslexic is Readium's own bundled font.
 - Online catalogues (`Library/OPDSFeed.swift` parses, Linux-checked; `OPDSBrowser.swift` browses and downloads through the
   normal importer; passwords in the Keychain). Plain http is allowed only on the local network (Info.plist).
+- Author lines (`Library/AuthorNames.swift`, Linux-checked): every place that builds one from several names (EPUB details,
+  FB2, OPDS entries) goes through `AuthorNames.joined` — each person once, joined by " & " (a comma reads as "Last,
+  First"). A book's details often name one person twice ("John doe" and "John Doe", "Doe, John" and "John Doe"), and the
+  line read "John doe & John Doe". The catalogue cleans lines saved before this when it loads (`AuthorNames.cleaned`).
 - `OpenAt` (`Library/HighlightsHub.swift`) carries a one-shot "open at this place" from the hub to the reader.
 - Scheduled backup (`Library/AutoBackup.swift`, planning in `AutoBackupPlan.swift`, Linux-checked): the same zip as the manual
   export, named by day into a Files folder kept as a bookmark, oldest copies pruned. Made on opening the app when due, and by a

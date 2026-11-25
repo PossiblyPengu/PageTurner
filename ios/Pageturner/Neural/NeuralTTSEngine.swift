@@ -43,8 +43,12 @@ final class NeuralTTSEngine {
 
     /// How fast to speak (1 is the voice's own pace); changes apply to what is playing too.
     @MainActor var speed: Double = 1 {
-        didSet { NeuralPlayer.shared.speed = speed }
+        didSet { NeuralPlayer.shared.speed = NeuralPace.stretch(speed: speed, achieved: playingAchieved) }
     }
+
+    /// How much faster than the voice's own pace the sentence playing was made (`NeuralPace`): the player stretches by
+    /// the rest of `speed`.
+    @MainActor private var playingAchieved: Double = 1
 
     /// The sentences after the one given, when the book can say what they are.
     @MainActor var upcoming: ((String) async -> [SentenceLookahead.Sentence])?
@@ -76,6 +80,20 @@ final class NeuralTTSEngine {
     private struct Made: Sendable {
         var audio: NeuralSynth.Audio
         var timeline: SpokenWords.Timeline?
+        /// How much faster than the voice's own pace it was made.
+        var achieved: Double = 1
+    }
+
+    /// The pace to make the next sentence at for the speed it will be heard at, and what that pace really gives this
+    /// voice. A pace not yet measured for the voice is measured now, in the background (`NeuralSynth.calibrate`), and
+    /// meanwhile the sentence is made at the voice's own pace, as before.
+    @MainActor
+    private func pace(for entry: NeuralVoiceIndex.Entry) -> (pace: Double, achieved: Double) {
+        let pace = NeuralPace.made(for: speed)
+        guard pace > 1 else { return (1, 1) }
+        if let achieved = NeuralSynth.shared.achieved(pace: pace, key: entry.info.key) { return (pace, achieved) }
+        NeuralSynth.shared.calibrate(pace: pace, directory: entry.directory, info: entry.info, language: entry.voice.language)
+        return (1, 1)
     }
 
     /// With this much of a sentence still to be heard — or six tenths of it, if that is more: the next one is
@@ -135,7 +153,9 @@ final class NeuralTTSEngine {
             }
             let audio = ready.audio
             let player = NeuralPlayer.shared
-            player.speed = speed
+            // made at a faster pace or not, it is heard at `speed`: the player stretches by what the voice did not do
+            playingAchieved = ready.achieved
+            player.speed = NeuralPace.stretch(speed: speed, achieved: ready.achieved)
             // whether the next thing heard is in this voice decides if this sentence's
             // tail may be handed back early to make room for it
             let hasNext = await nextAsked
@@ -153,7 +173,9 @@ final class NeuralTTSEngine {
             func follow(_ seconds: TimeInterval) -> TimeInterval? {
                 guard !cancellation.isSet, let timeline else { return nil }
                 let until = timeline.untilNextWord(after: seconds)
-                guard watched, let next = timeline.index(at: seconds), next != lit else { return until }
+                // nobody is watching (the phone is locked, the reader is away): no word to wake for
+                guard watched else { return nil }
+                guard let next = timeline.index(at: seconds), next != lit else { return until }
                 lit = next
                 // a word with no counterpart on the page ("to" of a year range, say) keeps the last
                 // mark lit rather than the whole sentence flashing over it
@@ -230,11 +252,16 @@ final class NeuralTTSEngine {
             if let ready = try? await ahead.value {
                 recent = (key, ready)
                 Self.log("sentence made ahead, waited \(Self.ms(since: started)) ms")
+                noteWait(Date().timeIntervalSince(started), entry: entry)
                 return ready
             }
         }
-        let audio = try await NeuralSynth.shared.generate(text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid)
-        let ready = Made(audio: audio, timeline: reportsWords ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil)
+        let how = pace(for: entry)
+        let audio = try await NeuralSynth.shared.generate(
+            text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid, pace: how.pace)
+        let ready = Made(
+            audio: audio, timeline: reportsWords ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil,
+            achieved: how.achieved)
         recent = (key, ready)
         Self.log("sentence made on the spot in \(Self.ms(since: started)) ms")
         return ready
@@ -246,7 +273,8 @@ final class NeuralTTSEngine {
     private func hurryLater(after seconds: TimeInterval) {
         playing += 1
         let mine = playing
-        let length = seconds / max(speed, 0.25)
+        let length = seconds / max(NeuralPace.stretch(speed: speed, achieved: playingAchieved), 0.25)
+        lastHeardLength = length
         let wait = length - max(Self.hurryAt, length * 0.6)
         guard wait > 0 else {
             NeuralSynth.shared.hurry()
@@ -258,6 +286,25 @@ final class NeuralTTSEngine {
             guard let self, self.playing == mine, !self.made.isEmpty else { return }
             NeuralSynth.shared.hurry()
         }
+    }
+
+    /// How long the sentence last started takes to hear — the time the one after it had to be made in.
+    @MainActor private var lastHeardLength: TimeInterval = 0
+    /// When sentences made ahead were still being made at their turn although there had been time to make them.
+    @MainActor private var lateTimes: [Date] = []
+
+    /// A sentence made ahead was waited for. After a sentence of three seconds or more (time enough, hurried for the
+    /// last two and a half), a wait means the voice cannot keep up on the threads it has: twice in ten minutes and it
+    /// is given more (`NeuralSynth.needsMoreThreads`). A short one before it (a heading) proves nothing.
+    @MainActor
+    private func noteWait(_ waited: TimeInterval, entry: NeuralVoiceIndex.Entry) {
+        guard waited > 0.15, lastHeardLength >= 3 else { return }
+        let now = Date()
+        lateTimes = lateTimes.filter { now.timeIntervalSince($0) < 600 } + [now]
+        Log.event("neural", "a sentence made ahead was not ready in time: waited \(Int(waited * 1000)) ms")
+        guard lateTimes.count >= 2 else { return }
+        lateTimes = []
+        NeuralSynth.shared.needsMoreThreads(forKey: entry.info.key)
     }
 
     /// What the simulator run reads back to see whether sentences really follow without a wait.
@@ -326,10 +373,13 @@ final class NeuralTTSEngine {
             made.removeAll()
         }
         let timed = reportsWords
+        let how = pace(for: entry)
         made[key] = Task {
             let audio = try await NeuralSynth.shared.generate(
-                text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid, ahead: true)
-            return Made(audio: audio, timeline: timed ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil)
+                text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid, ahead: true, pace: how.pace)
+            return Made(
+                audio: audio, timeline: timed ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil,
+                achieved: how.achieved)
         }
     }
 
@@ -384,6 +434,12 @@ final class CompositeTTSEngine {
 
     /// Have the voice that will be asked for loaded before the first sentence is: a chosen
     /// neural voice, or the one Automatic will route the book's language to.
+    /// Whether a page is being looked at — the device voice reports only each sentence's first word when not.
+    @MainActor
+    func setWatched(_ watched: Bool) {
+        system.watched = watched
+    }
+
     func warmVoice(_ identifier: String?, bookLanguage: String?) {
         if let id = identifier, NeuralVoice.key(fromID: id) != nil {
             neural.warm(id)

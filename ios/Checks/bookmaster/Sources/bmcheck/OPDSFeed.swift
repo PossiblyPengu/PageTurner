@@ -172,7 +172,7 @@ enum OPDS {
                 if inEntry, !value.isEmpty { entry?.id = value }
             case "name":
                 if var current = entry, path.dropLast().last == "author", !value.isEmpty {
-                    current.author = current.author.isEmpty ? value : current.author + " & " + value
+                    current.author = current.author.isEmpty ? value : AuthorNames.cleaned(current.author + " & " + value)
                     entry = current
                 }
             case "entry":
@@ -385,7 +385,7 @@ enum OPDS {
         var entry = OPDSEntry(id: pub.metadata?.identifier ?? UUID().uuidString)
         let meta = pub.metadata
         entry.title = meta?.title?.text ?? ""
-        entry.author = (meta?.author?.texts ?? []).joined(separator: " & ")
+        entry.author = AuthorNames.joined(meta?.author?.texts ?? [])
         entry.summary = meta?.description?.text ?? ""
         // the smallest image worth a thumbnail box, else whatever was offered
         let images = (pub.images ?? []).compactMap { image -> (URL, Int)? in

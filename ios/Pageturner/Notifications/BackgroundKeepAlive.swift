@@ -64,7 +64,8 @@ final class BackgroundKeepAlive {
         Log.event("keepalive", "started")
         looking = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(BMKeepAlive.pollInterval(lowPower: LowPower.on)))
+                let bookPlaying = await MainActor.run { !AudioFocus.shared.isIdle }
+                try? await Task.sleep(for: .seconds(BMKeepAlive.pollInterval(lowPower: LowPower.on, bookPlaying: bookPlaying)))
                 guard !Task.isCancelled else { return }
                 await Notifier.shared.refresh(notify: true)
                 self?.restartIfStopped()

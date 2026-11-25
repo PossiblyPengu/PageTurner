@@ -62,6 +62,8 @@ final class NeuralPlayer {
     var speed: Double = 1 {
         didSet {
             stretch.rate = Float(min(max(speed, 0.25), 4))
+            // at the voice's own pace there is nothing to stretch: the unit is passed by, not run on every sample
+            stretch.bypass = Self.atOwnPace(speed)
             wake()   // the time left changes with the speed
         }
     }
@@ -70,6 +72,7 @@ final class NeuralPlayer {
         engine.attach(node)
         engine.attach(stretch)
         stretch.pitch = 0
+        stretch.bypass = Self.atOwnPace(speed)
         let center = NotificationCenter.default
         // the output changed under us (headphones out, a Bluetooth route): the engine has stopped
         center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
@@ -246,6 +249,9 @@ final class NeuralPlayer {
         }
     }
 
+    /// Speeds this close to 1 are the voice's own pace (a slider's 1.0 is not always exactly 1).
+    private static func atOwnPace(_ speed: Double) -> Bool { abs(speed - 1) < 0.001 }
+
     // MARK: Where the voice is
 
     private func startTicker() {
@@ -258,8 +264,12 @@ final class NeuralPlayer {
                 // the word timing is fitted to ~105ms, so 15Hz is already finer
                 // than the marks can show; a lead-only wait doesn't need that, and
                 // Low Power Mode trades it all for wakeups
-                var interval: UInt64 = LowPower.on ? 200_000_000
-                    : self.follower != nil ? 66_000_000 : 120_000_000
+                // a follower with no word to come (nobody watching, the sentence's last word) is not looked in on
+                // 15 times a second either
+                // with no word to come, the ticks only keep the clock for the hand-off to the next sentence, which each
+                // quarter-second piece's end also does: four a second is plenty (it was eight, for hours behind a lock)
+                var interval: UInt64 = LowPower.on ? 250_000_000
+                    : self.follower != nil && self.nextReport != nil ? 66_000_000 : 250_000_000
                 // sooner, when whoever follows the voice has said when its next word starts
                 if !LowPower.on, self.follower != nil, let next = self.nextReport {
                     let wait = max(next, 0) / max(self.speed, 0.25)
@@ -281,7 +291,7 @@ final class NeuralPlayer {
         }
         if let last = lastTick {
             clock.advance(
-                seconds: min(max(now.timeIntervalSince(last), 0), 0.2), speed: max(speed, 0.25),
+                seconds: min(max(now.timeIntervalSince(last), 0), 0.3), speed: max(speed, 0.25),
                 sampleRate: wiredRate, pieceFrames: Double(current.buffer.frameLength))
         }
         wake()

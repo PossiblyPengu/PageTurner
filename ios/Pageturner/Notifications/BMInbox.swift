@@ -116,6 +116,12 @@ enum BMKeepAlive {
     /// How often it looks: every half minute, and every minute and a half in Low Power Mode.
     static func pollInterval(lowPower: Bool) -> TimeInterval { lowPower ? 90 : 30 }
 
+    /// How often while a book of ours is playing behind the lock (read aloud, or an audiobook): the app is kept running
+    /// by that sound anyway, and a look every half minute kept the radio awake for hours of listening.
+    static func pollInterval(lowPower: Bool, bookPlaying: Bool) -> TimeInterval {
+        bookPlaying ? (lowPower ? 300 : 120) : pollInterval(lowPower: lowPower)
+    }
+
     /// How often the app itself looks while it is in front — a banner arriving two minutes late
     /// beats a request every half minute; the background keep-alive stays snappier.
     static func foregroundPollInterval(lowPower: Bool) -> TimeInterval { lowPower ? 180 : 120 }
