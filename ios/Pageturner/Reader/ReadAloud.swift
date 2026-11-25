@@ -561,6 +561,9 @@ final class ReadAloud: NSObject, ObservableObject {
         // stopped before this one speaks, so two never overlap
         if let other = Self.current, other !== self {
             Log.event("readaloud", "another voice was still going (\(Self.summary)) — stopped before this one began")
+            #if DEBUG
+            NSLog("PTSecondVoice %@", Self.summary)
+            #endif
             other.stop()
         }
         Self.current = self

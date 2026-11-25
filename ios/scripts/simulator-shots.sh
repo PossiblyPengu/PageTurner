@@ -183,6 +183,40 @@ xcrun simctl spawn "$UDID" log show --style compact --last 2m \
   --predicate 'process == "Pageturner" AND eventMessage CONTAINS "PTNarrated"' > "$OUT/readaloud-away.txt" 2>/dev/null || true
 grep -q "PTNarrated" "$OUT/readaloud-away.txt" || { echo "::error::read-aloud did not go on after the reader was left"; FAILED=1; }
 
+# read-aloud sent to the background and brought back (the double play: a voice going on behind the lock that the
+# reader, in front again, didn't know was its own). Back in front the reader must know what the app's voice is
+# doing, and nothing may start a second voice. The voice going on while away is reported, not failed on: a
+# simulator with no sound hardware may suspend an app whose voice makes no sound.
+shot 69-readaloud-return-before 18 -PTDebugScreen reader -PTDebugReaderSheet readaloud -PTDebugHighlights sentence
+apppid() { xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep "UIKitApplication:$BUNDLE" | awk '{print $1}' | head -1; }
+BEFORE=$(apppid)
+STARTED=$(date +%s)
+xcrun simctl launch "$UDID" com.apple.Preferences >/dev/null 2>&1 || true
+sleep 15
+xcrun simctl launch "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
+sleep 8
+AFTER=$(apppid)
+xcrun simctl io "$UDID" screenshot "$OUT/69-readaloud-return.png" >/dev/null 2>&1 || true
+xcrun simctl spawn "$UDID" log show --style compact --last "$(( $(date +%s) - STARTED + 5 ))s" \
+  --predicate 'process == "Pageturner" AND (eventMessage CONTAINS "PTNarrated" OR eventMessage CONTAINS "PTInFront" OR eventMessage CONTAINS "PTSecondVoice")' \
+  > "$OUT/readaloud-return.txt" 2>/dev/null || true
+if [[ -z "$AFTER" ]]; then
+  echo "::error::the app is not running after coming back to read-aloud"; FAILED=1
+elif [[ "$AFTER" != "$BEFORE" ]]; then
+  echo "::warning::coming back relaunched the app (pid $BEFORE → $AFTER): the return could not be checked"
+else
+  grep -q "PTNarrated" "$OUT/readaloud-return.txt" && echo "ok     69 the voice went on in the background" \
+    || echo "::warning::read-aloud said nothing in the background (the simulator may have suspended it)"
+  if ! grep -q "PTInFront" "$OUT/readaloud-return.txt"; then
+    echo "::error::back in front, the reader never said it was in front"; FAILED=1
+  elif grep "PTInFront" "$OUT/readaloud-return.txt" | grep "app=speaking" | grep -vq "mine=speaking"; then
+    echo "::error::back in front, the app's voice was speaking and the reader didn't know it"; FAILED=1
+  else
+    echo "ok     69 back in front, the reader knows its voice: $(grep -o 'PTInFront.*' "$OUT/readaloud-return.txt" | tail -1)"
+  fi
+  if grep -q "PTSecondVoice" "$OUT/readaloud-return.txt"; then echo "::error::coming back started a second voice"; FAILED=1; fi
+fi
+
 fi
 
 # crash reports from the host (the simulator writes them there)
