@@ -95,6 +95,10 @@ func runQueueChecks() async {
     let other = BMBookRef(title: "It", author: "Alexa Chung", userBookId: "chung")
     await progress(0.6, ref: other, key: "chung")
     check("same-title pinned books both remain queued", entries().count == 2)
+    // while a voice reads the place is pushed every five minutes, not every half minute
+    check("a moved place waits out the voice's five minutes", !bm.wantsProgress(bookKey: "chung", percent: 0.61, every: 300))
+    check("the same move is due once the wait is over", bm.wantsProgress(bookKey: "chung", percent: 0.61, every: 0))
+    check("a place that has not moved is never due", !bm.wantsProgress(bookKey: "chung", percent: 0.6, every: 0))
     await bm.flush()
     BridgeProtocol.state.setStatus(200)
     await bm.flush()

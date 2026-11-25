@@ -184,19 +184,19 @@ final class BookMaster {
 
     /// Same dedup `syncProgress` applies, run synchronously — a page turn can
     /// ask before paying for the Task that would only bail out anyway.
-    func wantsProgress(bookKey: String, percent: Double, force: Bool = false) -> Bool {
+    func wantsProgress(bookKey: String, percent: Double, force: Bool = false, every interval: TimeInterval = 30) -> Bool {
         guard user != nil, syncEnabled else { return false }
         if force { return true }
         let pct = (percent * 1000).rounded() / 10
         guard let last = lastPush[bookKey] else { return true }
-        return last.percent != pct && Date().timeIntervalSince(last.at) >= 30
+        return last.percent != pct && Date().timeIntervalSince(last.at) >= interval
     }
 
-    /// Reading position, throttled to once per 30s per book unless forced
-    /// (book closed, playback paused). Fire-and-forget: never blocks reading.
+    /// Reading position, throttled to once per `interval` (30 s; five minutes while a voice reads) per book unless
+    /// forced (book closed, playback paused). Fire-and-forget: never blocks reading.
     func syncProgress(
         bookKey: String, ref book: BMBookRef, percent: Double,
-        isAudio: Bool, rating: Int? = nil, force: Bool = false,
+        isAudio: Bool, rating: Int? = nil, force: Bool = false, every interval: TimeInterval = 30,
         pinned: @escaping (String) -> Void
     ) async {
         guard let user, syncEnabled, percent.isFinite else { return }
@@ -204,7 +204,7 @@ final class BookMaster {
         if !force {
             if let last = lastPush[bookKey] {
                 if last.percent == pct { return }
-                if Date().timeIntervalSince(last.at) < 30 { return }
+                if Date().timeIntervalSince(last.at) < interval { return }
             }
         }
         lastPush[bookKey] = (Date(), pct)

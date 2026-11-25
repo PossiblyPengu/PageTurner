@@ -196,7 +196,9 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   read that first when a long listen drains the battery: 50% in two hours with the screen off (an iPhone 15 Pro Max) is ~4 W, far above what
   audio playback costs. "Stay connected" (`BackgroundKeepAlive`) looks every two minutes rather than every half minute while a book of ours
   is playing (`BMKeepAlive.pollInterval(lowPower:bookPlaying:)`): the sound keeps the app running anyway, and a look every 30 s kept the radio
-  awake for the whole listen.
+  awake for the whole listen. The reading place goes to BookMaster at most every five minutes while a voice reads (`ReaderModel.voiceProgressEvery`,
+  `BookMaster.wantsProgress/syncProgress(every:)`; page turns keep 30 s): it moves every sentence, and a push every half minute did the same to the
+  radio. Where the listening stops is still sent at once (`endSession` forces it).
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the

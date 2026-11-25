@@ -1326,7 +1326,7 @@ final class ReaderModel: ObservableObject {
         scheduleSaveForVoice()
         beginSession()
         reading.moved(to: locator.locations.totalProgression)
-        pushProgress()
+        pushProgress(every: Self.voiceProgressEvery)
         #if DEBUG
         NSLog("PTNarrated %@ %.4f", entry?.link.title ?? "?", locator.locations.totalProgression ?? -1)
         #endif
@@ -1586,20 +1586,26 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
         pushProgress()
     }
 
-    /// Tell BookMaster how far the book has got, when that has changed enough to be worth a call.
-    fileprivate func pushProgress() {
+    /// Tell BookMaster how far the book has got, when that has changed enough to be worth a call — at most every
+    /// `interval` seconds.
+    fileprivate func pushProgress(every interval: TimeInterval = 30) {
         let ref = book.bookMasterRef
         let progression = reading.reportable(book.progression ?? 0)
         // the push's own dedup still decides inside the task; this just skips
         // paying for a task the dedup would only throw away
-        if BookMaster.shared.wantsProgress(bookKey: book.id.uuidString, percent: progression) {
+        if BookMaster.shared.wantsProgress(bookKey: book.id.uuidString, percent: progression, every: interval) {
             Task {
                 await BookMaster.shared.syncProgress(
-                    bookKey: book.id.uuidString, ref: ref, percent: progression, isAudio: false,
+                    bookKey: book.id.uuidString, ref: ref, percent: progression, isAudio: false, every: interval,
                     pinned: { [weak self] id in self?.pin(id) })
             }
         }
     }
+
+    /// While a voice reads, the place moves every few seconds, and a push every half minute woke the radio for the
+    /// whole of a listen behind the lock. Every five minutes is plenty for BookMaster to follow along; where the
+    /// listening stops is sent at once (`endSession` forces it).
+    private static let voiceProgressEvery: TimeInterval = 300
 
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) {
         Log.error("reader", "navigator error: \(error)")
