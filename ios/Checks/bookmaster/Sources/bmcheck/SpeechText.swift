@@ -143,11 +143,13 @@ enum SpeechText {
             var follows = [Int?](repeating: nil, count: spokenWords.count)
             let prepared = SpeechText.prepared(original)
             if prepared.text == spoken {
+                // a copy: a closure may not reach a stored property before every one is set
+                let words = spokenWords
                 for place in prepared.respelled {
                     // the same text, but perhaps not the same string: its place by offset, in this one
                     let range = String.Index(utf16Offset: place.said.lowerBound.utf16Offset(in: prepared.text), in: spoken)
                         ..< String.Index(utf16Offset: place.said.upperBound.utf16Offset(in: prepared.text), in: spoken)
-                    let inside = spokenWords.indices.filter { spokenWords[$0].overlaps(range) }
+                    let inside = words.indices.filter { words[$0].overlaps(range) }
                     guard let first = inside.first,
                           let word = SpeechText.wordRanges(in: place.written).first
                     else { continue }
