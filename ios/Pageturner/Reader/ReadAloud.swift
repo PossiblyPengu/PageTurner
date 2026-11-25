@@ -740,6 +740,8 @@ final class ReadAloud: NSObject, ObservableObject {
                 self.markState = "none"
                 self.pageSentence = nil
                 self.paint(self.spoken, as: self.highlights, on: decorable, marks: !self.inPage)
+                // the page's own mark may have gone while nobody was looking (it lets go of one left alone)
+                self.syncMarks()
             }
             if self.scrolls {
                 if let sentence = self.spoken.sentence {
