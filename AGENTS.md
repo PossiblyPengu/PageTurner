@@ -192,8 +192,15 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   thread at the block's QoS, which `hurry()` lifts. A made-ahead sentence still being made at its turn after one of 3 s or more
   (`NeuralTTSEngine.noteWait`, > 150 ms) twice in ten minutes gives that voice two threads for good (`needsMoreThreads`, reloaded at once; never in
   Low Power Mode). The log says, per voice, how long each load took and on how many threads, and every 100 sentences the seconds of speech made
-  against the seconds of processor time it took ("0.30 of real time" = busy a third of the time it speaks) and how many were made ahead —
-  read that first when a long listen drains the battery: 50% in two hours with the screen off (an iPhone 15 Pro Max) is ~4 W, far above what
+  against the seconds of processor time it took ("0.30 of real time" = busy a third of the time it speaks) and how many were made ahead.
+  A voice listened to at 1.25× or more makes its sentences at that pace (`NeuralPace`, Linux-checked: quarter steps up to 1.75×), not at its own
+  pace for the player to squeeze: VITS's cost goes with the sound it makes, so at 1.5× it was making half as much sound again as was heard. VITS
+  does not reach the pace it is asked for exactly (each sound's length rounds up to a whole frame, the short gaps stay), so what a pace really
+  gives is measured once per voice and pace on the language's sample (`NeuralSynth.calibrate`, stored in `neural-pace-<key>-<pace×100>`; 1 = not
+  worth it) and the player stretches by the rest (`NeuralPace.stretch`), keeping the speed exact; until it is measured, sentences are made at the
+  voice's own pace as before. Each made sentence carries how much faster it was made (`Made.achieved`), so a speed change mid-listen stays exact.
+  The log line `voice … asked for 1.50× speaks 1.38×` is the measurement.
+  Read the cost line first when a long listen drains the battery: 50% in two hours with the screen off (an iPhone 15 Pro Max) is ~4 W, far above what
   audio playback costs. "Stay connected" (`BackgroundKeepAlive`) looks every two minutes rather than every half minute while a book of ours
   is playing (`BMKeepAlive.pollInterval(lowPower:bookPlaying:)`): the sound keeps the app running anyway, and a look every 30 s kept the radio
   awake for the whole listen. The reading place goes to BookMaster at most every five minutes while a voice reads (`ReaderModel.voiceProgressEvery`,

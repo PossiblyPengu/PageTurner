@@ -55,7 +55,8 @@ final class NeuralSynth: @unchecked Sendable {
     /// natural pace — `sid` picks a speaker of a multi-speaker voice.
     /// `ahead`: nobody is waiting for it yet (see `hurry`).
     func generate(
-        text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int = 0, ahead: Bool = false
+        text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int = 0, ahead: Bool = false,
+        pace: Double = 1
     ) async throws -> Audio {
         let cancelled = CancelFlag()
         return try await withTaskCancellationHandler {
@@ -67,7 +68,8 @@ final class NeuralSynth: @unchecked Sendable {
                         return
                     }
                     do {
-                        continuation.resume(returning: try self.run(text: text, directory: directory, info: info, sid: sid, ahead: ahead))
+                        continuation.resume(returning: try self.run(
+                            text: text, directory: directory, info: info, sid: sid, ahead: ahead, pace: pace))
                     } catch {
                         continuation.resume(throwing: error)
                     }
@@ -127,7 +129,9 @@ final class NeuralSynth: @unchecked Sendable {
 
     // MARK: On the queue
 
-    private func run(text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int, ahead: Bool) throws -> Audio {
+    private func run(
+        text: String, directory: URL, info: NeuralVoiceFormat.Installed, sid: Int, ahead: Bool, pace: Double = 1
+    ) throws -> Audio {
         unloadWork?.cancel()
         if loaded?.key != info.key {
             loaded = nil   // free the old one before the new one is made
@@ -137,12 +141,12 @@ final class NeuralSynth: @unchecked Sendable {
         }
         guard let tts = loaded?.tts else { throw Failure.loadFailed }
 
-        // sherpa turns a speed into length_scale = 1 / speed and then forgets the voice's own
-        // length_scale, so ask for the pace the voice was made for. Faster or slower is the
-        // player's job: stretching the audio is more exact than VITS's rounded durations.
+        // the voice's own pace, or faster (`NeuralPace`: the sound made is what it costs, and the player stretches by
+        // whatever the voice did not reach)
         let speaker = max(0, min(sid, info.speakers - 1))
         let began = DispatchTime.now().uptimeNanoseconds
-        let generated = tts.generate(text: text, sid: speaker, speed: Float(1 / max(info.lengthScale, 0.1)))
+        let speed = NeuralPace.sherpaSpeed(pace: pace, lengthScale: Double(info.lengthScale))
+        let generated = tts.generate(text: text, sid: speaker, speed: Float(speed))
         let samples = generated.samples
         if generated.sampleRate > 0 {
             let compute = Double(DispatchTime.now().uptimeNanoseconds - began) / 1_000_000_000
@@ -242,6 +246,47 @@ final class NeuralSynth: @unchecked Sendable {
         costAhead = 0
         costCompute = 0
         costAudio = 0
+    }
+
+    // MARK: Faster paces
+
+    private static func paceKey(_ key: String, _ pace: Double) -> String {
+        "neural-pace-" + key + "-" + String(Int((pace * 100).rounded()))
+    }
+
+    /// How much faster a sentence made at `pace` really is, measured for this voice (`calibrate`); nil until it has
+    /// been, or when the pace made no worthwhile difference (stored as 1).
+    func achieved(pace: Double, key: String) -> Double? {
+        let stored = UserDefaults.standard.double(forKey: Self.paceKey(key, pace))
+        return stored > 1 ? stored : nil
+    }
+
+    /// Paces being measured now, so one is not measured twice at once (on the queue).
+    private var calibrating: Set<String> = []
+
+    /// Measure once what `pace` really gives this voice: a sample in its language made at its own pace and at `pace`,
+    /// at low priority, behind whatever is being made. Until it is done, sentences are made at the voice's own pace.
+    func calibrate(pace: Double, directory: URL, info: NeuralVoiceFormat.Installed, language: String) {
+        let key = Self.paceKey(info.key, pace)
+        queue.async(qos: .utility) {
+            guard UserDefaults.standard.object(forKey: key) == nil, !self.calibrating.contains(key) else { return }
+            self.calibrating.insert(key)
+            defer { self.calibrating.remove(key) }
+            // twice over: a longer sample evens out the rounding of each sound's length
+            let sample = SpeechSamples.text(for: language)
+            let text = sample + " " + sample
+            guard let natural = try? self.run(text: text, directory: directory, info: info, sid: 0, ahead: true),
+                  let faster = try? self.run(text: text, directory: directory, info: info, sid: 0, ahead: true, pace: pace)
+            else { return }
+            let measured = NeuralPace.achieved(
+                natural: Double(natural.samples.count) / natural.sampleRate,
+                made: Double(faster.samples.count) / faster.sampleRate, asked: pace)
+            // 1: measured, and not worth it — not measured again
+            UserDefaults.standard.set(measured ?? 1, forKey: key)
+            let got = measured.map { String(format: "%.2f×", $0) } ?? "no faster"
+            let asked = String(format: "%.2f×", pace)
+            Log.event("neural", "voice \(info.key) asked for \(asked) speaks \(got)")
+        }
     }
 
     private func scheduleUnload() {

@@ -43,8 +43,12 @@ final class NeuralTTSEngine {
 
     /// How fast to speak (1 is the voice's own pace); changes apply to what is playing too.
     @MainActor var speed: Double = 1 {
-        didSet { NeuralPlayer.shared.speed = speed }
+        didSet { NeuralPlayer.shared.speed = NeuralPace.stretch(speed: speed, achieved: playingAchieved) }
     }
+
+    /// How much faster than the voice's own pace the sentence playing was made (`NeuralPace`): the player stretches by
+    /// the rest of `speed`.
+    @MainActor private var playingAchieved: Double = 1
 
     /// The sentences after the one given, when the book can say what they are.
     @MainActor var upcoming: ((String) async -> [SentenceLookahead.Sentence])?
@@ -76,6 +80,20 @@ final class NeuralTTSEngine {
     private struct Made: Sendable {
         var audio: NeuralSynth.Audio
         var timeline: SpokenWords.Timeline?
+        /// How much faster than the voice's own pace it was made.
+        var achieved: Double = 1
+    }
+
+    /// The pace to make the next sentence at for the speed it will be heard at, and what that pace really gives this
+    /// voice. A pace not yet measured for the voice is measured now, in the background (`NeuralSynth.calibrate`), and
+    /// meanwhile the sentence is made at the voice's own pace, as before.
+    @MainActor
+    private func pace(for entry: NeuralVoiceIndex.Entry) -> (pace: Double, achieved: Double) {
+        let pace = NeuralPace.made(for: speed)
+        guard pace > 1 else { return (1, 1) }
+        if let achieved = NeuralSynth.shared.achieved(pace: pace, key: entry.info.key) { return (pace, achieved) }
+        NeuralSynth.shared.calibrate(pace: pace, directory: entry.directory, info: entry.info, language: entry.voice.language)
+        return (1, 1)
     }
 
     /// With this much of a sentence still to be heard — or six tenths of it, if that is more: the next one is
@@ -135,7 +153,9 @@ final class NeuralTTSEngine {
             }
             let audio = ready.audio
             let player = NeuralPlayer.shared
-            player.speed = speed
+            // made at a faster pace or not, it is heard at `speed`: the player stretches by what the voice did not do
+            playingAchieved = ready.achieved
+            player.speed = NeuralPace.stretch(speed: speed, achieved: ready.achieved)
             // whether the next thing heard is in this voice decides if this sentence's
             // tail may be handed back early to make room for it
             let hasNext = await nextAsked
@@ -236,8 +256,12 @@ final class NeuralTTSEngine {
                 return ready
             }
         }
-        let audio = try await NeuralSynth.shared.generate(text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid)
-        let ready = Made(audio: audio, timeline: reportsWords ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil)
+        let how = pace(for: entry)
+        let audio = try await NeuralSynth.shared.generate(
+            text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid, pace: how.pace)
+        let ready = Made(
+            audio: audio, timeline: reportsWords ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil,
+            achieved: how.achieved)
         recent = (key, ready)
         Self.log("sentence made on the spot in \(Self.ms(since: started)) ms")
         return ready
@@ -249,7 +273,7 @@ final class NeuralTTSEngine {
     private func hurryLater(after seconds: TimeInterval) {
         playing += 1
         let mine = playing
-        let length = seconds / max(speed, 0.25)
+        let length = seconds / max(NeuralPace.stretch(speed: speed, achieved: playingAchieved), 0.25)
         lastHeardLength = length
         let wait = length - max(Self.hurryAt, length * 0.6)
         guard wait > 0 else {
@@ -349,10 +373,13 @@ final class NeuralTTSEngine {
             made.removeAll()
         }
         let timed = reportsWords
+        let how = pace(for: entry)
         made[key] = Task {
             let audio = try await NeuralSynth.shared.generate(
-                text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid, ahead: true)
-            return Made(audio: audio, timeline: timed ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil)
+                text: spoken, directory: entry.directory, info: entry.info, sid: entry.sid, ahead: true, pace: how.pace)
+            return Made(
+                audio: audio, timeline: timed ? await NeuralTTSEngine.timeline(text, spoken: spoken, audio: audio) : nil,
+                achieved: how.achieved)
         }
     }
 
