@@ -48,7 +48,7 @@ func runFB2Checks() {
     }
     let raw = String(decoding: c.epub, as: UTF8.self)
     check("FB2: the book's own title", c.title == "The Test & Book", c.title)
-    check("FB2: the authors, not the file's maker", c.author == "Ivan I. Petrov, Anna Lee", c.author)
+    check("FB2: the authors, not the file's maker", c.author == "Ivan I. Petrov & Anna Lee", c.author)
     check("FB2: the language it names", c.language == "ru", c.language)
     check("FB2: a chapter per section, and the notes", c.chapterCount >= 3, "\(c.chapterCount)")
     check("FB2: a two-line title reads as one heading", raw.contains("Chapter 1. The Start"))

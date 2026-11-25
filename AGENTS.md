@@ -388,6 +388,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (`navigator(_:setupUserScripts:)`), reversible, checked in headless Chromium. OpenDyslexic is Readium's own bundled font.
 - Online catalogues (`Library/OPDSFeed.swift` parses, Linux-checked; `OPDSBrowser.swift` browses and downloads through the
   normal importer; passwords in the Keychain). Plain http is allowed only on the local network (Info.plist).
+- Author lines (`Library/AuthorNames.swift`, Linux-checked): every place that builds one from several names (EPUB details,
+  FB2, OPDS entries) goes through `AuthorNames.joined` — each person once, joined by " & " (a comma reads as "Last,
+  First"). A book's details often name one person twice ("John doe" and "John Doe", "Doe, John" and "John Doe"), and the
+  line read "John doe & John Doe". The catalogue cleans lines saved before this when it loads (`AuthorNames.cleaned`).
 - `OpenAt` (`Library/HighlightsHub.swift`) carries a one-shot "open at this place" from the hub to the reader.
 - Scheduled backup (`Library/AutoBackup.swift`, planning in `AutoBackupPlan.swift`, Linux-checked): the same zip as the manual
   export, named by day into a Files folder kept as a bookmark, oldest copies pruned. Made on opening the app when due, and by a
