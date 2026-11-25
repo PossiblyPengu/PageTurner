@@ -1336,8 +1336,11 @@ extension ReadAloud: SpeechSynthesizerDelegate {
             // stays where it was if this is the sentence that was being said
             let stayed = spoken.sentence == utterance.locator ? spoken.word : nil
             spoken = Spoken(sentence: utterance.locator, word: stayed ?? firstWord(of: utterance))
-            // the page's own mark is told to stay while the voice is paused (`putOnPage`)
-            syncMarks()
+            // the page's own mark is told to stay while the voice is paused. Only told: the page is not looked at, so
+            // one the reader has turned away from the word stays turned (a mark put after this is held by `putOnPage`)
+            if inPage, onScreen, let epub = navigator as? EPUBNavigatorViewController {
+                Task { @MainActor in _ = await bounded(3, { await epub.evaluateJavaScript(SpokenMarkScript.hold) }) }
+            }
         }
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
     }
