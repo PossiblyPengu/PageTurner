@@ -137,6 +137,7 @@ func runData() async {
     runNeuralPaceChecks()
     runAuthorNamesChecks()
     runPronunciationChecks()
+    runHandsFreeChecks()
     runShelfChecks()
     runChatChecks()
     runWebAppsChecks()

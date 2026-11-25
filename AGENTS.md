@@ -220,6 +220,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (asked at each press); with nothing of ours holding the session it takes an `.ambient` mixing one, so no one's
   music stops, and a paused voice's or audiobook's session category is left alone. `ReaderView.wantsVolumeTurns`
   turns it off with a sheet up, the voice speaking or the app inactive.
+- Hands-free turning (More menu ▸ Turn Pages for Me; `ReaderModel.startHandsFree`, pace in `HandsFreePace`,
+  Linux-checked): a page stays up for the share of the book a page is (the middle of the recent page steps within a
+  chapter) times this reader's minutes per book (`ReadingPace`), 5 s–5 min, 45 s until there is enough to go on. The
+  tortoise/hare steps are kept per book (`handsfree-seconds-<id>`) and then win over the measured pace. A page the
+  reader turns restarts the page's time (a place reported within 1.5 s of the turner's own turn is its own); a sheet
+  or the app away holds it (`ReaderView.holdsHandsFree`); the voice starting stops it. It keeps the screen on.
 - The reader (`Reader/`): `ReaderModel` owns the Readium navigator; `JumpHistory` drives the Back chip;
   page turns are `PageTurnStyle`: Readium's slide, a hinge `flip`, a `fade`, and `curl` — a finger-tracked
   peel. `PageCurl` is the pure geometry (fold line, cylinder roll, warped mesh — Linux-checked);

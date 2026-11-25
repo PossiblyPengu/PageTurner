@@ -458,6 +458,108 @@ final class ReaderModel: ObservableObject {
         return forward ? await navigator.goForward(options: options) : await navigator.goBackward(options: options)
     }
 
+    // MARK: Hands-free
+
+    /// Pages turned for the reader at their own pace (`HandsFreePace`) — nil while off.
+    struct HandsFree: Equatable {
+        var secondsPerPage: TimeInterval
+        /// Held: a sheet over the page, or the app away. The page waits, and its full time starts again after.
+        var held = false
+        /// When the page turns next; nil while held.
+        var turnsAt: Date?
+    }
+
+    @Published private(set) var handsFree: HandsFree?
+    private var handsFreeTask: Task<Void, Never>?
+    /// The reader set the pace for this book: theirs, not worked out again from the pages.
+    private var handsFreeTuned = false
+    /// The latest page steps (`HandsFreePace.noting`), for how much of the book a page is.
+    private var pageSteps: [Double] = []
+    /// When the turner last turned the page itself — a place reported just after is that turn's, not the reader's.
+    private var lastHandsFreeTurn = Date.distantPast
+
+    private var handsFreeKey: String { "handsfree-seconds-\(book.id.uuidString)" }
+
+    /// The pace the pages turned and the reader's sittings give; nil until there is enough of both.
+    private var measuredPageSeconds: TimeInterval? {
+        HandsFreePace.seconds(
+            pageShare: HandsFreePace.pageShare(steps: pageSteps),
+            minutesPerBook: ReadingPace.minutesPerBook(ReadingLog.shared.sessions, bookID: book.id))
+    }
+
+    /// Turn the pages for the reader: at the pace they last set for this book, else the one their reading gives,
+    /// else a page of prose at an ordinary pace. The voice, which turns its own pages, stops.
+    func startHandsFree() {
+        guard case .ready = phase else { return }
+        if readAloud != nil { stopReadAloud() }
+        let saved = UserDefaults.standard.double(forKey: handsFreeKey)
+        handsFreeTuned = saved > 0
+        let seconds = saved > 0 ? HandsFreePace.clamped(saved) : (measuredPageSeconds ?? HandsFreePace.fallback)
+        handsFree = HandsFree(secondsPerPage: seconds)
+        scheduleHandsFree()
+        let whose = handsFreeTuned ? " (set by the reader)" : ""
+        Log.event("reader", "hands-free: a page every \(Int(seconds)) s\(whose)")
+    }
+
+    func stopHandsFree() {
+        handsFreeTask?.cancel()
+        handsFreeTask = nil
+        if handsFree != nil { handsFree = nil }
+    }
+
+    /// A step quicker or slower — kept for this book, and the page's time starts again at it.
+    func handsFreeQuicker(_ quicker: Bool) {
+        guard var state = handsFree else { return }
+        state.secondsPerPage = HandsFreePace.adjusted(state.secondsPerPage, quicker: quicker)
+        handsFree = state
+        handsFreeTuned = true
+        UserDefaults.standard.set(state.secondsPerPage, forKey: handsFreeKey)
+        scheduleHandsFree()
+    }
+
+    /// A sheet over the page, or the app away, holds the turning (`ReaderView.holdsHandsFree`).
+    func holdHandsFree(_ held: Bool) {
+        guard var state = handsFree, state.held != held else { return }
+        state.held = held
+        handsFree = state
+        scheduleHandsFree()
+    }
+
+    private func scheduleHandsFree() {
+        handsFreeTask?.cancel()
+        handsFreeTask = nil
+        guard var state = handsFree else { return }
+        guard !state.held else {
+            if state.turnsAt != nil {
+                state.turnsAt = nil
+                handsFree = state
+            }
+            return
+        }
+        let seconds = state.secondsPerPage
+        state.turnsAt = Date().addingTimeInterval(seconds)
+        handsFree = state
+        handsFreeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.handsFree != nil else { return }
+            self.lastHandsFreeTurn = Date()
+            let turned = await self.turnPage(forward: true)
+            self.lastHandsFreeTurn = Date()
+            guard !Task.isCancelled, self.handsFree != nil else { return }
+            guard turned else {
+                self.stopHandsFree()
+                self.notice = "That’s the end of the book"
+                return
+            }
+            // the pages say how long one takes, until the reader says otherwise
+            if !self.handsFreeTuned, let measured = self.measuredPageSeconds, var now = self.handsFree {
+                now.secondsPerPage = measured
+                self.handsFree = now
+            }
+            self.scheduleHandsFree()
+        }
+    }
+
     /// The volume buttons as page turns, while `ReaderView` says the page is in front with nothing over it.
     private lazy var volumePager: VolumeButtonPager = {
         let pager = VolumeButtonPager()
@@ -1255,6 +1357,8 @@ final class ReaderModel: ObservableObject {
     }
 
     private func startReadAloud(from start: Locator? = nil) {
+        // the voice turns the pages now
+        stopHandsFree()
         // one voice: a book still being read aloud with its reader left gives way
         ReadAloudHost.shared.show(self)
         guard let publication, let navigator,
@@ -1628,6 +1732,13 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
         previousLocator = currentLocator
         currentLocator = locator
         lastActivityAt = Date()
+        // how much of the book a page is, for the hands-free turner: a step within one chapter
+        if let before = previousLocator, before.href == locator.href,
+           let from = before.locations.totalProgression, let to = locator.locations.totalProgression {
+            pageSteps = HandsFreePace.noting(to - from, in: pageSteps)
+        }
+        // a page the reader turned (or a page laid out again) while the turner runs: its full time starts now
+        if handsFree != nil, Date().timeIntervalSince(lastHandsFreeTurn) > 1.5 { scheduleHandsFree() }
         // While the voice holds the place, a page still catching up — or a webview reloaded
         // to where it was when the screen locked — must not pull the saved place back with it.
         // One at or past the narrated spot may take it.

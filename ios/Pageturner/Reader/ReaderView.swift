@@ -87,6 +87,14 @@ struct ReaderView: View {
                             )
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         } else {
+                            if let handsFree = model.handsFree {
+                                HandsFreeBar(
+                                    state: handsFree,
+                                    onSlower: { model.handsFreeQuicker(false); model.revealChrome() },
+                                    onQuicker: { model.handsFreeQuicker(true); model.revealChrome() },
+                                    onStop: { model.stopHandsFree(); model.revealChrome() })
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
                             footer.transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
@@ -106,7 +114,8 @@ struct ReaderView: View {
 
     /// The screen stays on while a book is open and on screen (unless the reader switched that off).
     private func keepAwake(_ on: Bool) {
-        UIApplication.shared.isIdleTimerDisabled = on && model.settings.keepAwake
+        // pages turned hands-free need the screen as much as the reader does
+        UIApplication.shared.isIdleTimerDisabled = on && (model.settings.keepAwake || model.handsFree != nil)
     }
 
     /// Dim the page while it is read aloud and the hands are off — the voice doesn't need the
@@ -125,6 +134,13 @@ struct ReaderView: View {
         visible && scenePhase == .active && model.phase == .ready && model.settings.volumeTurns && !model.readAloudPlaying
             && !showContents && !showSettings && !showSearch && !showVoices
             && exportFile == nil && model.footnote == nil && model.editingHighlight == nil && model.pronouncing == nil
+    }
+
+    /// Pages turned hands-free wait while something is over the page or the app is away.
+    private var holdsHandsFree: Bool {
+        !(visible && scenePhase == .active)
+            || showContents || showSettings || showSearch || showVoices
+            || exportFile != nil || model.footnote != nil || model.editingHighlight != nil || model.pronouncing != nil
     }
 
     /// Turn the screen down once the hands have been off for a while (`NarrationDim.delay`), and back up at once
@@ -155,6 +171,8 @@ struct ReaderView: View {
             .onChange(of: model.settings.keepAwake) { _, _ in keepAwake(true) }
             .onChange(of: wantsDim) { _, dim in applyDim(dim) }
             .onChange(of: wantsVolumeTurns) { _, on in model.volumeButtons(on) }
+            .onChange(of: holdsHandsFree) { _, held in model.holdHandsFree(held) }
+            .onChange(of: model.handsFree != nil) { _, _ in keepAwake(visible) }
             // a theme that follows the clock: look again every few minutes
             .onReceive(Timer.publish(every: 300, on: .main, in: .common).autoconnect()) { _ in model.refreshNight() }
             .onAppear {
@@ -166,6 +184,7 @@ struct ReaderView: View {
             .onDisappear {
                 visible = false
                 model.volumeButtons(false)
+                model.stopHandsFree()
                 model.sleepCover(false)   // a cover put up as the app went inactive must not outlive the reader
                 keepAwake(false)
                 applyDim(false)
@@ -421,6 +440,7 @@ struct ReaderView: View {
                         label: model.isCurrentLocationBookmarked ? "Remove bookmark" : "Add bookmark"
                     ) { model.toggleBookmark(); model.revealChrome() }
                     toolButton("list.bullet", label: "Contents, bookmarks and highlights") { model.holdChrome(); showContents = true }
+                    moreMenu
                 }
                 .padding(.horizontal, 4)
                 .ptGlassCapsule()
@@ -674,6 +694,29 @@ struct ReaderView: View {
                 }
             }
         }
+    }
+
+    /// What the page can do besides: turn itself, and what comes later.
+    private var moreMenu: some View {
+        Menu {
+            if model.handsFree == nil {
+                Button { model.startHandsFree(); model.revealChrome() } label: {
+                    Label("Turn Pages for Me", systemImage: "hand.raised.slash")
+                }
+            } else {
+                Button { model.stopHandsFree(); model.revealChrome() } label: {
+                    Label("Stop Turning Pages", systemImage: "hand.raised")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: 42, height: 44)
+                .contentShape(Rectangle())
+        }
+        .foregroundStyle(.primary)
+        .accessibilityLabel("More")
+        .simultaneousGesture(TapGesture().onEnded { _ in model.holdChrome() })
     }
 
     private func toolButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
