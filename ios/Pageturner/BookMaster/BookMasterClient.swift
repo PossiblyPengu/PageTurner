@@ -192,7 +192,7 @@ final class BookMaster {
         return last.percent != pct && Date().timeIntervalSince(last.at) >= interval
     }
 
-    /// Reading position, throttled to once per `interval` (30 s; five minutes while a voice reads) per book unless
+    /// Reading position, throttled to once per `interval` (30 s; 15 minutes while a voice reads) per book unless
     /// forced (book closed, playback paused). Fire-and-forget: never blocks reading.
     func syncProgress(
         bookKey: String, ref book: BMBookRef, percent: Double,

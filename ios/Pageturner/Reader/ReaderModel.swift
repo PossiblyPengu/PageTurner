@@ -36,9 +36,15 @@ final class ReaderModel: ObservableObject {
             guard readAloud !== oldValue else { return }
             playingSink = readAloud?.$isPlaying
                 .sink { [weak self] playing in
-                    self?.readAloudPlaying = playing
+                    guard let self else { return }
+                    let was = self.readAloudPlaying
+                    self.readAloudPlaying = playing
+                    guard was, !playing else { return }
                     // paused or ended: the place the voice got to is written now, not at its next slow save
-                    if !playing, self?.savesForVoice == true { self?.scheduleSave() }
+                    if self.savesForVoice { self.scheduleSave() }
+                    // and BookMaster is told it now — a pause from the lock screen or the headphones ends no sitting,
+                    // so nothing else would send it until the book is next opened (the 15-minute send is only a net)
+                    self.pushProgress(every: 0)
                 }
             if readAloud == nil {
                 readAloudPlaying = false
@@ -1603,9 +1609,10 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
     }
 
     /// While a voice reads, the place moves every few seconds, and a push every half minute woke the radio for the
-    /// whole of a listen behind the lock. Every five minutes is plenty for BookMaster to follow along; where the
-    /// listening stops is sent at once (`endSession` forces it).
-    private static let voiceProgressEvery: TimeInterval = 300
+    /// whole of a listen behind the lock. The place goes to BookMaster when the voice pauses (`readAloud`'s playing
+    /// sink) and when the listening ends (`endSession` forces it); this is the net for what neither catches — iOS
+    /// ending the app in the middle of a long listen — and lets a reading partner see the place move meanwhile.
+    private static let voiceProgressEvery: TimeInterval = 900
 
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) {
         Log.error("reader", "navigator error: \(error)")
