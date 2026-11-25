@@ -369,14 +369,21 @@ final class ReadAloud: NSObject, ObservableObject {
             while let locator = pendingFollow, attempts < 15 {
                 pendingFollow = nil
                 attempts += 1
-                let slide = !quiet
+                // the slide is for a turn that is going well: a page that has been hard to turn is moved without it
+                // (a long smooth scroll to catch up left the web view half painted)
+                let slide = !quiet && goFailures == 0
                 // the wait is bounded: a webview suspended behind a locked screen can leave
                 // a go unanswered for good, which would hold the follow shut on isTurning
                 if await bounded(8, { await navigator.go(to: locator, options: NavigatorGoOptions(animated: slide)) }) == true {
                     attempts = 0
                     quiet = false
+                    goFailures = 0
                 } else {
+                    goFailures += 1
                     pendingFollow = pendingFollow ?? locator
+                    // Readium refuses every move while one it began has not finished, and a move that never finishes
+                    // (its page never loaded, its web view stopped answering) refuses them all for good
+                    if goFailures >= 6 { pageIsStuck("\(goFailures) turns in a row were refused or never answered") }
                     try? await Task.sleep(nanoseconds: 400_000_000)
                 }
             }
@@ -825,6 +832,13 @@ final class ReadAloud: NSObject, ObservableObject {
     private var longestStall: TimeInterval = 0
     private var stallWatch: Task<Void, Never>?
     private var lastSlowLog: Date?
+    /// How the page's turns are going: answers that were no, or never came, one after another.
+    private var goFailures = 0
+    /// Since when the voice's mark has been seen off the page, without once being seen on it.
+    private var offSince: Date?
+    private var lastPageReload: Date?
+    /// The page cannot be got to follow the voice: the reader should lay its pages out again.
+    var onPageStuck: (() -> Void)?
 
     /// Whether the page itself has said the voice's mark is on it — then the page is right, whatever else.
     private var pageHasTheMark: Bool {
@@ -896,7 +910,14 @@ final class ReadAloud: NSObject, ObservableObject {
             return
         }
         markState = answer
-        guard !scrolls, isActive, !painted.marks.isEmpty, fastFollowAllowed else { return }
+        guard !scrolls, isActive, !painted.marks.isEmpty else { return }
+        if answer == "off" { offSince = offSince ?? Date() } else if answer == "on" { offSince = nil }
+        // ten seconds of the voice on a page that is not the one shown: the page is not going to follow by itself
+        if let since = offSince, isPlaying, Date().timeIntervalSince(since) > 10 {
+            pageIsStuck("the voice's mark has been off the page for \(Int(Date().timeIntervalSince(since))) s")
+            return
+        }
+        guard fastFollowAllowed else { return }
         switch answer {
         case "on":
             sawMarkOnSinceFollow = true
@@ -921,6 +942,29 @@ final class ReadAloud: NSObject, ObservableObject {
         default:
             // no mark on this page: in another chapter, or not drawn — the slow follow finds it
             if let place = (spoken.word ?? spoken.sentence)?.followable { followTarget.send(place) }
+        }
+    }
+
+    /// The page is not following the voice and will not be turned by asking again: the reader lays its pages out
+    /// again (`onPageStuck`, rate-limited), and the page then goes to where the voice is, without the slide.
+    private func pageIsStuck(_ why: String) {
+        guard onScreen, !settling, isActive else { return }
+        if let last = lastPageReload, Date().timeIntervalSince(last) < 45 { return }
+        lastPageReload = Date()
+        goFailures = 0
+        offSince = nil
+        markState = "none"
+        Log.error("readaloud", "the page is not following the voice (\(why)) — its pages are laid out again")
+        onPageStuck?()
+        afterSettling { [weak self] in
+            guard let self else { return }
+            self.painted = ([], [])
+            if let decorable = self.decorable { self.paint(self.spoken, as: self.highlights, on: decorable) }
+            if let place = (self.spoken.word ?? self.spoken.sentence)?.followable, !self.scrolls {
+                self.pendingFollow = place
+                self.followQuietly = true
+                self.follow()
+            }
         }
     }
 

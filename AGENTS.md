@@ -150,6 +150,16 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   which also runs whenever there is no mark to find, in sentence-only highlighting's case always). The log says, at the end of a session and when the
   page is left, how many marks were sent and skipped, the page's slowest answer and the main thread's longest hold-up (`logSession`; slow ones are
   logged as they happen) — read it first when the highlighting or the page turning lags.
+- A page that will not turn (`ReadAloud.pageIsStuck` → `ReaderModel.reloadPages`): Readium's navigator is a state machine (`EPUBNavigatorViewController.State`):
+  `go(to:)` takes it to `.jumping` and back only when `PaginationView.goToIndex` returns, and while it is `.jumping` or `.moving` every other `go` answers
+  false at once. A move that never finishes — the target spread never loads, a web view stops answering `evaluateJavaScript` — so refuses every later turn
+  for good: the voice reads on pages nobody sees, for minutes, then something lays the pages out again (a rotation, a killed web process) and the page
+  comes up half painted. (`fadeToView` also leaves the whole pagination view at alpha 0 while it waits: a blank page.) Only `.load` leaves a stuck state,
+  and the public way to send it is a layout preference changing: `reloadPages` flips `fit` (`EPUBPreferences.fit` is for fixed-layout books only, so nothing
+  the reader sees changes but the pages being made again, place kept; `pagePreferences` keeps the flip so the next setting change does not flip it back).
+  Triggered by six turns in a row refused or unanswered, or the voice's mark off the page for ten seconds, at most once in 45 s, with the page then taken to
+  the voice without the slide. Turns are made without the slide after any failure, too: a long smooth scroll to catch up left the web view half painted.
+  The log says `the page is not following the voice (…)` and `laying the pages out again`.
 - Battery: presence beats run every 90s in front (120s under Low Power Mode) with one retry on a
   miss — BookMaster holds presence for two minutes. `App/LowPower.swift` names the mode: it slows
   the neural voice's playhead ticker, throttles the curl's animated finishes to 15fps, and drops the

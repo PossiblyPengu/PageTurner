@@ -951,7 +951,7 @@ final class ReaderModel: ObservableObject {
         if fitted != settings.speechRate { settings.speechRate = fitted }
         settings.save()
         (navigator as? EPUBNavigatorViewController)?
-            .submitPreferences(activeSettings.epubPreferences)
+            .submitPreferences(pagePreferences)
         (navigator as? PDFNavigatorViewController)?
             .submitPreferences(activeSettings.pdfPreferences)
         if settings.bionic != bionicApplied {
@@ -965,6 +965,32 @@ final class ReaderModel: ObservableObject {
         readAloud?.setRate(settings.speechRate)
         readAloud?.setVoice(settings.voiceIdentifier)
         readAloud?.setHighlights(settings.highlights)
+    }
+
+    // MARK: - Laying the pages out again
+
+    /// Whether `fit` has been flipped to make Readium lay its pages out again (see `reloadPages`). Kept, so the
+    /// next change of any setting does not flip it back and lay them out a second time.
+    private var pagesFlipped = false
+
+    /// The reader's settings as Readium takes them — with `fit` as `reloadPages` left it.
+    private var pagePreferences: EPUBPreferences {
+        var preferences = activeSettings.epubPreferences
+        if pagesFlipped { preferences.fit = .width }
+        return preferences
+    }
+
+    /// The page stopped following the voice and will not be turned: a move Readium's navigator began never finished
+    /// (it then refuses every later one), or a web view stopped answering — blank pages, and a page that is not turned
+    /// for minutes. Readium lays its pages out again — dropping whatever it was in the middle of, and keeping the place
+    /// — whenever a layout preference changes, and `fit` is one that only matters to fixed-layout books, so flipping
+    /// it changes nothing the reader sees but the pages being made again.
+    func reloadPages() {
+        guard let epub = navigator as? EPUBNavigatorViewController, phase == .ready, !curling else { return }
+        pagesFlipped.toggle()
+        Log.event("reader", "laying the pages out again")
+        epub.submitPreferences(pagePreferences)
+        refreshAwakeSoon()
     }
 
     // MARK: - Highlights
@@ -1173,6 +1199,7 @@ final class ReaderModel: ObservableObject {
         readAloud.bookID = book.id
         // the page was moved to the voice after waking: the web views are asked to paint it again as they wake
         readAloud.onPageCaughtUp = { [weak self] in self?.refreshAwakeSoon() }
+        readAloud.onPageStuck = { [weak self] in self?.reloadPages() }
         // a session that ends itself (sleep timer, repeated failures) must not leave a dead one here
         readAloud.onStopped = { [weak self, weak readAloud] in
             guard let self, let readAloud, self.readAloud === readAloud else { return }
