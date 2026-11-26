@@ -301,6 +301,12 @@ func runLogic() {
           wordsRound?.words.first?.word == "sullen" && wordsRound?.words.first?.context == "turned sullen and grey"
           && (try? JSONDecoder().decode([Book].self, from: Data(old.utf8)))?.first?.words.isEmpty == true)
     check("a highlight remembers it was sent as a quote", sentRound?.first?.quoted == true && Highlight(locatorJSON: "{}", text: "x").quoted == nil)
+    var kept = withWords
+    kept.fileRemoved = true
+    let keptRound = try? JSONDecoder().decode(Book.self, from: JSONEncoder().encode(kept))
+    check("a book kept without its file stays so, and an older book has its file",
+          keptRound?.fileRemoved == true && withWords.fileRemoved == false
+          && (try? JSONDecoder().decode([Book].self, from: Data(old.utf8)))?.first?.fileRemoved == false)
 }
 
 

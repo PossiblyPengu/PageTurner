@@ -132,6 +132,8 @@ enum DebugScenario {
         case "detail": router.detail = text
         // a book page's author tapped: the library shows that author's books, with the chip that goes back
         case "author": router.librarySearch = text?.author; selectTab(.library)
+        // a book just added from the file picker: the library says so, with Open
+        case "added": selectTab(.library); if let text { router.showAdded([text.id]) }
         // a book still in Google Drive: its page offers the download (with `-PTDebugCloudState downloading`, shows one on its way)
         case "clouddetail":
             let downloading = defaults.string(forKey: "PTDebugCloudState") == "downloading"
@@ -141,6 +143,19 @@ enum DebugScenario {
             }
             router.detail = cloudBook
         case "edit": router.editing = text
+        // a book removed from the library: the Undo note at the top (last of the run: the book goes when it does)
+        case "undo":
+            selectTab(.library)
+            if let book = library.books.first(where: { $0.title.hasPrefix("Alice") }) { router.remove([book], library: library) }
+        // a book whose file has gone (deleted in the Files app), opened as a tap on its cover would
+        case "missing":
+            if let book = library.books.first(where: { !$0.isAudio && $0.title != "Moby-Dick" && $0.drive == nil }) {
+                try? FileManager.default.removeItem(at: library.fileURL(for: book))
+                library.refreshMissing()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                selectTab(.library)
+                router.open(book, library: library)
+            }
         // the "you finished it" sheet, as Mark as Finished brings it up — on a book other than Moby-Dick
         case "finished":
             let other = library.books.first {

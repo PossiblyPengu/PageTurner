@@ -26,9 +26,8 @@ enum FinishedAsk {
     }
 }
 
-/// "You finished it": a rating for BookMaster, and what becomes of the book's file — the download given back (a
-/// Drive book stays in the library, to come down again), the book and its file removed (the file is its only copy),
-/// or kept. Asked once when a book is finished: on leaving the reader at its end, when an audiobook plays out, or
+/// "You finished it": a rating for BookMaster, and what becomes of the book's file — removed with the book kept (a
+/// Drive book downloads again, any other is given its file back), the book removed with it, or kept. Asked once when a book is finished: on leaving the reader at its end, when an audiobook plays out, or
 /// after Mark as Finished.
 struct FinishedBookSheet: View {
     let book: Book
@@ -146,8 +145,11 @@ struct FinishedBookSheet: View {
     private func nextCard(_ next: Book, caption: String, detail: String?) -> some View {
         Button {
             dismiss()
-            // once this sheet is down: a book doesn't open under one
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { router.open(next, library: library) }
+            // once this sheet is down: a book doesn't open under one, and "continue from BookMaster?" is not refused
+            Task {
+                guard await router.whenFree(settling: true) else { return }
+                router.open(library.books.first { $0.id == next.id } ?? next, library: library)
+            }
         } label: {
             HStack(spacing: 12) {
                 Group {
@@ -207,39 +209,42 @@ struct FinishedBookSheet: View {
         }
     }
 
-    @ViewBuilder
+    /// The file, the book, or neither: removing just the file keeps the book in the library with everything in it
+    /// (a Drive book downloads again, any other is given its file back from Files); removing the book takes it all.
     private var fileChoices: some View {
-        VStack(spacing: 10) {
-            if current.drive != nil {
-                Button {
-                    router.removeDownload(current, library: library)
+        let drive = current.drive != nil
+        return VStack(spacing: 10) {
+            Button {
+                router.removeFile(current, library: library)
+                dismiss()
+            } label: {
+                Label(drive ? (size.map { "Remove Download (\($0))" } ?? "Remove Download")
+                            : (size.map { "Remove File (\($0))" } ?? "Remove File"),
+                      systemImage: drive ? "icloud.and.arrow.up" : "trash")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            Text(drive
+                 ? "The book stays in your library, with your place and notes, and can be downloaded again from Google Drive."
+                 : "The book stays in your library, with your place, highlights and notes. Give it the file again to read it again.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button(role: .destructive) {
+                confirmRemove = true
+            } label: {
+                Text("Remove from Library").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            // over this button (iOS 26 draws a dialog over the view it belongs to)
+            .confirmationDialog("Remove “\(current.title)” from your library?", isPresented: $confirmRemove,
+                                titleVisibility: .visible) {
+                Button("Remove Book and File", role: .destructive) {
+                    router.remove([current], library: library)
                     dismiss()
-                } label: {
-                    Label(size.map { "Remove Download (\($0))" } ?? "Remove Download", systemImage: "icloud.and.arrow.up")
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                Text("The book stays in your library, with your place and notes, and can be downloaded again from Google Drive.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            } else {
-                Button(role: .destructive) {
-                    confirmRemove = true
-                } label: {
-                    Label(size.map { "Remove File (\($0))" } ?? "Remove File", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                // over this button (iOS 26 draws a dialog over the view it belongs to)
-                .confirmationDialog("Remove the file of “\(current.title)”?", isPresented: $confirmRemove, titleVisibility: .visible) {
-                    Button("Remove File and Book", role: .destructive) {
-                        router.clearFinished(current, library: library)
-                        dismiss()
-                    }
-                } message: {
-                    Text("The file is the book’s only copy, so the book leaves your library with it. Your BookMaster shelf isn’t touched.")
-                }
+            } message: {
+                Text("Your place, highlights and notes go with it. Your BookMaster shelf isn’t touched.")
             }
             Button {
                 dismiss()

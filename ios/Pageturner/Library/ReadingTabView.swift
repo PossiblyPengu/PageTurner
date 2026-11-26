@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The Reading tab is the reading itself: the open book, or the player for
 /// the audiobook on the go — not a card that opens a second screen. Leaving
-/// either just switches back to the library (`AppRouter.leaveReading`).
+/// either goes back to the tab it was opened from (`AppRouter.leaveReading`).
 /// Only when nothing is open does it show the "what you are in" list.
 struct ReadingTabView: View {
     @EnvironmentObject private var library: LibraryStore

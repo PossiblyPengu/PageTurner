@@ -80,6 +80,7 @@ shot 71-bookmaster-shelf 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen shelf
 shot 73-bookmaster-progress 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen stats
 shot 08-search 6 -PTDebugScreen search
 shot 08a-library-author 8 -PTDebugScreen author
+shot 08b-library-added 4 -PTDebugScreen added
 shot 09-settings 6 -PTDebugScreen settings
 # the settings list as a linked reader sees it (the BookMaster suite rows), and the pages behind it
 shot 09a-settings-linked 8 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings
@@ -159,6 +160,11 @@ shot 85-finished-reading 30 -PTDebugScreen reader -PTDebugReaderSheet finishbook
 finished_check 85-finished-reading "reading to the end"
 shot 86-finished-marked 12 -PTDebugScreen finished
 finished_check 86-finished-marked "Mark as Finished"
+# a book whose file was deleted in the Files app: tapping it shows its page with Find the File… and Remove (last too:
+# it deletes the file of a sample book)
+shot 87-missing-file 10 -PTDebugScreen missing
+# removing a book offers Undo at the top for a few seconds
+shot 88-removed-undo 4 -PTDebugScreen undo
 
 fi
 

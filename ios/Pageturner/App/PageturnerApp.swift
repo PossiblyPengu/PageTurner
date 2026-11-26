@@ -70,7 +70,10 @@ struct PageturnerApp: App {
                         else { return }
                         Task { try? await BookMaster.shared.redeem(code: code) }
                     } else {
-                        Task { await library.importFiles([url]) }
+                        Task {
+                            let added = await library.add([url])
+                            if !added.isEmpty { IntentRouter.shared.request = .added(added) }
+                        }
                     }
                 }
                 // a tapped Spotlight result

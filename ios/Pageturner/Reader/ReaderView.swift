@@ -7,6 +7,9 @@ struct ReaderView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(AppRouter.self) private var router
     @State private var showContents = false
+    /// A highlight whose editor opens once Contents has gone (`showContents`' onDismiss): a sheet asked for while
+    /// another is still going away is refused by iOS.
+    @State private var editAfterContents: Highlight?
     @State private var showSettings = false
     @State private var showVoices = false
     @State private var showGoTo = false
@@ -299,7 +302,13 @@ struct ReaderView: View {
     private func panels<V: View>(_ content: V) -> some View {
         content
             // a sheet is its own presentation: it doesn't inherit the reader's colour scheme
-            .sheet(isPresented: $showContents, onDismiss: model.revealChrome) {
+            .sheet(isPresented: $showContents, onDismiss: {
+                model.revealChrome()
+                if let highlight = editAfterContents {
+                    editAfterContents = nil
+                    model.editingHighlight = highlight
+                }
+            }) {
                 contentsSheet.preferredColorScheme(scheme)
             }
             .sheet(isPresented: $showSettings, onDismiss: model.revealChrome) {
@@ -932,9 +941,9 @@ struct ReaderView: View {
         }
         .swipeActions(edge: .leading) {
             Button {
-                // the editor is a sheet too — let this one go first
+                // the editor is a sheet too: it opens when this one has gone
+                editAfterContents = hl
                 showContents = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { model.editingHighlight = hl }
             } label: {
                 Label("Edit", systemImage: "pencil")
             }

@@ -26,6 +26,8 @@ final class IntentRouter {
         case switchVersion(from: UUID, page: Int?, chapter: Int?, progression: Double?)
         /// A book has just been finished (the reader left at its end, an audiobook played out): ask about it once.
         case bookFinished(UUID)
+        /// Books sent here from another app ("Open in", AirDrop) are in: the library shows them.
+        case added([UUID])
     }
 
     var request: Request?

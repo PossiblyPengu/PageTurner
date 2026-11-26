@@ -514,8 +514,7 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   "Credits" chapter) or the last 30 s are all of it (`heardShare`), and reaching them asks too.
 - Finishing a book (`App/FinishedBook.swift`): `FinishedBookSheet` asks once per finish (`FinishedAsk`, forgotten by
   `LibraryStore.restart` and an audiobook played again from its end) for a BookMaster rating and what to do with the file —
-  Remove Download for a Drive book (it stays, to come down again), Remove Book and File for one whose file is its only copy,
-  or Keep It. It comes on leaving a reader in which the book was finished (`ReaderModel.finishedHere`, `ReaderView.onDisappear`),
+  Remove File / Remove Download (the book stays: `LibraryStore.removeFile`), Remove from Library (book and file), or Keep It. It comes on leaving a reader in which the book was finished (`ReaderModel.finishedHere`, `ReaderView.onDisappear`),
   when an audiobook plays out (`AudioPlayer.advance`), both through `IntentRouter.Request.bookFinished`, and after Mark as
   Finished (`AppRouter.markFinished`); `AppRouter.offerFinished` never puts it up at once — 0.6 s, then after whatever sheet is up
   goes (a minute at most): a sheet asked for while a menu or another sheet is still going away is refused by iOS without a word,
@@ -524,6 +523,22 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   `86-finished-marked`: `-PTDebugScreen finished`) by the Debug-only `PTFinishedAsked` line. The sheet leads with the rating (always —
   kept with the book, sent to BookMaster when linked) and the file, then what to read next. Settings' "Clear files without asking" (`auto-clear-finished`) clears on leaving instead — reading the library's
   record, not the reader's opening copy, which never looked finished.
+- Removing (`Library/BookDialogs.swift`, `LibraryStore.remove`/`removeFiles`): every Remove dialog (a cover's hold menu, Book Info, the
+  select bar) and the finish sheet offer the file alone — "Remove File, Keep the Book" (a Drive book: "Remove Download") — beside Remove
+  from Library. A book kept without its file has `Book.fileRemoved` (a quiet archive-box badge, not the missing-file warning); tapping it,
+  or any book whose file has gone (`LibraryStore.hasNoFile`), opens Book Info with "Find the File…" (`relink`: copied back under the
+  book's own name, place and notes as they were; one-file books) and Remove. The settings sweep and "Clear files without asking" keep
+  the books too (a book whose file was its only copy used to leave the library with it). Both kinds of removal are undoable for 8 s:
+  the files and covers are moved to `Application Support/Removed/` (emptied at launch), and `RemovalUndoHost` — over the whole shell, at
+  the top — offers Undo, which puts the books back where they stood (`undoRemoval`); when the note goes, `finishRemoval` deletes.
+- Hand-offs between presentations: iOS refuses, without a word, a sheet or alert asked for while another is going away, so nothing
+  waits a guessed pause any more. `AppRouter.whenFree(settling:)` (the finish sheet, notices into the chat or a web app, the Home
+  Screen's Add Books, "read next", a PDF's text version) waits until nothing of ours is up, then for its slide; a sheet chained from
+  a sheet of the same view opens from the first one's `onDismiss` (the reader's highlight editor from Contents); and Book Info opens
+  Edit Details and the shelves over itself and comes back to them. Leaving a book goes back to the tab it was opened from
+  (`AppRouter.openedFrom`). Books the reader adds (the picker, "Open in") are shown: the library's filters go off and "Added …" with
+  Open says what came in (`AppRouter.justAdded`). An error says what was being done (`LibraryStore.report(_:title:)`), not "Import
+  problem" for everything.
 - Saved words (`SavedWord` in the Book model region, `Library/SavedWordsView.swift`): "Save Word" in the selection menu keeps
   the word and a line of context on the book; the list opens iOS's dictionary. `Highlight.quoted` stops "Send new highlights
   as quotes" (off by default) from posting one twice.

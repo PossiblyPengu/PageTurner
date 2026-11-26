@@ -29,7 +29,12 @@ struct RootView: View {
 
     var body: some View {
         // grouped, so no one expression is a long chain the compiler has to solve at once
-        routing(alerts(bookSheets(shell.overlay { chatButton }.overlay(alignment: .top) { BMBannerHost() })))
+        routing(alerts(bookSheets(shell.overlay { chatButton }.overlay(alignment: .top) {
+            VStack(spacing: 8) {
+                BMBannerHost()
+                RemovalUndoHost()
+            }
+        })))
             .tint(.ptAccent)
             // the reader sets its own scheme inside; this is the preference for the rest
             .preferredColorScheme(scheme)
@@ -99,6 +104,11 @@ struct RootView: View {
 
     private func handle(_ request: IntentRouter.Request) {
         let covered = router.presenting
+        if case let .added(ids) = request {
+            // nothing is closed for it: the library says so when it is next in view
+            router.showAdded(ids)
+            return
+        }
         if case let .bookFinished(id) = request {
             // nothing is closed for it: it waits for what is up to go (`offerFinished`)
             router.offerFinished(id, library: library)
@@ -138,8 +148,13 @@ struct RootView: View {
             router.openSuite(target, covered: covered)
         case .importBooks:
             router.tab = .library
-            router.showImporter = true
-        case .openDownloaded, .bookFinished:
+            // the file picker is refused while a sheet put away for it is still going
+            if covered {
+                Task { if await router.whenFree(settling: true) { router.showImporter = true } }
+            } else {
+                router.showImporter = true
+            }
+        case .openDownloaded, .bookFinished, .added:
             break   // handled above
         case let .switchVersion(id, page, chapter, progression):
             guard let book = library.books.first(where: { $0.id == id }) else { return }
@@ -168,7 +183,7 @@ struct RootView: View {
                 allowsMultipleSelection: true
             ) { result in
                 if case let .success(urls) = result {
-                    Task { await library.importFiles(urls) }
+                    Task { router.showAdded(await library.add(urls)) }
                 }
             }
     }
@@ -205,19 +220,6 @@ struct RootView: View {
                 if (book.progression ?? 0) >= 0.995 { library.restart(book.id) }
                 router.open(library.books.first { $0.id == book.id } ?? book, library: library)
             },
-            onEdit: {
-                router.detail = nil
-                // present the edit sheet after this one is fully dismissed
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.editing = book }
-            },
-            onDelete: {
-                router.detail = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.askDelete([book]) }
-            },
-            onShelves: {
-                router.detail = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { router.openShelves([book.id]) }
-            },
             onFinish: {
                 router.markFinished(book, library: library)
                 router.detail = nil
@@ -234,14 +236,6 @@ struct RootView: View {
             onDownload: { downloads.start(book, library: library, open: true) },
             onCancelDownload: { downloads.cancel(book.id) },
             onStream: book.isAudio ? { router.stream(book, library: library) } : nil,
-            onRemoveDownload: {
-                router.detail = nil
-                router.removeDownload(book, library: library)
-            },
-            onClearFile: {
-                router.detail = nil
-                router.clearFinished(book, library: library)
-            },
             onShelfMove: { status in
                 bookMaster.moveToShelf(status, bookID: book.id, library: library)
             },
@@ -283,47 +277,31 @@ struct RootView: View {
                 }
                 if router.detail != nil {
                     router.detail = nil
-                    // the sheet goes first, so the reader isn't opened under it
-                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    // the sheet goes first, so the reader isn't opened under it (nor the resume question refused)
+                    await router.whenFree(settling: true)
                 }
                 router.open(target, library: library)
             } catch is CancellationError {
                 return
             } catch {
-                library.lastError = error.localizedDescription
+                library.report(error.localizedDescription, title: "Couldn’t Switch Versions")
             }
         }
     }
 
     private func editSheet(_ book: Book) -> some View {
-        BookEditSheet(book: book) { updated in
-            library.update(updated)
-            // a lookup that named a BookMaster shelf row pins the book to it; a match for a different book unpins it —
-            // `update` keeps the stored link, so the edit is applied here, against what the sheet opened with (a pin
-            // a push reply made while the sheet was open is not undone by a sheet that never touched it)
-            if updated.bookmasterId != book.bookmasterId {
-                library.updateBookMaster(book.id) {
-                    $0.bookmasterId = updated.bookmasterId
-                    if updated.bookmasterId == nil {
-                        // the shelf row's status, rating and place were the other book's
-                        $0.bmStatus = nil
-                        $0.bmRating = nil
-                        $0.bmRemotePercent = nil
-                        $0.bmUpNext = nil
-                    }
-                }
-            }
-            router.editing = nil
-        }
+        BookEditSheet(book: book)
     }
 
-    /// BookMaster's notice, the "continue from BookMaster?" question and the remove confirmation.
+    /// What went wrong, BookMaster's notice and the "continue from BookMaster?" question. (Removing a book is asked
+    /// over the book itself — a cover, Book Info's row, the select bar: `RemoveBookDialog`.)
     private func alerts<V: View>(_ content: V) -> some View {
         content
-            // imports can start from any tab, so their failures are reported here
-            .alert("Import problem", isPresented: Binding(
+            // imports can start from any tab, so their failures are reported here — and whatever else went wrong, under
+            // a title that says what was being done
+            .alert(library.lastErrorTitle ?? "Something Went Wrong", isPresented: Binding(
                 get: { library.lastError != nil },
-                set: { if !$0 { library.lastError = nil } }
+                set: { if !$0 { library.lastError = nil; library.lastErrorTitle = nil } }
             )) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -349,25 +327,6 @@ struct RootView: View {
             } message: { prompt in
                 Text(Self.resumeMessage(prompt))
             }
-            .confirmationDialog(
-                Self.deleteTitle(router.pendingDelete),
-                isPresented: deleteShown,
-                titleVisibility: .visible,
-                presenting: router.pendingDelete.isEmpty ? nil : router.pendingDelete
-            ) { books in
-                // one Drive book that is on the phone: its download can go and the book stay, to come down again
-                if books.count == 1, let book = books.first, BookRemoval.keepsBook(book, inCloud: library.inCloud) {
-                    Button("Remove Download, Keep the Book") { router.removeDownload(book, library: library) }
-                }
-                Button(books.count == 1 ? "Remove from Library" : "Remove \(books.count) Books", role: .destructive) {
-                    for book in books {
-                        router.putAway(book.id)
-                        library.delete(book)
-                    }
-                }
-            } message: { books in
-                Text(BookRemoval.message(books, inCloud: library.inCloud))
-            }
     }
 
     private var noticeShown: Binding<Bool> {
@@ -378,18 +337,10 @@ struct RootView: View {
         Binding(get: { router.resumePrompt != nil }, set: { if !$0 { router.resumePrompt = nil } })
     }
 
-    private var deleteShown: Binding<Bool> {
-        Binding(get: { !router.pendingDelete.isEmpty }, set: { if !$0 { router.pendingDelete = [] } })
-    }
-
     private static func resumeMessage(_ prompt: ResumePrompt) -> String {
         let remote = ResumeOffer.label(prompt.fraction)
         let here = ResumeOffer.label(prompt.book.progression ?? 0)
         return "BookMaster has you \(remote) of the way through “\(prompt.book.title)”. This device is at \(here)."
-    }
-
-    private static func deleteTitle(_ books: [Book]) -> String {
-        books.count == 1 ? "Remove “\(books[0].title)”?" : "Remove \(books.count) books?"
     }
 
     // MARK: Shells
@@ -464,7 +415,7 @@ struct RootView: View {
         switch nowPlaying {
         case .audiobook:
             if let player = playback.player {
-                MiniPlayer(player: player) { router.reading = nil; router.tab = .reading }
+                MiniPlayer(player: player) { router.showPlayer() }
             }
         case .narration:
             if let held = speech.held, let readAloud = held.readAloud {

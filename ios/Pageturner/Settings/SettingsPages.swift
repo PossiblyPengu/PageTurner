@@ -119,32 +119,18 @@ struct LibrarySettingsPage: View {
     }
 
     /// Finished books still holding files, and the byte count they would free.
-    private var clearable: (count: Int, local: Int, freed: Int64) {
+    private var clearable: (count: Int, freed: Int64) {
         let targets = library.clearableFinished()
-        return (targets.count, targets.filter { $0.book.drive == nil }.count,
-                targets.reduce(Int64(0)) { $0 + $1.bytes })
+        return (targets.count, targets.reduce(Int64(0)) { $0 + $1.bytes })
     }
 
     private var clearConfirmText: String {
-        let c = clearable
-        var text = "Frees about \(GoogleDrive.sizeText(c.freed))."
-        if c.local > 0 {
-            text += " \(c.local == 1 ? "One book has" : "\(c.local) books have") no Google Drive copy — \(c.local == 1 ? "it is" : "they are") removed from the library with \(c.local == 1 ? "its" : "their") file."
-        }
-        text += " Your BookMaster shelf isn’t touched."
-        return text
+        "Frees about \(GoogleDrive.sizeText(clearable.freed)). The books stay in your library with your places, highlights and notes; a Google Drive book can be downloaded again. Your BookMaster shelf isn’t touched."
     }
 
     private func sweepFinished() {
         let result = router.clearFinishedBooks(library: library)
-        var parts = ["Freed \(GoogleDrive.sizeText(result.freed))"]
-        if result.kept > 0 {
-            parts.append("\(result.kept) \(result.kept == 1 ? "book stays" : "books stay") in the library — \(result.kept == 1 ? "its" : "their") files are back in Google Drive")
-        }
-        if result.removed > 0 {
-            parts.append("\(result.removed) \(result.removed == 1 ? "book was" : "books were") removed from the library")
-        }
-        clearedMessage = parts.joined(separator: "; ") + "."
+        clearedMessage = "Freed \(GoogleDrive.sizeText(result.freed)). \(result.cleared == 1 ? "The book stays" : "The \(result.cleared) books stay") in your library without \(result.cleared == 1 ? "its file" : "their files")."
     }
 
     private var finishedBooks: some View {
@@ -156,10 +142,10 @@ struct LibrarySettingsPage: View {
         } header: {
             Text("Finished books")
         } footer: {
-            Text("When you finish a book, Pageturner asks for a rating and whether to remove its file — or, with this on, clears it without asking. "
+            Text("When you finish a book, Pageturner asks for a rating and whether to remove its file — or, with this on, removes it without asking. The book stays in your library either way, with your place and notes. "
                  + (c.count == 0
-                 ? "Free the space of books you have finished: a Google Drive copy goes back to the Drive (the book stays and can come down again), a book whose file is its only copy leaves the library with it."
-                 : "Finished books hold \(GoogleDrive.sizeText(c.freed)) across \(c.count) \(c.count == 1 ? "book" : "books"). A Google Drive copy goes back to the Drive; a book whose file is its only copy leaves the library with it."))
+                 ? "No finished book holds a file now."
+                 : "Finished books hold \(GoogleDrive.sizeText(c.freed)) across \(c.count) \(c.count == 1 ? "book" : "books")."))
         }
     }
 

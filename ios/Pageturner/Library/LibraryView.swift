@@ -32,6 +32,8 @@ struct LibraryView: View {
     /// to go back. (It used to be typed into the search field, whose clear button iOS hides once the field isn't being
     /// edited — so there was no way back to the whole library.)
     @State private var authorFilter: String?
+    /// The books just added, said at the bottom for a few seconds (`AppRouter.justAdded`).
+    @State private var addedNote: [UUID] = []
     @State private var showCatalogs = false
     /// Removing the ticked books is being asked — over the select bar's Remove, not the middle of the screen.
     @State private var removingSelected = false
@@ -171,7 +173,7 @@ struct LibraryView: View {
                 // through the glass capsule under it
                 .tabBarChrome(!selecting)
                 .safeAreaInset(edge: .bottom) {
-                    if selecting { selectionBar }
+                    if selecting { selectionBar } else if !addedNote.isEmpty { addedBanner }
                 }
                 .overlay { if let finding { findingCard(finding) } }
             ))
@@ -254,6 +256,20 @@ struct LibraryView: View {
                 router.tab = .library
                 query = ""
                 authorFilter = search
+            }
+            .onChange(of: router.justAdded, initial: true) { _, ids in
+                guard !ids.isEmpty else { return }
+                router.justAdded = []
+                // every filter off, so what came in is in view
+                showAll()
+                query = ""
+                selecting = false
+                withAnimation(.smooth) { addedNote = ids }
+                AccessibilityNotification.Announcement(Self.addedLine(ids.count, title: library.books.first { $0.id == ids[0] }?.title)).post()
+            }
+            .task(id: addedNote) {
+                guard !addedNote.isEmpty, (try? await Task.sleep(nanoseconds: 6_000_000_000)) != nil else { return }
+                withAnimation(.smooth) { addedNote = [] }
             }
     }
 
@@ -412,6 +428,40 @@ struct LibraryView: View {
         }
     }
 
+    /// "Added “Dune”", "Added 3 books".
+    private static func addedLine(_ count: Int, title: String?) -> String {
+        if count == 1, let title { return "Added “\(title)”" }
+        return count == 1 ? "Added 1 book" : "Added \(count) books"
+    }
+
+    /// What just came in, with Open when it is one book.
+    @ViewBuilder
+    private var addedBanner: some View {
+        let books = addedNote.compactMap { id in library.books.first { $0.id == id } }
+        if let first = books.first {
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.ptAccent)
+                Text(Self.addedLine(books.count, title: first.title))
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if books.count == 1 {
+                    Button("Open") {
+                        addedNote = []
+                        router.open(first, library: library)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .ptGlass(in: Capsule())
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
     /// The author being shown, lit, with the ✕ that goes back to all books.
     private func authorChip(_ author: String) -> some View {
         let count = library.books.filter { BMShelf.sameAuthor(author, $0.author) && $0.textVersionOf == nil }.count
@@ -556,16 +606,25 @@ struct LibraryView: View {
                     selected.count == 1 ? "Remove 1 book?" : "Remove \(selected.count) books?",
                     isPresented: $removingSelected, titleVisibility: .visible
                 ) {
-                    Button(selected.count == 1 ? "Remove from Library" : "Remove \(selected.count) Books", role: .destructive) {
-                        for book in library.books where selected.contains(book.id) {
-                            router.putAway(book.id)
-                            library.delete(book)
+                    // the files alone, the books kept — for those whose files are on this iPhone
+                    let withFiles = library.books.filter {
+                        selected.contains($0.id) && BookRemoval.canRemoveFile($0, inCloud: library.inCloud, missing: library.missing)
+                    }
+                    if !withFiles.isEmpty {
+                        Button(withFiles.count == 1 ? "Remove the File, Keep the Book" : "Remove \(withFiles.count) Files, Keep the Books") {
+                            router.removeFiles(withFiles, library: library)
+                            selected = []
+                            selecting = false
                         }
+                    }
+                    Button(selected.count == 1 ? "Remove from Library" : "Remove \(selected.count) Books", role: .destructive) {
+                        router.remove(library.books.filter { selected.contains($0.id) }, library: library)
                         selected = []
                         selecting = false
                     }
                 } message: {
-                    Text(BookRemoval.message(library.books.filter { selected.contains($0.id) }, inCloud: library.inCloud))
+                    Text(BookRemoval.message(library.books.filter { selected.contains($0.id) },
+                                             inCloud: library.inCloud, missing: library.missing))
                 }
         }
         .padding(.horizontal, 8)

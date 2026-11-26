@@ -78,12 +78,13 @@ struct BookCoverView: View {
                 CloudBadge(badge: cloud)
             }
             if missing {
-                Image(systemName: "exclamationmark.triangle.fill")
+                // a file removed to free the space is not a fault: a quiet mark, not the warning
+                Image(systemName: book.fileRemoved ? "archivebox" : "exclamationmark.triangle.fill")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(book.fileRemoved ? Color.secondary : Color.orange)
                     .padding(6)
                     .ptGlass(in: Circle())
-                    .accessibilityLabel("File missing")
+                    .accessibilityLabel(book.fileRemoved ? "File removed" : "File missing")
             }
             if hasTextVersion {
                 Image(systemName: "doc.plaintext")
@@ -247,7 +248,7 @@ struct BookGrid: View {
             BookCoverView(
                 book: book, cover: library.coverThumbnail(for: book, maxPixels: 640),
                 selected: selection.map { $0.wrappedValue.contains(book.id) },
-                missing: library.missing.contains(book.id),
+                missing: library.hasNoFile(book),
                 cloud: cloud,
                 hasTextVersion: hasTextVersion)
             Text(book.title)
@@ -311,8 +312,9 @@ struct BookGrid: View {
                     if book.isAudio {
                         Image(systemName: "headphones").foregroundStyle(.secondary)
                     }
-                    if library.missing.contains(book.id) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    if library.hasNoFile(book) {
+                        Image(systemName: book.fileRemoved ? "archivebox" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(book.fileRemoved ? Color.secondary : Color.orange)
                     }
                     switch cloud {
                     case let .downloading(fraction)?:
@@ -422,7 +424,7 @@ struct BookGrid: View {
         if !book.author.isEmpty { parts.append("by \(book.author)") }
         if book.isAudio { parts.append("audiobook") }
         if let p = book.progression, p > 0 { parts.append("\(Int((p * 100).rounded())) percent") }
-        if library.missing.contains(book.id) { parts.append("file missing") }
+        if library.hasNoFile(book) { parts.append(book.fileRemoved ? "file removed" : "file missing") }
         if library.inCloud.contains(book.id) { parts.append("in Google Drive, not downloaded") }
         return parts.joined(separator: ", ")
     }

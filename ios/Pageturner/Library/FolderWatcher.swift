@@ -47,7 +47,8 @@ final class FolderWatcher {
         guard let data = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
         else {
             if scoped { url.stopAccessingSecurityScopedResource() }
-            library.lastError = "That folder can’t be watched."
+            library.report("iOS wouldn’t let Pageturner keep a link to that folder. Try picking it again.",
+                           title: "Couldn’t Watch the Folder")
             return
         }
         if scoped { url.stopAccessingSecurityScopedResource() }

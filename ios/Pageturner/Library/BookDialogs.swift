@@ -2,16 +2,30 @@ import SwiftUI
 
 /// What removing a book can mean, said the same wherever it is asked.
 enum BookRemoval {
-    /// A Drive book that is on the phone can lose just its download and stay in the library.
-    static func keepsBook(_ book: Book, inCloud: Set<UUID>) -> Bool {
-        book.drive != nil && !inCloud.contains(book.id)
+    /// The book's files are on this iPhone, so they can go and the book stay: a Drive book to be downloaded again, any
+    /// other to be given its file back from Files.
+    static func canRemoveFile(_ book: Book, inCloud: Set<UUID>, missing: Set<UUID>) -> Bool {
+        !inCloud.contains(book.id) && !missing.contains(book.id)
     }
 
-    static func message(_ books: [Book], inCloud: Set<UUID>) -> String {
-        if books.count == 1, let book = books.first, keepsBook(book, inCloud: inCloud) {
-            return "Removing the download frees the space and keeps the book, your place and notes, to download again. Removing it from the library takes it all. Your BookMaster shelf isn’t touched."
+    static func removeFileLabel(_ book: Book) -> String {
+        book.drive != nil ? "Remove Download, Keep the Book" : "Remove File, Keep the Book"
+    }
+
+    static func message(_ books: [Book], inCloud: Set<UUID>, missing: Set<UUID> = []) -> String {
+        let withFiles = books.filter { canRemoveFile($0, inCloud: inCloud, missing: missing) }
+        if books.count == 1, let book = withFiles.first {
+            return book.drive != nil
+                ? "Removing the download frees the space and keeps the book, your place and notes, to download again. Removing it from the library takes it all. Your BookMaster shelf isn’t touched."
+                : "Removing the file frees the space and keeps the book — your place, highlights and notes — to read again when you give it the file back. Removing it from the library takes it all. Your BookMaster shelf isn’t touched."
         }
-        return "This also deletes the file from this device. Your BookMaster shelf isn’t touched."
+        // a book whose file has gone has none to delete
+        if withFiles.isEmpty {
+            return books.count == 1
+                ? "Its place, highlights and notes go with it. Your BookMaster shelf isn’t touched."
+                : "Their places, highlights and notes go with them. Your BookMaster shelf isn’t touched."
+        }
+        return "Removing the files frees the space and keeps the books, with your places and notes. Removing them from the library takes it all, files included. Your BookMaster shelf isn’t touched."
     }
 }
 
@@ -25,15 +39,12 @@ struct RemoveBookDialog: ViewModifier {
 
     func body(content: Content) -> some View {
         content.confirmationDialog("Remove “\(book.title)”?", isPresented: $isPresented, titleVisibility: .visible) {
-            if BookRemoval.keepsBook(book, inCloud: library.inCloud) {
-                Button("Remove Download, Keep the Book") { router.removeDownload(book, library: library) }
+            if BookRemoval.canRemoveFile(book, inCloud: library.inCloud, missing: library.missing) {
+                Button(BookRemoval.removeFileLabel(book)) { router.removeFile(book, library: library) }
             }
-            Button("Remove from Library", role: .destructive) {
-                router.putAway(book.id)
-                library.delete(book)
-            }
+            Button("Remove from Library", role: .destructive) { router.remove([book], library: library) }
         } message: {
-            Text(BookRemoval.message([book], inCloud: library.inCloud))
+            Text(BookRemoval.message([book], inCloud: library.inCloud, missing: library.missing))
         }
     }
 }
@@ -69,5 +80,44 @@ struct BookCellDialogs: ViewModifier {
                 Text("Your place in this book is forgotten.")
             }
             .modifier(RemoveBookDialog(book: book, isPresented: asking($removing)))
+    }
+}
+
+/// "Removed “Dune” · Undo" at the top of the app for a few seconds after a removal (`LibraryStore.undoable`); when it
+/// goes, what was set aside is deleted. It is laid over the whole shell, so it is seen wherever the removal was made —
+/// a cover, Book Info, the select bar, the finish sheet.
+struct RemovalUndoHost: View {
+    @EnvironmentObject private var library: LibraryStore
+
+    var body: some View {
+        Group {
+            if let removal = library.undoable {
+                HStack(spacing: 12) {
+                    Image(systemName: removal.fileOnly ? "doc" : "trash")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(removal.line)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button("Undo") { library.undoRemoval() }
+                        .font(.subheadline.weight(.semibold))
+                        .tint(.ptAccent)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .ptGlass(in: Capsule())
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .id(removal.id)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .task(id: removal.id) {
+                    AccessibilityNotification.Announcement("\(removal.line). Undo is available.").post()
+                    guard (try? await Task.sleep(for: .seconds(8))) != nil else { return }
+                    if library.undoable?.id == removal.id { library.finishRemoval() }
+                }
+            }
+        }
+        .ptAnimation(.smooth(duration: 0.3), value: library.undoable?.id)
     }
 }

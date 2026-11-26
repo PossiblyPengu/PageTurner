@@ -137,6 +137,10 @@ struct Book: Identifiable, Codable, Hashable {
     /// book — what the reader's switch between the two goes by.
     var textVersionOf: UUID?
     var pageSpots: [PDFText.PageSpot]?
+    /// Its file was removed on purpose to free the space (a finished book, most often): the book stays — place,
+    /// highlights, notes, rating — and is read again when its file is given back (`LibraryStore.relink`). Without
+    /// it, a book with no file looks like one whose file went missing.
+    var fileRemoved: Bool = false
 
     var ext: String { fileName.split(separator: ".").last.map(String.init)?.lowercased() ?? "" }
     /// The local name keeps the file's extension, except Drive parts whose Drive name
@@ -313,6 +317,7 @@ extension Book {
         drive = try? c.decodeIfPresent(GoogleDrive.Source.self, forKey: .drive)
         textVersionOf = try c.decodeIfPresent(UUID.self, forKey: .textVersionOf)
         pageSpots = try? c.decodeIfPresent([PDFText.PageSpot].self, forKey: .pageSpots)
+        fileRemoved = (try? c.decodeIfPresent(Bool.self, forKey: .fileRemoved)) ?? false
     }
 
     /// How a BookMaster push names this book.
@@ -375,6 +380,46 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var inCloud: Set<UUID> = []
     @Published var lastError: String?
 
+    /// A removal that can still be taken back: the books as they were and where they stood, their files and covers set
+    /// aside (not deleted) until the Undo note has gone (`RemovalUndoHost`). A removed book and its file used to be
+    /// gone at the tap.
+    struct Removal: Identifiable {
+        struct Entry {
+            let book: Book
+            let index: Int
+            let wasMissing: Bool
+            let wasInCloud: Bool
+        }
+        let id = UUID()
+        let entries: [Entry]
+        /// Only the file went (`removeFile`): the book stayed.
+        let fileOnly: Bool
+        let held: URL
+
+        /// "Removed “Dune”", "Removed the file of “Dune”", "Removed 3 books".
+        var line: String {
+            if entries.count == 1, let book = entries.first?.book {
+                return fileOnly ? "Removed the file of “\(book.title)”" : "Removed “\(book.title)”"
+            }
+            return fileOnly ? "Removed \(entries.count) files" : "Removed \(entries.count) books"
+        }
+    }
+    @Published private(set) var undoable: Removal?
+
+    nonisolated static var heldFolder: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Removed", isDirectory: true)
+    }
+    /// What the alert for `lastError` is called: what was being done when it went wrong (`report`). Everything used to
+    /// be an "Import problem" — a folder that couldn't be watched, a PDF with no text.
+    var lastErrorTitle: String?
+
+    /// Say what went wrong, under a title naming what was being done.
+    func report(_ message: String, title: String) {
+        lastErrorTitle = title
+        lastError = message
+    }
+
     private let fm = FileManager.default
     private let booksDir: URL
     private let coversDir: URL
@@ -389,6 +434,8 @@ final class LibraryStore: ObservableObject {
         catalogueURL = support.appendingPathComponent("library.json")
         try? fm.createDirectory(at: booksDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: coversDir, withIntermediateDirectories: true)
+        // files set aside for an Undo that was never used (the app ended while it was offered) go now
+        try? fm.removeItem(at: Self.heldFolder)
         if let data = try? Data(contentsOf: catalogueURL) {
             // element-wise: one bad record must not empty the library (and the
             // next save then overwrite the catalogue with nothing)
@@ -461,6 +508,38 @@ final class LibraryStore: ObservableObject {
     }
 
     func fileURL(for book: Book) -> URL { booksDir.appendingPathComponent(book.fileName) }
+
+    /// No file to open: gone from under the app, or removed on purpose (known before the launch's look has finished).
+    func hasNoFile(_ book: Book) -> Bool {
+        missing.contains(book.id) || (book.fileRemoved && book.drive == nil)
+    }
+
+    /// A book whose file has gone can be given it again when it is one file (an audiobook of many parts is added again).
+    func canRelink(_ book: Book) -> Bool { book.drive == nil && book.fileNames.count <= 1 }
+
+    struct RelinkError: LocalizedError {
+        let errorDescription: String?
+    }
+
+    /// A missing book's file found again (picked in Files): copied back under the book's own name, so its place,
+    /// highlights and notes are as they were.
+    func relink(_ id: UUID, from url: URL) throws {
+        guard let book = books.first(where: { $0.id == id }), canRelink(book) else { return }
+        let want = (book.fileName as NSString).pathExtension.lowercased()
+        let got = url.pathExtension.lowercased()
+        guard want.isEmpty || got == want else {
+            throw RelinkError(errorDescription: "That is a .\(got.isEmpty ? "file" : got) file; “\(book.title)” was a .\(want).")
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let target = fileURL(for: book)
+        try? fm.createDirectory(at: booksDir, withIntermediateDirectories: true)
+        if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+        try fm.copyItem(at: url, to: target)
+        missing.remove(id)
+        if book.fileRemoved { mutate(id) { $0.fileRemoved = false } }
+        Log.event("library", "file of “\(book.title)” found again")
+    }
     func fileURLs(for book: Book) -> [URL] {
         let names = book.fileNames.isEmpty ? [book.fileName] : book.fileNames
         return names.map { booksDir.appendingPathComponent($0) }
@@ -536,6 +615,13 @@ final class LibraryStore: ObservableObject {
     /// Calls whose 800 ms wait a later call took over, each let go when the batch holding its files is done.
     private var importWaiters: [(url: URL, done: CheckedContinuation<Void, Never>)] = []
 
+    /// `importFiles` for files the reader chose (the picker, "Open in"), answering with the books that came in.
+    func add(_ urls: [URL]) async -> [UUID] {
+        let before = Set(books.map(\.id))
+        await importFiles(urls)
+        return books.filter { !before.contains($0.id) }.map(\.id)
+    }
+
     func importFiles(_ urls: [URL]) async {
         pendingURLs.append(contentsOf: urls)
         importing = true
@@ -584,7 +670,8 @@ final class LibraryStore: ObservableObject {
             importWaiters.removeAll { taken.contains($0.url) }
             for waiter in finished { waiter.done.resume() }
             if !failures.isEmpty {
-                lastError = failures.joined(separator: "\n")
+                report(failures.joined(separator: "\n"),
+                       title: failures.count == 1 ? "Couldn’t Add a File" : "Couldn’t Add \(failures.count) Files")
                 for failure in failures { Log.error("import", failure) }
             }
         }
@@ -979,6 +1066,25 @@ final class LibraryStore: ObservableObject {
         save()
     }
 
+    /// Edit Details saved: the fields onto the book, and the BookMaster pin as the edit left it. A lookup that named a
+    /// BookMaster shelf row pins the book to it; a match for a different book unpins it — `update` keeps the stored
+    /// link, so the pin is applied here, against what the sheet opened with (a pin a push reply made while the sheet
+    /// was open is not undone by a sheet that never touched it).
+    func saveEdit(_ updated: Book, openedWith original: Book) {
+        update(updated)
+        guard updated.bookmasterId != original.bookmasterId else { return }
+        updateBookMaster(original.id) {
+            $0.bookmasterId = updated.bookmasterId
+            if updated.bookmasterId == nil {
+                // the shelf row's status, rating and place were the other book's
+                $0.bmStatus = nil
+                $0.bmRating = nil
+                $0.bmRemotePercent = nil
+                $0.bmUpNext = nil
+            }
+        }
+    }
+
     /// Save what reading changed — the place, the marks the reader made, the sitting's time — onto the book as it is
     /// stored now. The reader holds its own copy of the whole `Book` from when it opened; writing that back with
     /// `update` would undo a title, shelf or note edited meanwhile.
@@ -1185,16 +1291,31 @@ final class LibraryStore: ObservableObject {
         inCloud.insert(id)
     }
 
-    /// Free the space a finished book's files take, in the way its storage allows: a book with a Drive
-    /// copy keeps its place in the library and can come down again, while one whose file is its only
-    /// copy is removed from the library with it. What is open, playing or read aloud from those files
-    /// is put away by the caller first (see `AppRouter.clearFinished`).
-    func clearFinishedFiles(_ book: Book) {
-        if book.drive != nil {
-            removeDownload(book.id)
-        } else {
-            delete(book)
+    /// Free the space a book's files take and keep the book — its place, highlights, notes, rating and sittings: a
+    /// Drive book can be downloaded again, any other is given its file back from Files (`relink`). What is open,
+    /// playing or read aloud from those files is put away by the caller first (`AppRouter.removeFile`). A book whose
+    /// file was its only copy used to leave the library with it.
+    func removeFile(_ id: UUID) { removeFiles([id]) }
+
+    /// `removeFile` for several at once, with one Undo for all (a Drive book's download is not part of it: it comes
+    /// down again).
+    func removeFiles(_ ids: [UUID]) {
+        let chosen = ids.compactMap { id in books.first { $0.id == id } }
+        for book in chosen where book.drive != nil { removeDownload(book.id) }
+        let local = chosen.filter { $0.drive == nil }
+        guard !local.isEmpty else { return }
+        // set aside, not deleted, while Undo is offered
+        finishRemoval()
+        let held = Self.heldFolder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        var entries: [Removal.Entry] = []
+        for book in local {
+            entries.append(.init(book: book, index: 0, wasMissing: missing.contains(book.id), wasInCloud: false))
+            setAside(book, in: held, cover: false)
+            mutate(book.id) { $0.fileRemoved = true }
+            missing.insert(book.id)
+            Log.event("library", "file of “\(book.title)” removed, the book kept")
         }
+        undoable = Removal(entries: entries, fileOnly: true, held: held)
     }
 
     /// Finished books whose files are on this device, with the bytes each would free — what the
@@ -1339,6 +1460,80 @@ final class LibraryStore: ObservableObject {
             books[i].bmUpNext = nil
         }
         save()
+    }
+
+    /// Remove books from the library as the reader asked, with Undo: their files and covers are set aside, and deleted
+    /// when the moment for Undo has gone (`finishRemoval`). Whatever is open or playing from them is put away by the
+    /// caller first (`AppRouter.putAway`).
+    func remove(_ chosen: [Book]) {
+        finishRemoval()
+        let held = Self.heldFolder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? fm.createDirectory(at: held, withIntermediateDirectories: true)
+        // where each stood in the list as it was, so Undo, putting them back lowest first, restores the order
+        let ids = Set(chosen.map(\.id))
+        var entries: [Removal.Entry] = []
+        for (index, stored) in books.enumerated() where ids.contains(stored.id) {
+            entries.append(.init(book: stored, index: index, wasMissing: missing.contains(stored.id),
+                                 wasInCloud: inCloud.contains(stored.id)))
+            DriveDownloads.shared.cancel(stored.id)
+            setAside(stored, in: held, cover: true)
+            inCloud.remove(stored.id)
+            missing.remove(stored.id)
+        }
+        books.removeAll { ids.contains($0.id) }
+        guard !entries.isEmpty else { try? fm.removeItem(at: held); return }
+        coverThumbs.removeAllObjects()
+        save()
+        undoable = Removal(entries: entries, fileOnly: false, held: held)
+        Log.event("library", "removed \(entries.count) book(s), Undo offered")
+    }
+
+    /// A book's files (and its cover) moved into `folder`, under their own names.
+    private func setAside(_ book: Book, in folder: URL, cover: Bool) {
+        let dir = folder.appendingPathComponent(book.id.uuidString, isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        for url in fileURLs(for: book) where fm.fileExists(atPath: url.path) {
+            try? fm.moveItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
+        }
+        let coverFile = coverURL(for: book)
+        if cover, fm.fileExists(atPath: coverFile.path) {
+            try? fm.moveItem(at: coverFile, to: dir.appendingPathComponent("cover.jpg"))
+        }
+    }
+
+    /// Undo: the books back where they stood, with their files, covers, places and notes.
+    func undoRemoval() {
+        guard let removal = undoable else { return }
+        undoable = nil
+        for entry in removal.entries.sorted(by: { $0.index < $1.index }) {
+            let book = entry.book
+            let dir = removal.held.appendingPathComponent(book.id.uuidString, isDirectory: true)
+            for url in fileURLs(for: book) {
+                let kept = dir.appendingPathComponent(url.lastPathComponent)
+                if fm.fileExists(atPath: kept.path), !fm.fileExists(atPath: url.path) { try? fm.moveItem(at: kept, to: url) }
+            }
+            let keptCover = dir.appendingPathComponent("cover.jpg")
+            if fm.fileExists(atPath: keptCover.path) { try? fm.moveItem(at: keptCover, to: coverURL(for: book)) }
+            if removal.fileOnly {
+                mutate(book.id) { $0.fileRemoved = book.fileRemoved }
+                if !entry.wasMissing { missing.remove(book.id) }
+            } else if !books.contains(where: { $0.id == book.id }) {
+                books.insert(book, at: min(entry.index, books.count))
+                if entry.wasMissing { missing.insert(book.id) }
+                if entry.wasInCloud { inCloud.insert(book.id) }
+            }
+        }
+        try? fm.removeItem(at: removal.held)
+        coverChanged()
+        save()
+        Log.event("library", "removal undone")
+    }
+
+    /// The moment for Undo has gone: what was set aside is deleted.
+    func finishRemoval() {
+        guard let removal = undoable else { return }
+        undoable = nil
+        try? fm.removeItem(at: removal.held)
     }
 
     func delete(_ book: Book) {

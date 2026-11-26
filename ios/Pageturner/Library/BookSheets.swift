@@ -1,13 +1,11 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct BookDetailSheet: View {
     let book: Book
     let cover: UIImage?
     let onOpen: () -> Void
-    let onEdit: () -> Void
-    let onDelete: () -> Void
-    let onShelves: () -> Void
     let onFinish: () -> Void
     let onRestart: () -> Void
     /// Rating, when the book can be rated on BookMaster (it is linked).
@@ -20,9 +18,6 @@ struct BookDetailSheet: View {
     var onCancelDownload: () -> Void = {}
     /// Play an audiobook from the Drive without downloading it.
     var onStream: (() -> Void)? = nil
-    var onRemoveDownload: () -> Void = {}
-    /// A finished book whose file is its only copy: removing the file removes the book. Nil hides it.
-    var onClearFile: (() -> Void)? = nil
     /// A BookMaster shelf move (want to read, abandoned) for a linked book. Nil hides it.
     var onShelfMove: ((BMShelfStatus) -> Void)? = nil
     /// Looks the book up online (a Drive book has only a name until it is downloaded); true when something was found.
@@ -43,6 +38,15 @@ struct BookDetailSheet: View {
     @State private var confirmRestart = false
     @State private var confirmWantToRead = false
     @State private var confirmRemove = false
+    /// Edit Details and the shelves open over this page and come back to it — they used to close it, open after a
+    /// guessed pause (a sheet asked for while another is still going away is dropped by iOS), and end on the shelf.
+    @State private var editing = false
+    @State private var choosingShelves = false
+    /// The file is gone (deleted in the Files app): finding it again, or removing the book, from right here.
+    @State private var findingFile = false
+    @State private var confirmRemoveMissing = false
+
+    private var fileMissing: Bool { cloud == nil && library.hasNoFile(book) }
     @State private var detent: PresentationDetent = .large
 
     private var isFinished: Bool { (book.progression ?? 0) >= 0.995 }
@@ -122,6 +126,45 @@ struct BookDetailSheet: View {
                 }
             }
         }
+    }
+
+    /// In the place of the Read button when the book's file has gone: why, and the way to find it again or remove the book.
+    private var missingControl: some View {
+        let relinkable = library.canRelink(book)
+        // removed on purpose (to free the space) or gone from under the app (the Files app)
+        let removed = book.fileRemoved
+        return VStack(spacing: 10) {
+            Label(removed ? "Kept without its file" : "The file is no longer on this iPhone",
+                  systemImage: removed ? "archivebox" : "exclamationmark.triangle")
+                .font(.subheadline.weight(.semibold))
+            Text(removed
+                 ? (relinkable
+                    ? "You removed the file to free the space. Your place, highlights and notes are kept: find the file to read it again."
+                    : "You removed its files to free the space. Your place, highlights and notes are kept.")
+                 : (relinkable
+                    ? "It may have been deleted or moved in the Files app. Find it to read on: your place, highlights and notes are kept."
+                    : "Its files may have been deleted or moved in the Files app. Add it again, or remove it."))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if relinkable {
+                Button { findingFile = true } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder")
+                        Text("Find the File…")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .ptButtonStyle(prominent: true)
+                .controlSize(.large)
+            }
+            Button("Remove from Library", role: .destructive) { confirmRemoveMissing = true }
+                .font(.footnote)
+                .buttonStyle(.borderless)
+                // asked over this button
+                .modifier(RemoveBookDialog(book: book, isPresented: $confirmRemoveMissing))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     /// "Make a Text Version" for a PDF — its words laid out to flow like a book's — or open the one made before;
@@ -212,6 +255,8 @@ struct BookDetailSheet: View {
                 ratingRow
                 if cloud != nil {
                     cloudControl
+                } else if fileMissing {
+                    missingControl
                 } else {
                     Button(action: onOpen) {
                         // not a Label: inside a List it tints its icon with the accent colour,
@@ -385,7 +430,7 @@ struct BookDetailSheet: View {
                     Section {
                         Label("The author is missing.", systemImage: "info.circle")
                             .foregroundStyle(.secondary)
-                        Button("Find Details", action: onEdit)
+                        Button("Find Details") { editing = true }
                     }
                 }
                 Section {
@@ -423,10 +468,12 @@ struct BookDetailSheet: View {
                     }
                 }
                 // the same few things as the shelf's hold menu: where it stands, its shelves, what this kind of book
-                // has besides, and removing it (the root's dialog says what removing can mean for it). Edit is at the top.
+                // has besides, and removing it (its own dialog says what removing can mean for it). Edit is at the top.
                 Section {
                     statusMenu
-                    Button(book.collections.isEmpty ? "Add to a Shelf…" : "Shelves: \(book.collections.joined(separator: ", "))", action: onShelves)
+                    Button(book.collections.isEmpty ? "Add to a Shelf…" : "Shelves: \(book.collections.joined(separator: ", "))") {
+                        choosingShelves = true
+                    }
                     if let onTextVersion, book.ext == "pdf", cloud == nil {
                         textVersionRow(onTextVersion)
                     }
@@ -449,7 +496,7 @@ struct BookDetailSheet: View {
             // here all along, and nobody could see them
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Edit", action: onEdit)
+                    Button("Edit") { editing = true }
                 }
                 ToolbarItem(placement: .primaryAction) { shareButton }
             }
@@ -469,8 +516,9 @@ struct BookDetailSheet: View {
         }
         // sheets, the share button and the alerts: a chain of their own, so the
         // type checker never faces the whole page at once
+        .modifier(FindMissingFile(book: book, isPresented: $findingFile))
         .modifier(DetailPresented(book: book, changeCover: $changeCover, showNotes: $showNotes,
-            detent: $detent, coverFailed: $coverFailed,
+            editing: $editing, choosingShelves: $choosingShelves, detent: $detent, coverFailed: $coverFailed,
             onCover: { candidate in
                 guard !candidate.coverURLs.isEmpty else { return }
                 coverFetching = true
@@ -491,12 +539,45 @@ struct BookDetailSheet: View {
     }
 }
 
+/// Picking a missing book's file in Files, and saying why one picked wouldn't do.
+private struct FindMissingFile: ViewModifier {
+    let book: Book
+    @Binding var isPresented: Bool
+    @EnvironmentObject private var library: LibraryStore
+    @State private var failure: String?
+
+    private var types: [UTType] {
+        [UTType(filenameExtension: (book.fileName as NSString).pathExtension) ?? .item]
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .fileImporter(isPresented: $isPresented, allowedContentTypes: types) { result in
+                switch result {
+                case let .success(url):
+                    do { try library.relink(book.id, from: url) } catch { failure = error.localizedDescription }
+                case let .failure(error):
+                    failure = error.localizedDescription
+                }
+            }
+            // here, not at the root: an alert from under this sheet would not be shown
+            .alert("Couldn’t Use That File", isPresented: Binding(
+                get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(failure ?? "")
+            }
+    }
+}
+
 /// The detail page's presentations — share, notes, the cover picker, its alert —
 /// as one modifier, keeping `body` under the type checker's limit.
 private struct DetailPresented: ViewModifier {
     let book: Book
     @Binding var changeCover: Bool
     @Binding var showNotes: Bool
+    @Binding var editing: Bool
+    @Binding var choosingShelves: Bool
     @Binding var detent: PresentationDetent
     @Binding var coverFailed: Bool
     let onCover: (MetadataCandidate) -> Void
@@ -505,6 +586,8 @@ private struct DetailPresented: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(isPresented: $showNotes) { BookNotesView(book: book) }
+            .sheet(isPresented: $editing) { BookEditSheet(book: book) }
+            .sheet(isPresented: $choosingShelves) { ShelvesSheet(target: ShelfTarget(bookIDs: [book.id])) }
             .sheet(isPresented: $changeCover) {
                 BookLookupSheet(book: book, coverOnly: true,
                     onPick: { candidate, _ in onCover(candidate) },
@@ -545,11 +628,11 @@ struct BookEditSheet: View {
     /// The lookup sheet — details or jacket only, switched inside it.
     @State private var showLookup = false
     private let original: Book
-    private let onSave: (Book) -> Void
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: LibraryStore
 
-    init(book: Book, onSave: @escaping (Book) -> Void) {
+    /// Saves and closes itself — over Book Info it goes back there, from a cover's hold menu back to the shelf.
+    init(book: Book) {
         _title = State(initialValue: book.title)
         _author = State(initialValue: book.author)
         _year = State(initialValue: book.year ?? "")
@@ -562,7 +645,6 @@ struct BookEditSheet: View {
         _seriesIndex = State(initialValue: book.seriesIndex)
         _seriesNumber = State(initialValue: Self.numberText(book.seriesIndex))
         original = book
-        self.onSave = onSave
     }
 
     var body: some View {
@@ -604,7 +686,10 @@ struct BookEditSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
+                    Button("Save") {
+                        save()
+                        dismiss()
+                    }
                         .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
@@ -764,7 +849,7 @@ struct BookEditSheet: View {
         // what was typed; nothing typed, or no series, is no number
         let typed = seriesNumber.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
         book.seriesIndex = named.isEmpty ? nil : Double(typed).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
-        onSave(book)
+        library.saveEdit(book, openedWith: original)
         if removeCover {
             try? FileManager.default.removeItem(at: library.coverURL(for: book))
             library.coverChanged()
