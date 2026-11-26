@@ -325,6 +325,18 @@ struct BookDetailSheet: View {
         return "Not started"
     }
 
+    /// The Open Library page when the book has one, its name otherwise.
+    @ViewBuilder
+    private var shareButton: some View {
+        if let olid = book.openLibraryId, let url = URL(string: "https://openlibrary.org/works/\(olid)") {
+            ShareLink(item: url, message: Text(shareLine)) { Image(systemName: "square.and.arrow.up") }
+                .accessibilityLabel("Share")
+        } else {
+            ShareLink(item: shareLine) { Image(systemName: "square.and.arrow.up") }
+                .accessibilityLabel("Share")
+        }
+    }
+
     /// The stars live with the cover, where rating is a gesture — not a line in the facts.
     @ViewBuilder
     private var ratingRow: some View {
@@ -433,6 +445,14 @@ struct BookDetailSheet: View {
             }
             .navigationTitle("Book Info")
             .navigationBarTitleDisplayMode(.inline)
+            // inside the NavigationStack: a toolbar put on the stack from outside is never drawn — Edit and Share were
+            // here all along, and nobody could see them
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Edit", action: onEdit)
+                }
+                ToolbarItem(placement: .primaryAction) { shareButton }
+            }
             .scrollContentBackground(.hidden)
             .ptSoftScrollEdges()
             .background(CoverTintBackdrop(tint: tint))
@@ -449,8 +469,8 @@ struct BookDetailSheet: View {
         }
         // sheets, the share button and the alerts: a chain of their own, so the
         // type checker never faces the whole page at once
-        .modifier(DetailPresented(book: book, onEdit: onEdit, changeCover: $changeCover, showNotes: $showNotes,
-            detent: $detent, coverFailed: $coverFailed, shareLine: shareLine,
+        .modifier(DetailPresented(book: book, changeCover: $changeCover, showNotes: $showNotes,
+            detent: $detent, coverFailed: $coverFailed,
             onCover: { candidate in
                 guard !candidate.coverURLs.isEmpty else { return }
                 coverFetching = true
@@ -475,35 +495,15 @@ struct BookDetailSheet: View {
 /// as one modifier, keeping `body` under the type checker's limit.
 private struct DetailPresented: ViewModifier {
     let book: Book
-    let onEdit: () -> Void
     @Binding var changeCover: Bool
     @Binding var showNotes: Bool
     @Binding var detent: PresentationDetent
     @Binding var coverFailed: Bool
-    let shareLine: String
     let onCover: (MetadataCandidate) -> Void
     let onCoverCropped: (UIImage) -> Void
 
     func body(content: Content) -> some View {
         content
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Edit", action: onEdit)
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    // the Open Library page when the book has one, its name otherwise
-                    if let olid = book.openLibraryId,
-                       let url = URL(string: "https://openlibrary.org/works/\(olid)") {
-                        ShareLink(item: url, message: Text(shareLine)) {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                    } else {
-                        ShareLink(item: shareLine) {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                    }
-                }
-            }
             .sheet(isPresented: $showNotes) { BookNotesView(book: book) }
             .sheet(isPresented: $changeCover) {
                 BookLookupSheet(book: book, coverOnly: true,
@@ -533,6 +533,8 @@ struct BookEditSheet: View {
     /// carried silently like the Open Library id and the shelf pin.
     @State private var series: String?
     @State private var seriesIndex: Double?
+    /// The number as typed ("2.", on its way to "2.5"), read into `seriesIndex` on Save.
+    @State private var seriesNumber: String
     /// Jacket guesses the picked match will bring (lookup) or the jacket
     /// picked online on its own — either way a chain `applyCover` walks.
     @State private var pickedCovers: [URL] = []
@@ -558,6 +560,7 @@ struct BookEditSheet: View {
         _openLibraryId = State(initialValue: book.openLibraryId)
         _series = State(initialValue: book.series)
         _seriesIndex = State(initialValue: book.seriesIndex)
+        _seriesNumber = State(initialValue: Self.numberText(book.seriesIndex))
         original = book
         self.onSave = onSave
     }
@@ -576,6 +579,18 @@ struct BookEditSheet: View {
                     TextField("ISBN", text: $isbn)
                         .keyboardType(.numbersAndPunctuation)
                         .autocorrectionDisabled()
+                }
+                // the Series shelf and "next in the series" go by these
+                Section {
+                    TextField("Series", text: Binding(
+                        get: { series ?? "" },
+                        set: { series = $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }))
+                    TextField("Number in the series", text: $seriesNumber)
+                        .keyboardType(.decimalPad)
+                } header: {
+                    Text("Series")
+                } footer: {
+                    Text("A number like 2 or 2.5 puts it in order with the others.")
                 }
                 Section("Description") {
                     TextField("A few lines about the book", text: $summary, axis: .vertical)
@@ -706,7 +721,11 @@ struct BookEditSheet: View {
         if let isbn = candidate.isbn { self.isbn = isbn }
         if let count = candidate.pages { pages = String(count) }
         if let olid = candidate.openLibraryId { openLibraryId = olid }
-        if let named = candidate.series { series = named; seriesIndex = candidate.seriesIndex }
+        if let named = candidate.series {
+            series = named
+            seriesIndex = candidate.seriesIndex
+            seriesNumber = Self.numberText(candidate.seriesIndex)
+        }
         // a shelf row the match names is the one to push to — never a guess
         if let id = candidate.bookmasterId { pin = id }
         // the match's jacket comes with it, over a photo or a removal chosen
@@ -716,6 +735,12 @@ struct BookEditSheet: View {
             pickedImage = nil
             removeCover = false
         }
+    }
+
+    /// "2", "2.5", or nothing.
+    private static func numberText(_ index: Double?) -> String {
+        guard let index, index.isFinite else { return "" }
+        return index == index.rounded() && abs(index) < 1_000_000 ? String(Int(index)) : String(index)
     }
 
     private func save() {
@@ -734,8 +759,11 @@ struct BookEditSheet: View {
         book.pages = Int(pages.trimmingCharacters(in: .whitespaces)).flatMap { $0 > 0 ? $0 : nil }
         book.openLibraryId = openLibraryId
         book.bookmasterId = pin
-        book.series = series
-        book.seriesIndex = seriesIndex
+        let named = series?.trimmingCharacters(in: .whitespaces) ?? ""
+        book.series = named.isEmpty ? nil : named
+        // what was typed; nothing typed, or no series, is no number
+        let typed = seriesNumber.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
+        book.seriesIndex = named.isEmpty ? nil : Double(typed).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         onSave(book)
         if removeCover {
             try? FileManager.default.removeItem(at: library.coverURL(for: book))

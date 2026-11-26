@@ -376,6 +376,10 @@ struct BookGrid: View {
             Button { router.detail = book } label: {
                 Label("Book Info", systemImage: "info.circle")
             }
+            // the title, author, cover, series… — straight from the shelf, not only from Book Info
+            Button { router.editing = book } label: {
+                Label("Edit Details", systemImage: "pencil")
+            }
             Divider()
             Button(role: .destructive) { removing = book } label: {
                 Label("Remove…", systemImage: "trash")

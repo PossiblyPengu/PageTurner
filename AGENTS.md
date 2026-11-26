@@ -110,9 +110,11 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
 
 - Fewer places, not fewer things (the UX pass of Nov 2026 — keep it that way when adding): three tabs (Reading, Library,
   BookMaster). The library filters in **one** chip row (`LibraryView.smartShelves`/`laterShelves`, then series, Up next and the
-  reader's shelves); the sort menu only sorts. A book's hold menu and its Book Info page carry the same five things — open, Status ▸,
-  Shelves, Book Info, Remove… (the root's remove dialog offers what removing can mean: a Drive book can keep itself without its
-  download) — Edit is Book Info's top-left button. In the reader the selection menu is iOS's own + Highlight + More… (`SelectionChoicesSheet`,
+  reader's shelves); the sort menu only sorts. A book's hold menu carries six things — open, Status ▸, Shelves, Book Info, Edit Details,
+  Remove… (each cover's own dialog offers what removing can mean: a Drive book can keep itself without its download) — and Book Info
+  the same, with Edit and Share in its bar. **A `.toolbar` must go inside the `NavigationStack`** (on its content): Book Info's was
+  put on the stack from a modifier outside it, so its Edit and Share were never drawn and a book's details could not be edited at all.
+  Edit Details has the series name and number (the Series shelf and next-in-series go by them). In the reader the selection menu is iOS's own + Highlight + More… (`SelectionChoicesSheet`,
   `ReaderModel.act(_:on:)`: the choices take the selection they were given, it is cleared before the sheet); search is a Contents tab;
   the Reading sheet is one short screen with More Options (`ReaderMoreOptions`), and read-aloud's settings open from the read-aloud
   bar (`ReadAloudSheetContent`). A new action goes into one of these, not a new button or menu.
