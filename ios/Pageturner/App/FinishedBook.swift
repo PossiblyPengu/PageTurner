@@ -79,74 +79,65 @@ struct FinishedBookSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                // what it is for first — the rating and the file — within the half-height sheet; what to read next after
+                VStack(spacing: 18) {
                     header
+                    rating
+                    if Self.hasFiles(current, library: library) { fileChoices }
                     if let next = nextInSeries {
                         nextCard(next, caption: "Next in the series", detail: SeriesShelf.place(of: next))
                     } else if let more = moreByAuthor {
                         nextCard(more, caption: "More by \(more.author)", detail: (more.progression ?? 0) > 0.001
                                  ? "\(Int(((more.progression ?? 0) * 100).rounded()))% read" : nil)
                     }
-                    if Self.canRate(current) { rating }
-                    if Self.hasFiles(current, library: library) { fileChoices }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 20)
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
             }
+            .navigationTitle(current.isAudio ? "Finished Listening" : "Finished")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-            .confirmationDialog(
-                "Remove “\(current.title)”?", isPresented: $confirmRemove, titleVisibility: .visible
-            ) {
-                Button("Remove Book and File", role: .destructive) {
-                    router.clearFinished(current, library: library)
-                    dismiss()
-                }
-            } message: {
-                Text("The file is the book’s only copy — the book is removed from the library with it. Your BookMaster shelf isn’t touched.")
             }
         }
         .presentationDetents([.medium, .large])
     }
 
+    /// The book beside its cover, small: how long it took and what was kept from it.
     private var header: some View {
-        VStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 14) {
             Group {
-                if let cover = library.coverThumbnail(for: current, maxPixels: 360) {
+                if let cover = library.coverThumbnail(for: current, maxPixels: 240) {
                     Image(uiImage: cover).resizable().scaledToFit()
                 } else {
                     Image(systemName: current.isAudio ? "headphones" : "book.closed.fill")
-                        .font(.largeTitle)
-                        .frame(width: 80, height: 120)
+                        .font(.title2)
+                        .frame(width: 60, height: 90)
                         .background(Color.ptAccent.opacity(0.2))
                 }
             }
-            .frame(maxHeight: 120)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(width: 60, height: 90)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .accessibilityHidden(true)
-            Text(current.isAudio ? "You finished listening to" : "You finished")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(current.title)
-                .font(.title3.weight(.semibold))
-                .multilineTextAlignment(.center)
-            if !current.author.isEmpty {
-                Text(current.author).font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(current.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                if !current.author.isEmpty {
+                    Text(current.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if let summary {
+                    Text(summary.line).font(.caption.weight(.medium)).padding(.top, 2)
+                    Text("Started \(summary.started.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let keptLine {
+                    Text(keptLine).font(.caption2).foregroundStyle(.secondary)
+                }
             }
-            // how long it took and what was kept from it
-            if let summary {
-                Text(summary.line)
-                    .font(.footnote.weight(.medium))
-                    .padding(.top, 4)
-                Text("Started \(summary.started.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let keptLine {
-                Text(keptLine).font(.caption).foregroundStyle(.secondary)
-            }
+            Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
     }
@@ -209,7 +200,8 @@ struct FinishedBookSheet: View {
                 }
             }
             .sensoryFeedback(.selection, trigger: picked)
-            Text("Your rating goes to BookMaster.")
+            // rated whether or not BookMaster is linked: kept with the book either way
+            Text(Self.canRate(current) ? "Your rating goes to BookMaster." : "Kept with the book.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -235,10 +227,19 @@ struct FinishedBookSheet: View {
                 Button(role: .destructive) {
                     confirmRemove = true
                 } label: {
-                    Label(size.map { "Remove Book and File (\($0))" } ?? "Remove Book and File", systemImage: "trash")
+                    Label(size.map { "Remove File (\($0))" } ?? "Remove File", systemImage: "trash")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                // over this button (iOS 26 draws a dialog over the view it belongs to)
+                .confirmationDialog("Remove the file of “\(current.title)”?", isPresented: $confirmRemove, titleVisibility: .visible) {
+                    Button("Remove File and Book", role: .destructive) {
+                        router.clearFinished(current, library: library)
+                        dismiss()
+                    }
+                } message: {
+                    Text("The file is the book’s only copy, so the book leaves your library with it. Your BookMaster shelf isn’t touched.")
+                }
             }
             Button {
                 dismiss()

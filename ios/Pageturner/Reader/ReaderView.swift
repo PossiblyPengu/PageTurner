@@ -239,7 +239,7 @@ struct ReaderView: View {
             .task {
                 guard let sheet = DebugScenario.readerSheet else { return }
                 // the ones that act on the open book wait for it to open
-                let needsBook = ["jump", "pdfsearch", "readaloud", "readaloudaway"].contains(sheet)
+                let needsBook = ["jump", "pdfsearch", "readaloud", "readaloudaway", "finishbook"].contains(sheet)
                 try? await Task.sleep(nanoseconds: needsBook ? 7_000_000_000 : 3_000_000_000)
                 switch sheet {
                 case "pdfsearch":
@@ -267,6 +267,14 @@ struct ReaderView: View {
                     onBack()
                 // a jump far ahead: the Back chip should appear
                 case "jump": model.go(toProgression: 0.8)
+                // read to the end: to the last pages, then turn forward past the last one — the "you finished it" sheet
+                case "finishbook":
+                    FinishedAsk.forget(model.book.id)
+                    model.go(toProgression: 0.999)
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    _ = await model.turnPage(forward: true)
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    _ = await model.turnPage(forward: true)
                 case "footnote":
                     model.footnote = Footnote(
                         text: "Ishmael is the narrator; the name is an invitation, not a claim.",

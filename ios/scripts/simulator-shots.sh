@@ -144,6 +144,21 @@ shot 33-large-player 8 -PTDebugScreen player
 shot 34-large-voices 12 -PTDebugScreen settings -PTDebugSettingsPush voices
 xcrun simctl ui "$UDID" content_size large 2>/dev/null || true
 
+# the "you finished it" sheet — last, since both finish a book of the sample library. Read to the end of Moby-Dick and
+# turn past its last page; then Mark as Finished on another book. Each must bring the sheet up (Debug builds log
+# PTFinishedAsked when it is put up).
+finished_check() {
+  local name=$1 what=$2
+  xcrun simctl spawn "$UDID" log show --style compact --last 2m \
+    --predicate 'process == "Pageturner" AND eventMessage CONTAINS "PTFinished"' > "$OUT/$name.txt" 2>/dev/null || true
+  if grep -q "PTFinishedAsked" "$OUT/$name.txt"; then echo "ok     $name: $what brought up the finish sheet"
+  else echo "::error::$what did not bring up the finish sheet"; FAILED=1; fi
+}
+shot 85-finished-reading 30 -PTDebugScreen reader -PTDebugReaderSheet finishbook
+finished_check 85-finished-reading "reading to the end"
+shot 86-finished-marked 12 -PTDebugScreen finished
+finished_check 86-finished-marked "Mark as Finished"
+
 fi
 
 if [[ $SET != screens ]]; then

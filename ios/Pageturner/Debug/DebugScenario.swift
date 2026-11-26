@@ -9,7 +9,8 @@ import UIKit
 ///
 ///     -PTDebugSeed 1            fill an empty library with sample books, a listen and some history
 ///     -PTDebugScreen library    which screen to put up (see `run`)
-///     -PTDebugReaderSheet …     with `reader`: contents | settings | search | voices | readaloud | readaloudaway
+///     -PTDebugReaderSheet …     with `reader`: contents | settings | search | voices | readaloud | readaloudaway |
+///                               finishbook (read to the end and turn past the last page)
 ///     -PTDebugReaderScroll 1    with `reader`: lay the book out as one scrolling page
 ///     -PTDebugHighlights …      with readaloud: which of sentence,line,word to light (comma separated)
 ///     -PTDebugVoice neural      with readaloud: speak with the downloaded Piper voice (en_US-lessac-low)
@@ -138,6 +139,16 @@ enum DebugScenario {
             }
             router.detail = cloudBook
         case "edit": router.editing = text
+        // the "you finished it" sheet, as Mark as Finished brings it up — on a book other than Moby-Dick
+        case "finished":
+            let other = library.books.first {
+                !$0.isAudio && $0.title != "Moby-Dick" && $0.ext == "epub" && !library.inCloud.contains($0.id)
+            } ?? text
+            if let other {
+                FinishedAsk.forget(other.id)
+                selectTab(.library)
+                router.markFinished(other, library: library)
+            }
         // the lookup sheet with a fixed result set: the shelf pin, a folded-in second source,
         // a multi-edition card, the current match and one with no art — `debugLookup` in
         // LibraryView reads -PTDebugScreen and shows it

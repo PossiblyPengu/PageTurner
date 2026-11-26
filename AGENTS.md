@@ -512,8 +512,12 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Remove Download for a Drive book (it stays, to come down again), Remove Book and File for one whose file is its only copy,
   or Keep It. It comes on leaving a reader in which the book was finished (`ReaderModel.finishedHere`, `ReaderView.onDisappear`),
   when an audiobook plays out (`AudioPlayer.advance`), both through `IntentRouter.Request.bookFinished`, and after Mark as
-  Finished (`AppRouter.markFinished`); `AppRouter.offerFinished` waits for a sheet that is up and skips a book with nothing
-  to ask. Settings' "Clear files without asking" (`auto-clear-finished`) clears on leaving instead — reading the library's
+  Finished (`AppRouter.markFinished`); `AppRouter.offerFinished` never puts it up at once — 0.6 s, then after whatever sheet is up
+  goes (a minute at most): a sheet asked for while a menu or another sheet is still going away is refused by iOS without a word,
+  and the `finished` left set held every later one back. The log says why a book was or wasn't asked about ("finished" lines).
+  The simulator run checks both ways in (`85-finished-reading`: `-PTDebugReaderSheet finishbook` turns past Moby-Dick's last page;
+  `86-finished-marked`: `-PTDebugScreen finished`) by the Debug-only `PTFinishedAsked` line. The sheet leads with the rating (always —
+  kept with the book, sent to BookMaster when linked) and the file, then what to read next. Settings' "Clear files without asking" (`auto-clear-finished`) clears on leaving instead — reading the library's
   record, not the reader's opening copy, which never looked finished.
 - Saved words (`SavedWord` in the Book model region, `Library/SavedWordsView.swift`): "Save Word" in the selection menu keeps
   the word and a line of context on the book; the list opens iOS's dictionary. `Highlight.quoted` stops "Send new highlights

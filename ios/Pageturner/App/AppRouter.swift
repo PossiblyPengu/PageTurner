@@ -79,18 +79,40 @@ final class AppRouter {
     /// nothing to ask (no BookMaster to rate for, no file left). A sheet that is up (the book's page, after Mark as
     /// Finished there) is let go first — two at once can't be shown.
     func offerFinished(_ id: UUID, library: LibraryStore) {
-        guard let book = library.books.first(where: { $0.id == id }), (book.progression ?? 0) >= 0.995,
-              !FinishedAsk.asked(id), FinishedBookSheet.worthAsking(book, library: library)
-        else { return }
+        guard let book = library.books.first(where: { $0.id == id }) else { return }
+        let share = book.progression ?? 0
+        guard share >= 0.995 else {
+            Log.event("finished", "not asked about “\(book.title)”: it stands at \(Int((share * 100).rounded()))%")
+            return
+        }
+        guard !FinishedAsk.asked(id), FinishedBookSheet.worthAsking(book, library: library) else {
+            Log.event("finished", "not asked about “\(book.title)” again: asked once for this finish")
+            return
+        }
         FinishedAsk.mark(id)
-        let wait = presenting ? 0.45 : 0
-        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [self] in
-            // something else came up meanwhile: not over it — the book can be asked about another time
-            guard !presenting, let latest = library.books.first(where: { $0.id == id }) else {
+        // never at once: a sheet asked for while a menu or another sheet is still going away is refused by iOS without
+        // a word — the request was lost, and the `finished` left set kept every later one waiting behind it
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            var waited = 0
+            // something up (the book's page after Mark as Finished there, the settings): after it, for up to a minute
+            while self.presenting, waited < 120 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                waited += 1
+            }
+            if waited > 0 { try? await Task.sleep(nanoseconds: 600_000_000) }
+            guard !self.presenting, let latest = library.books.first(where: { $0.id == id }) else {
+                // still covered: the book can be asked about another time
                 FinishedAsk.forget(id)
+                Log.event("finished", "not asked about “\(book.title)”: something else stayed up")
                 return
             }
-            finished = latest
+            Log.event("finished", "asking about “\(latest.title)”")
+            #if DEBUG
+            NSLog("PTFinishedAsked %@", latest.title)   // the simulator run's check (85, 86)
+            #endif
+            self.finished = latest
         }
     }
 
