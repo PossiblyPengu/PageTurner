@@ -143,6 +143,7 @@ func runData() async {
     runCompanionChecks()
     runStoryRecapChecks()
     runBookEndingChecks()
+    runBMWebNavChecks()
     runShelfChecks()
     runChatChecks()
     runWebAppsChecks()

@@ -141,6 +141,11 @@ final class AppRouter {
         case .chat:
             Notifier.shared.noteChatOpened()
             showChat = true
+        case let .web(app, url) where app == .bookmaster:
+            // BookMaster's pages are the BookMaster tab's: the page they belong to, there — not a second copy full screen
+            let tab = BMWebNav.tab(for: url, otherwise: bmPage)
+            showBookMaster(tab)
+            BMWebPages.shared.tab(tab).open(BMWebNav.embedded(url))
         case let .web(app, url):
             browser = BMWebLaunch(app: app, url: url)
         }

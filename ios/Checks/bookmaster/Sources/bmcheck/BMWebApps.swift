@@ -185,6 +185,59 @@ enum BMWebPlace: String, CaseIterable, Identifiable {
     }
 }
 
+/// The BookMaster tab's pages, each once, in the order its one menu lists them (the title at the top of the tab):
+/// Shelf, Together and Stats have web views of their own (`BMWebTab`); the rest open in the page on screen. There
+/// used to be a switch for three of them, a "BookMaster pages" menu that listed the one on screen again, and
+/// BookMaster in the "Open an app" menu as well — three ways to the same pages.
+enum BMWebNav: Hashable, Identifiable {
+    case tab(BMWebTab)
+    case place(BMWebPlace)
+
+    static let all: [BMWebNav] = [
+        .place(.today), .tab(.shelf), .tab(.together), .tab(.stats),
+        .place(.find), .place(.series), .place(.wrapped), .place(.profile),
+    ]
+
+    var id: String { path }
+
+    var title: String {
+        switch self {
+        case let .tab(tab): return tab.title
+        case let .place(place): return place.title
+        }
+    }
+
+    var path: String {
+        switch self {
+        case let .tab(tab): return tab.path
+        case let .place(place): return place.path
+        }
+    }
+
+    /// The page a path is on: the one whose path it is or lies under ("/library/42" is the Shelf). Nil for a page
+    /// the menu does not list.
+    static func at(path: String) -> BMWebNav? {
+        let trimmed = path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
+        return all.first { trimmed == $0.path || trimmed.hasPrefix($0.path + "/") }
+    }
+
+    /// The tab's web view a BookMaster address belongs in: its own page's, else the one given.
+    static func tab(for url: URL, otherwise current: BMWebTab) -> BMWebTab {
+        if case let .tab(tab)? = at(path: url.path) { return tab }
+        return current
+    }
+
+    /// `url` asked to be drawn alone, as the tab shows BookMaster (`?in=pageturner`), keeping what else it asks.
+    static func embedded(_ url: URL) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var items = parts.queryItems ?? []
+        guard !items.contains(where: { $0.name == "in" }) else { return url }
+        items.append(URLQueryItem(name: "in", value: "pageturner"))
+        parts.queryItems = items
+        return parts.url ?? url
+    }
+}
+
 /// What the browser does with an address it is asked to go to.
 enum BMWebPolicy {
     enum Decision: Equatable {

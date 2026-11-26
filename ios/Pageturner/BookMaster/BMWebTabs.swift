@@ -4,19 +4,20 @@ import SwiftUI
 /// the web shows (`BMWebTab`), drawn alone, so they are the same everywhere and there is no second copy of them
 /// here to keep in step. Pageturner draws what is around a page: the tab bar, the notifications bell, the settings
 /// button, the banners and the floating chat button.
-/// The BookMaster tab: its Shelf, Together and Stats pages behind one switch at the top — they were three tabs.
+/// The BookMaster tab: every BookMaster page from one menu, its title at the top (`BMWebNav`) — the shelf, Together and
+/// the stats each in a web view of their own (`AppRouter.bmPage`), the rest opened in the one on screen. There used to
+/// be a switch for three of them, a "BookMaster pages" menu that listed them again, and BookMaster itself in the "Open
+/// an app" menu: three ways to the same pages.
 struct BookMasterTabView: View {
     @Environment(AppRouter.self) private var router
 
     var body: some View {
-        BMWebTabView(tab: router.bmPage, switchesPages: true)
+        BMWebTabView(tab: router.bmPage)
     }
 }
 
 struct BMWebTabView: View {
     let tab: BMWebTab
-    /// The BookMaster tab's switch between its pages, under the bar.
-    var switchesPages = false
     @Environment(AppRouter.self) private var router
     @State private var showInbox = false
     private let bookMaster = BookMaster.shared
@@ -33,42 +34,31 @@ struct BMWebTabView: View {
                         .background(Color(uiColor: .systemGroupedBackground))
                 }
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if switchesPages, bookMaster.isLinked { pagePicker }
-            }
-            .navigationTitle(switchesPages ? "BookMaster" : tab.title)
+            .navigationTitle("BookMaster")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $showInbox) { BMInboxView() }
             .toolbar { barItems }
         }
     }
 
-    /// Shelf · Together · Stats — Together marked while something there is unread.
-    private var pagePicker: some View {
-        Picker("BookMaster page", selection: Binding(get: { router.bmPage }, set: { router.bmPage = $0 })) {
-            ForEach([BMWebTab.shelf, .together, .stats]) { page in
-                Text(page == .together && inbox.unreadCount > 0 ? "Together •" : page.title).tag(page)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(.bar)
-    }
-
     /// The page this tab keeps — made only when a linked reader's toolbar asks for it.
     private var page: BMWebPage { BMWebPages.shared.tab(tab) }
 
-    /// A way back through the pages the tab has been sent to, the notifications bell and the ways into Kindred and Quest Log
-    /// on the Together tab, a menu of BookMaster's other pages; Settings on every one.
+    /// The page on screen, by its address; the tab's own until it has loaded.
+    private var current: BMWebNav {
+        page.currentURL.flatMap { BMWebNav.at(path: $0.path) } ?? .tab(tab)
+    }
+
+    /// Back through the pages the tab has been sent to; the notifications bell and the other apps; the page menu as
+    /// the title; Settings. The same on every page.
     @ToolbarContentBuilder
     private var barItems: some ToolbarContent {
-        if bookMaster.isLinked, page.canGoBack {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { page.goBack() } label: { Label("Back", systemImage: "chevron.backward") }
+        if bookMaster.isLinked {
+            if page.canGoBack {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { page.goBack() } label: { Label("Back", systemImage: "chevron.backward") }
+                }
             }
-        }
-        if bookMaster.isLinked, tab == .together {
             ToolbarItem(placement: .topBarLeading) {
                 let unread = inbox.unreadCount
                 Button { showInbox = true } label: {
@@ -77,8 +67,9 @@ struct BMWebTabView: View {
                 .accessibilityLabel(unread > 0 ? "Notifications, \(unread) unread" : "Notifications")
             }
             ToolbarItem(placement: .topBarLeading) {
+                // the other apps: BookMaster is this tab
                 Menu {
-                    ForEach(BMWebApp.allCases) { app in
+                    ForEach(BMWebApp.allCases.filter { $0 != .bookmaster }) { app in
                         Button { router.browser = BMWebLaunch(app: app, url: nil) } label: {
                             Label(app.name, systemImage: app.symbol)
                         }
@@ -86,25 +77,45 @@ struct BMWebTabView: View {
                 } label: {
                     Image(systemName: "square.grid.2x2")
                 }
-                .accessibilityLabel("Open an app")
+                .accessibilityLabel("Open Kindred or Quest Log")
             }
-        }
-        if bookMaster.isLinked {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button(tab.title) { page.open() }
-                    ForEach(BMWebPlace.allCases) { place in
-                        Button(place.title) { page.open(place.url) }
-                    }
-                    Divider()
-                    Button("Reload") { page.reload() }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("BookMaster pages")
-            }
+            ToolbarItem(placement: .principal) { pageMenu }
         }
         SettingsToolbarItem(router: router)
+    }
+
+    /// Every BookMaster page, once: the title says which is on screen.
+    private var pageMenu: some View {
+        Menu {
+            ForEach(BMWebNav.all) { nav in
+                Button { go(nav) } label: {
+                    if nav == current {
+                        Label(nav.title, systemImage: "checkmark")
+                    } else {
+                        Text(nav.title)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(current.title).font(.headline)
+                Image(systemName: "chevron.down").font(.caption.weight(.bold))
+            }
+            .foregroundStyle(.primary)
+        }
+        .accessibilityLabel("BookMaster page")
+        .accessibilityValue(current.title)
+    }
+
+    /// The shelf, Together and the stats are their own web views (chosen again, back to their start); the rest open in
+    /// the page on screen, with Back to return.
+    private func go(_ nav: BMWebNav) {
+        switch nav {
+        case let .tab(other):
+            if other == tab { page.open() } else { router.bmPage = other }
+        case let .place(place):
+            page.open(place.url)
+        }
     }
 }
 

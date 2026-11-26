@@ -291,14 +291,18 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Nothing of the web site is involved, so it works whether or not the PWA is deployed. (`pageturner://link?code=`
   and `docs/js/native-link.js` are the older route and still work; the app handles both.) Why not
   `ASWebAuthenticationSession`: its callback came from a page that was never deployed, so linking never completed.
-- BookMaster's screens are BookMaster's own pages, not a native copy: the **BookMaster** tab's Shelf, Together and Stats pages (one tab with a
-  switch under its bar, `BookMasterTabView` and `AppRouter.bmPage`; go there with `router.showBookMaster(_:)` — they were three tabs) are web views of
+- BookMaster's screens are BookMaster's own pages, not a native copy: the **BookMaster** tab (`BookMasterTabView`; go there with
+  `router.showBookMaster(_:)` — Shelf, Together and Stats were three tabs) has **one** way between its pages: the title is a menu of every page,
+  each once (`BMWebNav.all`, Linux-checked: Today, Shelf, Together, Stats, Find a Book, Series, Wrapped, Profile; the title is the page on screen,
+  `BMWebNav.at(path:)`). Shelf, Together and Stats (`AppRouter.bmPage`) are web views of
   `/library`, `/together` and `/progress` (`BMWebTab`, pure and Linux-checked; `BMWebTabView` / `BMWebTabContent` in `BMWebTabs.swift`), opened
   with `?in=pageturner` (remembered for the life of the view, `BookMaster/src/lib/embedded.ts`): BookMaster then draws the page alone — no bars,
   bell, banners or chat button, and no heartbeat of its own — and Pageturner draws those around it (tab bar, Settings, the Together bell and the
   "Open an app" menu) and says where you are (`place`, set from the selected tab in `RootView`). One `WKWebView` per tab is kept alive
-  (`BMWebPages.tab(_:)`), pull to refresh is the web view's own. The web's own tab bar and header are not drawn there, so the tab's toolbar brings a Back
-  button (while the tab has been sent somewhere) and a "BookMaster pages" menu (`BMWebPlace`: Today, Find a Book, Series, Wrapped, Profile, the tab's own page, Reload). Unlinked, a tab shows `BMLinkPrompt` instead. A link out of a tab into Kindred or
+  (`BMWebPages.tab(_:)`), pull to refresh is the web view's own; the other pages (`BMWebPlace`) open in the one on screen, with Back. The bar is
+  the same on every page: Back (while sent somewhere), the bell, Kindred/Quest Log (not BookMaster — this is it), the page menu, Settings. A notice
+  or link to a BookMaster page opens in this tab, in the page it belongs to (`AppRouter.present`, `BMWebNav.tab(for:)`), never a second copy full
+  screen. Unlinked, a tab shows `BMLinkPrompt` instead. A link out of a tab into Kindred or
   Quest Log opens that app full screen (`router.browser`, `BMWebBrowserScreen`), as do notices and `pageturner://open`. What stays native is what
   needs the device: the link and its sync (`BookMasterClient`: progress, sessions, quotes, covers, shelf pull, shelving a book, comments and
   suggestions on a book's page), the notifications and inbox (`Notifier`, `BMInbox*`), the floating chat button, and the barcode scanner. Do not
