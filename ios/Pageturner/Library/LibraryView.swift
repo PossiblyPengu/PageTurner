@@ -28,6 +28,10 @@ struct LibraryView: View {
     @State private var reviewPicked = false
     /// The folded-in Search tab's field — empty means the shelf shows.
     @State private var query = ""
+    /// The books by one author, from a book page's author: a chip at the front of the filter row, ✕ or any other chip
+    /// to go back. (It used to be typed into the search field, whose clear button iOS hides once the field isn't being
+    /// edited — so there was no way back to the whole library.)
+    @State private var authorFilter: String?
     @State private var showCatalogs = false
     /// Removing the ticked books is being asked — over the select bar's Remove, not the middle of the screen.
     @State private var removingSelected = false
@@ -122,6 +126,8 @@ struct LibraryView: View {
         // a PDF's text version is reached from the PDF (its cover is badged for it), not a second card on the shelf
         let ids = Set(library.books.map(\.id))
         list = list.filter { book in book.textVersionOf.map { !ids.contains($0) } ?? true }
+        // an author's books are all of theirs, whichever shelf was chosen
+        if let authorFilter { return list.filter { BMShelf.sameAuthor(authorFilter, $0.author) } }
         switch activeShelfKey {
         case Self.allKey: break
         case Self.upNextKey: list = list.filter { $0.bmUpNext == true }
@@ -230,8 +236,8 @@ struct LibraryView: View {
             }
     }
 
-    /// Requests that arrive from outside: a book page's "find this author in
-    /// the library" lands here as a shelf search.
+    /// Requests that arrive from outside: a book page's author lands here as
+    /// that author's books, a chip at the front of the filter row.
     private func routing<V: View>(_ content: V) -> some View {
         content
             // books removed elsewhere (the confirmation lives at the root) drop out of the selection
@@ -246,7 +252,8 @@ struct LibraryView: View {
                 // whatever sheet the tap came from (the book page) is put away first
                 router.dismissPresentations()
                 router.tab = .library
-                query = search
+                query = ""
+                authorFilter = search
             }
     }
 
@@ -275,19 +282,21 @@ struct LibraryView: View {
                         ContentUnavailableView.search(text: query)
                             .padding(.top, 40)
                     } else {
-                        let filtered = activeShelfKey != Self.allKey
+                        let filtered = activeShelfKey != Self.allKey || authorFilter != nil
                         ContentUnavailableView {
                             Label(activeShelfKey == "~audio" ? "No Audiobooks" : "No Books",
                                   systemImage: activeShelfKey == "~audio" ? "headphones" : "book.closed")
                         } description: {
-                            if filtered {
+                            if let authorFilter {
+                                Text("Nothing by \(authorFilter) in your library.")
+                            } else if filtered {
                                 Text("Nothing on this shelf.")
                             } else {
                                 Text("Nothing matches yet.")
                             }
                         } actions: {
                             if filtered {
-                                Button("Show All Books") { shelfKey = Self.allKey }
+                                Button("Show All Books") { showAll() }
                             } else {
                                 Button { router.showImporter = true } label: {
                                     Label("Add Books", systemImage: "plus")
@@ -296,7 +305,7 @@ struct LibraryView: View {
                         }
                         .padding(.top, 40)
                     }
-                } else if activeShelfKey == Self.seriesKey, !searching {
+                } else if activeShelfKey == Self.seriesKey, authorFilter == nil, !searching {
                     ForEach(SeriesShelf.groups(books)) { series in seriesSection(series) }
                 } else if order == .series, !searching {
                     // a series together, under its name
@@ -365,15 +374,26 @@ struct LibraryView: View {
         return out
     }
 
-    /// "All", "Up next" (books BookMaster has queued) and the reader's own shelves.
+    /// Back to the whole library, from a shelf or an author.
+    private func showAll() {
+        shelfKey = Self.allKey
+        authorFilter = nil
+    }
+
+    /// "All", "Up next" (books BookMaster has queued) and the reader's own shelves — after the author being shown.
     @ViewBuilder
     private var shelfChips: some View {
-        if shelfKeys.count > 1 {
+        if shelfKeys.count > 1 || authorFilter != nil {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    if let authorFilter { authorChip(authorFilter) }
                     ForEach(shelfKeys, id: \.self) { key in
-                        let active = key == activeShelfKey
-                        Button { shelfKey = key } label: {
+                        // an author's books stand in for any shelf: none is lit beside them
+                        let active = authorFilter == nil && key == activeShelfKey
+                        Button {
+                            shelfKey = key
+                            authorFilter = nil
+                        } label: {
                             Text("\(shelfLabel(key)) · \(shelfCount(key))")
                                 .font(.subheadline.weight(.medium))
                                 .padding(.horizontal, 14)
@@ -390,6 +410,26 @@ struct LibraryView: View {
             // a clipped chip at large text reads as scrollable with a soft edge
             .ptSoftScrollEdges()
         }
+    }
+
+    /// The author being shown, lit, with the ✕ that goes back to all books.
+    private func authorChip(_ author: String) -> some View {
+        let count = library.books.filter { BMShelf.sameAuthor(author, $0.author) && $0.textVersionOf == nil }.count
+        return Button { showAll() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "xmark").font(.caption.weight(.bold))
+                Text("\(author) · \(count)").lineLimit(1)
+            }
+            .font(.subheadline.weight(.medium))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Color.ptAccent, in: Capsule())
+            .foregroundStyle(Color.ptOnAccent)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Books by \(author), \(count == 1 ? "1 book" : "\(count) books")")
+        .accessibilityHint("Shows all books again")
+        .accessibilityAddTraits(.isSelected)
     }
 
     private var emptyState: some View {

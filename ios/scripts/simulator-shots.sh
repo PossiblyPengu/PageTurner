@@ -79,6 +79,7 @@ shot 70-bookmaster 8 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen together
 shot 71-bookmaster-shelf 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen shelf
 shot 73-bookmaster-progress 10 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen stats
 shot 08-search 6 -PTDebugScreen search
+shot 08a-library-author 8 -PTDebugScreen author
 shot 09-settings 6 -PTDebugScreen settings
 # the settings list as a linked reader sees it (the BookMaster suite rows), and the pages behind it
 shot 09a-settings-linked 8 -PTDebugSeed 1 -PTDebugLinked 1 -PTDebugScreen settings

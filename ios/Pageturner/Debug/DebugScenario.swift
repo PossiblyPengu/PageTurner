@@ -130,6 +130,8 @@ enum DebugScenario {
         case "shelf": router.showBookMaster(.shelf)
         case "settings": router.showSettings = true
         case "detail": router.detail = text
+        // a book page's author tapped: the library shows that author's books, with the chip that goes back
+        case "author": router.librarySearch = text?.author; selectTab(.library)
         // a book still in Google Drive: its page offers the download (with `-PTDebugCloudState downloading`, shows one on its way)
         case "clouddetail":
             let downloading = defaults.string(forKey: "PTDebugCloudState") == "downloading"

@@ -114,7 +114,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Remove… (each cover's own dialog offers what removing can mean: a Drive book can keep itself without its download) — and Book Info
   the same, with Edit and Share in its bar. **A `.toolbar` must go inside the `NavigationStack`** (on its content): Book Info's was
   put on the stack from a modifier outside it, so its Edit and Share were never drawn and a book's details could not be edited at all.
-  Edit Details has the series name and number (the Series shelf and next-in-series go by them). In the reader the selection menu is iOS's own + Highlight + More… (`SelectionChoicesSheet`,
+  Edit Details has the series name and number (the Series shelf and next-in-series go by them). Book Info's author shows
+  that author's books in the library as a lit chip at the front of the filter row (`LibraryView.authorFilter`,
+  `BMShelf.sameAuthor`); ✕ or any other chip goes back. It used to fill the search field, and iOS hides the field's clear
+  button once it isn't being edited: no way back to all the books. In the reader the selection menu is iOS's own + Highlight + More… (`SelectionChoicesSheet`,
   `ReaderModel.act(_:on:)`: the choices take the selection they were given, it is cleared before the sheet); search is a Contents tab;
   the Reading sheet is one short screen with More Options (`ReaderMoreOptions`), and read-aloud's settings open from the read-aloud
   bar (`ReadAloudSheetContent`). A new action goes into one of these, not a new button or menu.

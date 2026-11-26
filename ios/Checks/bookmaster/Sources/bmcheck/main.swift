@@ -112,6 +112,11 @@ func runData() async {
     check("author: reordered name agrees", BMShelf.authorsAgree("Herbert, Frank", "Frank Herbert"))
     check("author: different people disagree", !BMShelf.authorsAgree("Stephen King", "Frank Herbert"))
     check("author: missing never decides", BMShelf.authorsAgree("", "Frank Herbert") && BMShelf.authorsAgree("Frank Herbert", nil))
+    check("author: the same person either way round",
+          BMShelf.sameAuthor("Melville, Herman", "Herman Melville & Someone Else")
+              && BMShelf.sameAuthor("Herman Melville & Someone Else", "Herman Melville"))
+    check("author: a missing author is nobody's", !BMShelf.sameAuthor("", "Herman Melville") && !BMShelf.sameAuthor("Herman Melville", " "))
+    check("author: different people are not the same", !BMShelf.sameAuthor("Jane Austen", "Herman Melville"))
 
     runBookText()
     runBackupChecks()

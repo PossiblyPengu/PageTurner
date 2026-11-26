@@ -134,6 +134,14 @@ enum BMShelf {
         return gotKeys.contains(nameKey(wanted) ?? "") || gotKeys.contains(nameKey(want) ?? "")
     }
 
+    /// Two author lines name the same person, either way round ("Melville, Herman" and "Herman Melville & …") — and
+    /// a missing author is nobody's, where `authorsAgree` lets it pass so a match by title can decide.
+    static func sameAuthor(_ a: String, _ b: String) -> Bool {
+        let a = a.trimmingCharacters(in: .whitespaces), b = b.trimmingCharacters(in: .whitespaces)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        return authorsAgree(a, b) || authorsAgree(b, a)
+    }
+
     static func match(_ book: Book, in rows: [BMShelfRow]) -> BMShelfRow? {
         if let pin = book.bookmasterId, let hit = rows.first(where: { $0.userBookId == pin }) {
             return hit

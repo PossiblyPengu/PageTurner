@@ -188,7 +188,7 @@ struct BookDetailSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityHint("Shows this author on the shelf")
+                        .accessibilityHint("Shows this author’s books in the library")
                     }
                     HStack(spacing: 6) {
                         Text(book.ext.uppercased())
