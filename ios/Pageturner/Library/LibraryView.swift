@@ -29,6 +29,8 @@ struct LibraryView: View {
     /// The folded-in Search tab's field — empty means the shelf shows.
     @State private var query = ""
     @State private var showCatalogs = false
+    /// Removing the ticked books is being asked — over the select bar's Remove, not the middle of the screen.
+    @State private var removingSelected = false
     /// "Later" on the backup reminder, until the view is next built.
     @State private var backupSnoozed = false
 
@@ -509,9 +511,22 @@ struct LibraryView: View {
                 }
             }
             barButton("Find Details", "sparkle.magnifyingglass") { findDetails() }
-            barButton("Remove", "trash") {
-                router.askDelete(library.books.filter { selected.contains($0.id) })
-            }
+            barButton("Remove", "trash") { removingSelected = true }
+                .confirmationDialog(
+                    selected.count == 1 ? "Remove 1 book?" : "Remove \(selected.count) books?",
+                    isPresented: $removingSelected, titleVisibility: .visible
+                ) {
+                    Button(selected.count == 1 ? "Remove from Library" : "Remove \(selected.count) Books", role: .destructive) {
+                        for book in library.books where selected.contains(book.id) {
+                            router.putAway(book.id)
+                            library.delete(book)
+                        }
+                        selected = []
+                        selecting = false
+                    }
+                } message: {
+                    Text(BookRemoval.message(library.books.filter { selected.contains($0.id) }, inCloud: library.inCloud))
+                }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)

@@ -42,7 +42,7 @@ struct BookDetailSheet: View {
     @State private var tint: Color = .ptAccent
     @State private var confirmRestart = false
     @State private var confirmWantToRead = false
-    @State private var confirmClearFile = false
+    @State private var confirmRemove = false
     @State private var detent: PresentationDetent = .large
 
     private var isFinished: Bool { (book.progression ?? 0) >= 0.995 }
@@ -426,7 +426,9 @@ struct BookDetailSheet: View {
                     }
                 }
                 Section {
-                    Button("Remove…", role: .destructive, action: onDelete)
+                    Button("Remove…", role: .destructive) { confirmRemove = true }
+                        // asked over this row, not after the page has gone
+                        .modifier(RemoveBookDialog(book: book, isPresented: $confirmRemove))
                 }
             }
             .navigationTitle("Book Info")

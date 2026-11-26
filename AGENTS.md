@@ -61,6 +61,10 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   `ReadiumShared.Link`; keep Readium's `Color` in files that don't import SwiftUI.
 - `tabViewBottomAccessory(isEnabled:)` is iOS 26.1; the plain `tabViewBottomAccessory` is 26.0.
 - `.backgroundTask` is a *Scene* modifier, not a View one.
+- iOS 26 draws a `confirmationDialog` as a popover over the view the modifier is attached to. One attached to a whole
+  grid or the root floated in the middle of the screen, over some other book. Attach a dialog about one thing to that
+  thing's own view (`BookCellDialogs` on each cover, `RemoveBookDialog` on Book Info's row, the shelf's and duplicate
+  group's own rows, the select bar's Remove), with an `isPresented` that compares ids.
 - Locking the screen is `.inactive`, not necessarily `.background` — with the keep-awake idle timer or
   live read-aloud the app can be suspended without `.background` ever firing. Anything that must reach
   disk on lock (the reader's position) is saved on `.inactive` too (`ReaderView`); session-end bookkeeping

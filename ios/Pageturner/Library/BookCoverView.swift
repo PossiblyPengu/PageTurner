@@ -182,6 +182,8 @@ struct BookGrid: View {
     @State private var restarting: Book?
     /// Back to "want to read" forgets the place too, so it asks first.
     @State private var wantToRead: Book?
+    /// The book whose removal is being asked about — over its own cover (`BookCellDialogs`).
+    @State private var removing: Book?
 
     /// Wider cells at accessibility sizes, so titles under the covers have room.
     private var columns: [GridItem] {
@@ -207,26 +209,6 @@ struct BookGrid: View {
         .ptAnimation(.smooth(duration: 0.35), value: books.map(\.id))
         .ptAnimation(.snappy(duration: 0.2), value: selection?.wrappedValue)
         .sensoryFeedback(.selection, trigger: selection?.wrappedValue)
-        .confirmationDialog(
-            "Start over?", isPresented: Binding(get: { restarting != nil }, set: { if !$0 { restarting = nil } }),
-            titleVisibility: .visible, presenting: restarting
-        ) { book in
-            Button(book.isAudio ? "Listen from the Beginning" : "Start from the Beginning", role: .destructive) {
-                library.restart(book.id)
-            }
-        } message: { _ in
-            Text("Your place in this book is forgotten.")
-        }
-        .confirmationDialog(
-            "Back to Want to Read?", isPresented: Binding(get: { wantToRead != nil }, set: { if !$0 { wantToRead = nil } }),
-            titleVisibility: .visible, presenting: wantToRead
-        ) { book in
-            Button("Move to Want to Read", role: .destructive) {
-                BookMaster.shared.moveToShelf(.wantToRead, bookID: book.id, library: library)
-            }
-        } message: { _ in
-            Text("Your place in this book is forgotten.")
-        }
     }
 
     /// One book, whichever shape the list takes — the tap, the menu and what it
@@ -254,6 +236,8 @@ struct BookGrid: View {
         .accessibilityHint(selection == nil ? (library.inCloud.contains(book.id) ? "Opens the book’s page, where it can be downloaded" : "Opens the book")
             : (selection?.wrappedValue.contains(book.id) == true ? "Double tap to deselect" : "Double tap to select"))
         .contextMenu { bookMenu(book) }
+        // its dialogs over this cover, not the middle of the screen
+        .modifier(BookCellDialogs(book: book, restarting: $restarting, wantToRead: $wantToRead, removing: $removing))
     }
 
     private var ticked: Bool { selection != nil }
@@ -393,7 +377,7 @@ struct BookGrid: View {
                 Label("Book Info", systemImage: "info.circle")
             }
             Divider()
-            Button(role: .destructive) { router.askDelete([book]) } label: {
+            Button(role: .destructive) { removing = book } label: {
                 Label("Remove…", systemImage: "trash")
             }
         }

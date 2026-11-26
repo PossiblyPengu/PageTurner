@@ -34,6 +34,17 @@ struct DuplicatesSheet: View {
                                 }
                             }
                             Button("Merge into one") { confirming = group }
+                                // asked over this group's button (iOS 26 draws a dialog over the view it belongs to)
+                                .confirmationDialog(
+                                    "Merge these copies?",
+                                    isPresented: Binding(get: { confirming?.first?.id == group.first?.id },
+                                                         set: { if !$0 { confirming = nil } }),
+                                    titleVisibility: .visible
+                                ) {
+                                    Button("Merge, keep the first", role: .destructive) { merge(group) }
+                                } message: {
+                                    Text("\(group.count - 1) extra \(group.count == 2 ? "copy is" : "copies are") removed from this device.")
+                                }
                         } footer: {
                             Text("Highlights, bookmarks and shelves are kept; the extra files are deleted.")
                         }
@@ -45,21 +56,15 @@ struct DuplicatesSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear { groups = library.duplicateGroups() }
-            .confirmationDialog(
-                "Merge these copies?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
-                titleVisibility: .visible, presenting: confirming
-            ) { group in
-                Button("Merge, keep the first", role: .destructive) {
-                    // the copies merged away are put away like any removed book (a voice, the player, an open reader)
-                    for other in group.dropFirst() { router.putAway(other.id) }
-                    library.merge(keep: group[0].id, removing: group.dropFirst().map(\.id))
-                    groups = library.duplicateGroups()
-                }
-            } message: { group in
-                Text("\(group.count - 1) extra \(group.count == 2 ? "copy is" : "copies are") removed from this device.")
-            }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func merge(_ group: [Book]) {
+        // the copies merged away are put away like any removed book (a voice, the player, an open reader)
+        for other in group.dropFirst() { router.putAway(other.id) }
+        library.merge(keep: group[0].id, removing: group.dropFirst().map(\.id))
+        groups = library.duplicateGroups()
     }
 
     private func detail(_ book: Book, keep: Bool) -> String {

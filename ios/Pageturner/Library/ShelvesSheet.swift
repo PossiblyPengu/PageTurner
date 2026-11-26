@@ -53,6 +53,20 @@ struct ShelvesSheet: View {
                             .tint(.orange)
                         }
                         .accessibilityValue(accessibilityState(library.state(of: name, among: target.bookIDs)))
+                        // asked over this shelf's row (iOS 26 draws a dialog over the view it belongs to)
+                        .confirmationDialog(
+                            "Delete shelf “\(name)”?",
+                            isPresented: Binding(get: { deleting == name }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible
+                        ) {
+                            Button("Delete Shelf", role: .destructive) {
+                                library.deleteShelf(name)
+                                deleting = nil
+                            }
+                            Button("Cancel", role: .cancel) { deleting = nil }
+                        } message: {
+                            Text("Its books stay in your library.")
+                        }
                     }
                 } footer: {
                     if !library.shelves.isEmpty { Text("Swipe a shelf to rename or delete it. Deleting a shelf keeps its books.") }
@@ -79,19 +93,6 @@ struct ShelvesSheet: View {
                 Button("Cancel", role: .cancel) { newName = "" }
             } message: {
                 Text(nameProblem(newName, renaming: nil) ?? "The selected books go onto it.")
-            }
-            .confirmationDialog(
-                "Delete shelf “\(deleting ?? "")”?",
-                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-                titleVisibility: .visible
-            ) {
-                Button("Delete Shelf", role: .destructive) {
-                    if let name = deleting { library.deleteShelf(name) }
-                    deleting = nil
-                }
-                Button("Cancel", role: .cancel) { deleting = nil }
-            } message: {
-                Text("Its books stay in your library.")
             }
             .alert("Rename Shelf", isPresented: Binding(
                 get: { renaming != nil },
