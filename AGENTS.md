@@ -494,6 +494,15 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   follows the ringer switch and never touches the audio session an audiobook is using.
 - Trends (`ReadingTrends` in `Library/ReadingStats.swift`, Linux-checked): weekly totals and the finish-date forecast, which
   spreads what a book gained over the days since its first sitting in the last three weeks (days off count against the pace).
+- When a book is finished (`Reader/BookEnding.swift`, Linux-checked): the place a page reports is where it *starts*, so the
+  last page saved 99% and the book never finished. Readium's viewport (`navigator(_:viewportDidChange:)`, the bottom of what is
+  on screen) is what counts: its upper bound at the end of the story (`BookEnding.showsEnd`) — the book's end, or the start of
+  the back matter that closes the contents (`storyEnd`: acknowledgements, "About the Author", "Also by", previews, credits… a
+  trailing run of them, never half the book) — finishes it, if it was read to rather than jumped to (`ReadingSpan.reachedByJump`;
+  a tap forward from the last page counts either way). Then `endReached` saves the place as 1 (`ReaderModel.shareRead`) until
+  the reader goes back more than `finishedReach` before the story's end. A tap past the last page, or a page that is all back
+  matter, asks about the finish there and then (`offerFinish`), once (`FinishedAsk`). Audiobooks: the closing credits (a trailing
+  "Credits" chapter) or the last 30 s are all of it (`heardShare`), and reaching them asks too.
 - Finishing a book (`App/FinishedBook.swift`): `FinishedBookSheet` asks once per finish (`FinishedAsk`, forgotten by
   `LibraryStore.restart` and an audiobook played again from its end) for a BookMaster rating and what to do with the file —
   Remove Download for a Drive book (it stays, to come down again), Remove Book and File for one whose file is its only copy,

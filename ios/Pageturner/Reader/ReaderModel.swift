@@ -168,6 +168,15 @@ final class ReaderModel: ObservableObject {
     /// finishing it, which `ReaderView` asks about when the reader is left (`finishedHere`).
     private var openedUnfinished: Bool
 
+    /// The end of the story has been read to (`BookEnding.showsEnd`) and the page has not gone back into the book since:
+    /// the place is saved as all of it (`shareRead`). The place a page reports is where it *starts*, so the last page
+    /// saved 99%, and a reader done with the story stopped short of the acknowledgements after it.
+    private var endReached: Bool
+    /// Where the story ends when back matter closes the book (`BookEnding.storyEnd`, from the contents).
+    private var storyEnd: Double?
+    /// What Readium last said is on the page, top to bottom, as shares of the book.
+    private var lastViewport: NavigatorViewport?
+
     /// The book was finished in this reader — it was not when it opened, and the library has it at its end now.
     var finishedHere: Bool {
         openedUnfinished && (library.books.first { $0.id == book.id }?.progression ?? 0) >= 0.995
@@ -178,6 +187,7 @@ final class ReaderModel: ObservableObject {
         self.stored = book
         self.library = library
         openedUnfinished = (book.progression ?? 0) < 0.995
+        endReached = (book.progression ?? 0) >= 0.995
         // after the change has landed (a sink runs inside the library's own write), and read from the library
         // then — a queued value can be older than a save this reader made meanwhile
         libraryChanges = library.$books
@@ -222,6 +232,7 @@ final class ReaderModel: ObservableObject {
         guard movedThere else { return }
         // started over elsewhere: its end, reached again here, is finishing it again
         if (book.progression ?? 0) < 0.995 { openedUnfinished = true }
+        endReached = (book.progression ?? 0) >= 0.995
         narrationAhead = nil
         catchUpOnWake = nil
         if readAloud != nil { stopReadAloud() }
@@ -588,6 +599,13 @@ final class ReaderModel: ObservableObject {
             curlBefore = nil
             curlMoved = false
         }
+        // a turn forward with the end of the book on the page: there is no page after it — the book is done
+        if let navigator, let viewport = lastViewport,
+           navigator.presentation.readingProgression == .rtl ? tapOnLeft : !tapOnLeft,
+           BookEnding.showsEnd(visibleUpTo: viewport.progression.upperBound, storyEnd: nil) {
+            reachedEnd()
+            offerFinish()
+        }
         if settings.turnHaptic { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         if settings.turnSound { PageTurnSound.shared.play() }
         guard settings.pageTurn != .slide, !(navigator?.presentation.scroll ?? false),
@@ -792,7 +810,39 @@ final class ReaderModel: ObservableObject {
             // was located, since a sampled outline would name a neighbour and a wrong chapter
             // is worse than none
             self.chapterMarks = strideBy == 1 ? marks.sorted { $0.at < $1.at } : []
+            // where the story ends, when acknowledgements and the like close the book
+            self.storyEnd = strideBy == 1 ? BookEnding.storyEnd(marks.map { (title: $0.title, start: $0.at) }) : nil
         }
+    }
+
+    // MARK: The end
+
+    /// The share of the book to save for a place: all of it while the end stays reached — a look back at the last
+    /// chapter keeps it finished; reading further back than `BookEnding.finishedReach` is reading it again.
+    private func shareRead(_ progression: Double) -> Double {
+        guard endReached else { return progression }
+        if progression >= (storyEnd ?? 1) - BookEnding.finishedReach { return 1 }
+        endReached = false
+        return progression
+    }
+
+    /// The end of the story is on the page and was read to: the book is finished — saved as all of it, and BookMaster
+    /// told now.
+    private func reachedEnd() {
+        endReached = true
+        guard (book.progression ?? 0) < 1 else { return }
+        book.progression = 1
+        let what = storyEnd.map { "the story (back matter from \(Int(($0 * 100).rounded()))%)" } ?? "the book"
+        Log.event("reader", "read to the end of \(what)")
+        flushSave()
+        pushProgress(every: 0)
+    }
+
+    /// The book is done: asked about now (`FinishedBookSheet`, once per finish), not when the reader is left.
+    private func offerFinish() {
+        guard !FinishedAsk.asked(book.id) else { return }
+        flushSave()
+        IntentRouter.shared.request = .bookFinished(book.id)
     }
 
     /// The section a spot on the scrubber falls in — the mark at or just before it, or the first
@@ -1614,7 +1664,7 @@ final class ReaderModel: ObservableObject {
         lastActivityAt = Date()
         if let json = try? locator.jsonString() { book.locatorJSON = json }
         if let progression = locator.locations.totalProgression, progression.isFinite {
-            book.progression = progression
+            book.progression = shareRead(progression)
         }
         let entry = chapterEntry(for: locator)
         chapterTitle = entry?.link.title
@@ -1682,7 +1732,7 @@ final class ReaderModel: ObservableObject {
             // catalogue write, not just this field
             if let json = try? locator.jsonString() { book.locatorJSON = json }
             if let prog = locator.locations.totalProgression, prog.isFinite {
-                book.progression = prog
+                book.progression = shareRead(prog)
             }
         }
         writeReading()
@@ -1830,6 +1880,18 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
             injectionTime: .atDocumentEnd, forMainFrameOnly: false))
     }
 
+    /// What is on the page, top to bottom: the end of the story there, read to and not jumped to, finishes the book;
+    /// a page that is all back matter asks about it at once.
+    func navigator(_ navigator: any ViewportObservingNavigator, viewportDidChange viewport: NavigatorViewport?) {
+        guard let viewport, !curling, readAloud?.onScreen != false else { return }
+        lastViewport = viewport
+        guard BookEnding.showsEnd(visibleUpTo: viewport.progression.upperBound, storyEnd: storyEnd) else { return }
+        // a peek at the last page from the scrubber is not reading it (a turn forward from it is, `pageIsTurning`)
+        if !endReached, reading.reachedByJump { return }
+        reachedEnd()
+        if let storyEnd, viewport.progression.lowerBound >= storyEnd - 0.0005 { offerFinish() }
+    }
+
     func navigator(_ navigator: Navigator, didJumpTo locator: Locator) {
         guard !curling else { return }   // the curl's own silent move
         recordJump(to: locator)
@@ -1874,7 +1936,7 @@ extension ReaderModel: EPUBNavigatorDelegate, PDFNavigatorDelegate {
             narrationAhead = nil   // the page is where the voice was, or the reader moved past it
             if let json = try? locator.jsonString() { book.locatorJSON = json }
             if let prog = locator.locations.totalProgression, prog.isFinite {
-                book.progression = prog
+                book.progression = shareRead(prog)
             }
             // reading on from where a jump landed lets the way back go
             if history.back != nil { history.readOn(to: locator.locations.totalProgression ?? book.progression ?? 0) }

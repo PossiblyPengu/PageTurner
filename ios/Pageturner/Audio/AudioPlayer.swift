@@ -217,6 +217,8 @@ final class AudioPlayer: ObservableObject {
             ? AudioChapters.fromTracks(titles: trackNames, offsets: offsets, duration: total)
             : await Self.embeddedChapters(of: urls.first, duration: total, loader: loader)
         guard !closed else { return }
+        // where the story ends when closing credits end the book: listening into them is finishing it
+        creditsStart = BookEnding.storyEnd(chapters.map { (title: $0.title, start: $0.start) }, end: total)
         coverImage = library.cover(for: book)
         guard !urls.isEmpty else {
             notice = "No audio files found for this book."
@@ -740,11 +742,16 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
+    /// Where the closing credits begin, in seconds (`BookEnding.storyEnd`); nil without them.
+    private var creditsStart: TimeInterval?
+
     private func savePosition(force: Bool = false) {
         // before the files are measured there is no place to save; after a close there is nothing to follow
         guard opened, !closed, duration > 0, position.isFinite, checkpoint.maySave(at: position) else { return }
-        let progression = position / duration
+        // in the closing credits or the last half minute, all of it is heard: stopped there, the book is finished
+        let progression = BookEnding.heardShare(position: position, duration: duration, storyEnd: creditsStart)
         guard progression.isFinite else { return }
+        let finishing = progression >= 0.995 && (book.progression ?? 0) < 0.995
         checkpoint.saved(position: position, progression: progression)
         // the record as it is now: an edit made while this was loaded (a title, a shelf) must survive
         library.mutate(book.id) { stored in
@@ -753,6 +760,8 @@ final class AudioPlayer: ObservableObject {
             stored.lastOpenedAt = Date()
         }
         if let latest = library.books.first(where: { $0.id == book.id }) { book = latest }
+        // asked about once (`FinishedAsk`) — here, or when the last file plays out (`advance`)
+        if finishing { IntentRouter.shared.request = .bookFinished(book.id) }
         let ref = book.bookMasterRef
         Task {
             await BookMaster.shared.syncProgress(

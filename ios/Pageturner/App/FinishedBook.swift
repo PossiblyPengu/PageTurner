@@ -50,13 +50,27 @@ struct FinishedBookSheet: View {
         !library.missing.contains(book.id) && library.finishedBytes(of: book) != nil
     }
 
-    /// Anything to ask at all: with nothing to rate and no file to free, the sheet would only say "well done".
-    static func worthAsking(_ book: Book, library: LibraryStore) -> Bool {
-        canRate(book) || hasFiles(book, library: library) || SeriesShelf.next(after: book, in: library.books) != nil
-    }
+    /// A finished book is always worth a moment: how long it took, what was kept from it, what to read next — and,
+    /// where there are any, a rating and the file.
+    static func worthAsking(_ book: Book, library: LibraryStore) -> Bool { true }
 
     /// The book that comes after this one in its series, when the library has it and it isn't read yet.
     private var nextInSeries: Book? { SeriesShelf.next(after: current, in: library.books) }
+
+    /// With no next in a series: another by the same author, not yet finished (`BookEnding.moreBy`).
+    private var moreByAuthor: Book? { BookEnding.moreBy(current, in: library.books, limit: 1).first }
+
+    /// How long the book took, from its sittings.
+    private var summary: BookEnding.Summary? { BookEnding.summary(of: ReadingLog.shared.sessions, book: current.id) }
+
+    /// "12 highlights · 3 saved words" — what was kept from it.
+    private var keptLine: String? {
+        var parts: [String] = []
+        let highlights = current.highlights.count, words = current.words.count
+        if highlights > 0 { parts.append(highlights == 1 ? "1 highlight" : "\(highlights) highlights") }
+        if words > 0 { parts.append(words == 1 ? "1 saved word" : "\(words) saved words") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     private var size: String? {
         library.finishedBytes(of: current).map { AutoBackup.sizeText($0) }
@@ -67,7 +81,12 @@ struct FinishedBookSheet: View {
             ScrollView {
                 VStack(spacing: 16) {
                     header
-                    if let next = nextInSeries { nextCard(next) }
+                    if let next = nextInSeries {
+                        nextCard(next, caption: "Next in the series", detail: SeriesShelf.place(of: next))
+                    } else if let more = moreByAuthor {
+                        nextCard(more, caption: "More by \(more.author)", detail: (more.progression ?? 0) > 0.001
+                                 ? "\(Int(((more.progression ?? 0) * 100).rounded()))% read" : nil)
+                    }
                     if Self.canRate(current) { rating }
                     if Self.hasFiles(current, library: library) { fileChoices }
                 }
@@ -116,12 +135,24 @@ struct FinishedBookSheet: View {
             if !current.author.isEmpty {
                 Text(current.author).font(.subheadline).foregroundStyle(.secondary)
             }
+            // how long it took and what was kept from it
+            if let summary {
+                Text(summary.line)
+                    .font(.footnote.weight(.medium))
+                    .padding(.top, 4)
+                Text("Started \(summary.started.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let keptLine {
+                Text(keptLine).font(.caption).foregroundStyle(.secondary)
+            }
         }
         .accessibilityElement(children: .combine)
     }
 
-    /// "Next in the series" — one tap closes this and opens it.
-    private func nextCard(_ next: Book) -> some View {
+    /// What to read next — the next in the series, or another by the author — one tap closes this and opens it.
+    private func nextCard(_ next: Book, caption: String, detail: String?) -> some View {
         Button {
             dismiss()
             // once this sheet is down: a book doesn't open under one
@@ -140,10 +171,10 @@ struct FinishedBookSheet: View {
                 .frame(width: 44, height: 64)
                 .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Next in the series").font(.caption).foregroundStyle(.secondary)
+                    Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Text(next.title).font(.headline).lineLimit(2).multilineTextAlignment(.leading)
-                    if let place = SeriesShelf.place(of: next) {
-                        Text(place).font(.caption).foregroundStyle(.secondary)
+                    if let detail {
+                        Text(detail).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Spacer(minLength: 0)
