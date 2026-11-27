@@ -237,11 +237,34 @@ final class AppRouter {
             detail = book
             return
         }
-        if AppPrefs.resumeAsk, !OpenAt.isPending(for: book.id), let fraction = ResumeOffer.target(for: book) {
+        if let fraction = resumeQuestion(for: book) {
             resumePrompt = ResumePrompt(book: book, fraction: fraction)
             return
         }
         launch(book, library: library)
+    }
+
+    /// BookMaster's place, when opening the book asks whether to go there: not when the book is being opened at a place
+    /// of its own (a highlight, its other edition's place — "Listen from Here" was asked over and could be overridden).
+    private func resumeQuestion(for book: Book) -> Double? {
+        guard AppPrefs.resumeAsk, !OpenAt.isPending(for: book.id), !AudioStartAt.isPending(for: book.id) else { return nil }
+        return ResumeOffer.target(for: book)
+    }
+
+    /// `open` just after a sheet or menu was put away. A book that goes straight to the reader or the player goes now;
+    /// one that would put something up — its page (no file, still in the Drive) or "continue from BookMaster?" —
+    /// waits for what is going away to go: iOS refuses, without a word, what is asked for meanwhile, and a refused
+    /// question left `resumePrompt` set, so the book never opened and everything that waits for a free screen waited.
+    func openAfterDismissing(_ book: Book, library: LibraryStore) {
+        let presents = library.inCloud.contains(book.id) || library.hasNoFile(book) || resumeQuestion(for: book) != nil
+        guard presents else {
+            open(book, library: library)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self, await self.whenFree(settling: true) else { return }
+            self.open(library.books.first { $0.id == book.id } ?? book, library: library)
+        }
     }
 
     /// The answer to the resume prompt: jump to BookMaster's place or stay put —

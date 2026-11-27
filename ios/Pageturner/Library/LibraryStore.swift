@@ -615,11 +615,18 @@ final class LibraryStore: ObservableObject {
     /// Calls whose 800 ms wait a later call took over, each let go when the batch holding its files is done.
     private var importWaiters: [(url: URL, done: CheckedContinuation<Void, Never>)] = []
 
-    /// `importFiles` for files the reader chose (the picker, "Open in"), answering with the books that came in.
+    /// Books an import gave their file back to (`register`), for `add` to count with the new ones.
+    private var reconnected: [UUID] = []
+
+    /// `importFiles` for files the reader chose (the picker, "Open in"), answering with the books that came in — new
+    /// ones, and ones kept without their file that have it again.
     func add(_ urls: [URL]) async -> [UUID] {
         let before = Set(books.map(\.id))
+        reconnected = []
         await importFiles(urls)
-        return books.filter { !before.contains($0.id) }.map(\.id)
+        let back = reconnected.filter { id in books.contains { $0.id == id } }
+        reconnected = []
+        return books.filter { !before.contains($0.id) }.map(\.id) + back
     }
 
     func importFiles(_ urls: [URL]) async {
@@ -996,6 +1003,30 @@ final class LibraryStore: ObservableObject {
         } catch {
             try? fm.removeItem(at: dest)
             throw error
+        }
+        // the file of a book kept without it (removed to free the space, or gone from the Files app) given back the
+        // ordinary way, from the + button: it goes to that book — its place, highlights and notes — not a second copy
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        if let kept = books.first(where: {
+            hasNoFile($0) && canRelink($0) && $0.title == book.title && $0.author == book.author
+                && ($0.fileName as NSString).pathExtension.lowercased() == ext
+        }) {
+            let target = fileURL(for: kept)
+            if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+            try fm.moveItem(at: dest, to: target)
+            // the cover the book has stays; the file's own only where it had none
+            let fileCover = coverURL(for: book)
+            if fm.fileExists(atPath: coverURL(for: kept).path) {
+                try? fm.removeItem(at: fileCover)
+            } else if fm.fileExists(atPath: fileCover.path) {
+                try? fm.moveItem(at: fileCover, to: coverURL(for: kept))
+                coverChanged()
+            }
+            missing.remove(kept.id)
+            if kept.fileRemoved { mutate(kept.id) { $0.fileRemoved = false } }
+            reconnected.append(kept.id)
+            Log.event("library", "file of “\(kept.title)” given back by an import")
+            return
         }
         // the same file twice ("Open in" twice, the watched folder plus a manual import) is one book
         if let size = Self.fileSize(dest),

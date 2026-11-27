@@ -253,12 +253,12 @@ final class BackupStore {
 
         let names = book.fileNames.isEmpty ? [book.fileName] : book.fileNames
         // a book from Google Drive is backed up without the files it has not downloaded: it comes back as it was,
-        // waiting in the Drive
+        // waiting in the Drive — and one kept without its file (`fileRemoved`) comes back so, with its place and notes
         var files: [(source: URL, destination: URL)] = []
         for name in names {
             if let src = staged.files[name] {
                 files.append((src, booksDir.appendingPathComponent(name)))
-            } else if book.drive == nil {
+            } else if book.drive == nil, !book.fileRemoved {
                 throw BackupError.missingPayload
             }
         }

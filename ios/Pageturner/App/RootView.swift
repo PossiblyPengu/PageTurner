@@ -121,7 +121,7 @@ struct RootView: View {
             guard router.reading == nil, router.detail?.id == id || !router.presenting,
                   let book = library.books.first(where: { $0.id == id }) else { return }
             router.dismissPresentations()
-            router.open(book, library: library)
+            router.openAfterDismissing(book, library: library)
             return
         }
         router.dismissPresentations()
@@ -130,7 +130,7 @@ struct RootView: View {
             // a book that is gone still answers with its shelf, not with nothing
             router.tab = .library
             guard let book = library.books.first(where: { $0.id == id }) else { return }
-            router.open(book, library: library)
+            router.openAfterDismissing(book, library: library)
         case let .finish(id):
             router.tab = .library
             if let book = library.books.first(where: { $0.id == id }) {
@@ -143,7 +143,7 @@ struct RootView: View {
             // with nothing in progress the request still lands where one starts
             router.tab = .reading
             guard let book = library.continueBook else { return }
-            router.open(book, library: library)
+            router.openAfterDismissing(book, library: library)
         case let .openSuite(target):
             router.openSuite(target, covered: covered)
         case .importBooks:
@@ -218,7 +218,8 @@ struct RootView: View {
                 router.detail = nil
                 // "Read again" starts from the beginning, not the last page
                 if (book.progression ?? 0) >= 0.995 { library.restart(book.id) }
-                router.open(library.books.first { $0.id == book.id } ?? book, library: library)
+                // the page is going away: the "continue from BookMaster?" question waits for it (`openAfterDismissing`)
+                router.openAfterDismissing(library.books.first { $0.id == book.id } ?? book, library: library)
             },
             onFinish: {
                 router.markFinished(book, library: library)

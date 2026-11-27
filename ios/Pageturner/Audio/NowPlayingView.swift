@@ -110,7 +110,7 @@ struct NowPlayingView: View {
             PTIconButton(systemImage: "chevron.down", label: "Close player") { onClose() }
             Spacer()
             Menu {
-                if let ebook = Companion.match(for: player.record, in: library.books) {
+                if let ebook = Companion.match(for: player.record, in: library.books.filter { !library.hasNoFile($0) }) {
                     Button { read(ebook) } label: {
                         Label("Read from Here", systemImage: "book")
                     }

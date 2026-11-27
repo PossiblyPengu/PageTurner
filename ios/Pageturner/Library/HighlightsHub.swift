@@ -153,6 +153,6 @@ struct HighlightsHubView: View {
         dismiss()
         // a book already open is closed first, so the reader that opens reads the request
         if router.reading?.id == item.book.id { router.reading = nil }
-        DispatchQueue.main.async { router.open(item.book, library: library) }
+        DispatchQueue.main.async { router.openAfterDismissing(item.book, library: library) }
     }
 }

@@ -921,7 +921,8 @@ final class ReaderModel: ObservableObject {
     }
 
     /// The audiobook of this book, when the library has one (`Companion`).
-    var companion: Book? { Companion.match(for: book, in: library.books) }
+    /// The other edition, when it can be opened: one kept without its file is not offered.
+    var companion: Book? { Companion.match(for: book, in: library.books.filter { !library.hasNoFile($0) }) }
 
     /// Where the page is, as the audiobook will find it: its chapter, how far into it, how far through the book.
     var companionPlace: Companion.Place {

@@ -6,4 +6,6 @@ enum AudioStartAt {
     private static var pending: [UUID: Companion.Place] = [:]
     static func request(_ place: Companion.Place, for book: UUID) { pending[book] = place }
     static func take(for book: UUID) -> Companion.Place? { pending.removeValue(forKey: book) }
+    /// A place is waiting: the audiobook is being opened at it, so BookMaster's place is not offered over it.
+    static func isPending(for book: UUID) -> Bool { pending[book] != nil }
 }

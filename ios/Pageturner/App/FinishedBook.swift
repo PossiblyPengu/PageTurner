@@ -145,11 +145,8 @@ struct FinishedBookSheet: View {
     private func nextCard(_ next: Book, caption: String, detail: String?) -> some View {
         Button {
             dismiss()
-            // once this sheet is down: a book doesn't open under one, and "continue from BookMaster?" is not refused
-            Task {
-                guard await router.whenFree(settling: true) else { return }
-                router.open(library.books.first { $0.id == next.id } ?? next, library: library)
-            }
+            // the reader at once; its page or "continue from BookMaster?" once this sheet is down
+            router.openAfterDismissing(library.books.first { $0.id == next.id } ?? next, library: library)
         } label: {
             HStack(spacing: 12) {
                 Group {
