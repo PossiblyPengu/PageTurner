@@ -11,3 +11,6 @@
 /ios/DerivedData/
 /ios/dist/
 __pycache__/
+
+# wrangler's local state (the live check's test servers write it here)
+/.wrangler/
