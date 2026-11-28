@@ -41,7 +41,13 @@ reset)
   "$0" stop; sleep 2
   printf 'JWT_SECRET=local-check-secret-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=http://localhost:8788\nPAGETURNER_SECRET=%s\n' "$SECRET" > "$BOOKMASTER_REPO/.dev.vars"
   (cd "$BOOKMASTER_REPO" && rm -rf .wrangler/state && "$WRANGLER" d1 migrations apply bookmaster-db --local >/dev/null 2>&1)
-  "$0" start-bm; "$0" start-pt
+  # one after the other: started together, the two workerds race for a port they share, and the loser dies with
+  # "Address already in use"
+  "$0" start-bm
+  for i in $(seq 1 40); do
+    [ "$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:8788/api/auth/me)" = 401 ] && break; sleep 2
+  done
+  "$0" start-pt
   for i in $(seq 1 40); do
     a=$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:8788/api/auth/me)
     b=$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:8789/)
