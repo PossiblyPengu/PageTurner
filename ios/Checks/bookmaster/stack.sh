@@ -11,6 +11,8 @@ WRANGLER="$BOOKMASTER_REPO/node_modules/.bin/wrangler"
 SECRET=bridge-test-secret
 
 pids() { ps -eo pid,args | awk -v pat="$1" '$0 ~ pat && $0 !~ /awk/ {print $1}'; }
+# the servers' own executables, not the bare word "wrangler" (any shell whose command mentions it would match)
+SERVERS='node_modules/[.]bin/wrangler|wrangler-dist/cli[.]js|workerd-linux-64/bin/workerd|@esbuild/linux-x64/bin/esbuild'
 
 case "$1" in
 start-bm)
@@ -28,8 +30,11 @@ stop-bm-only)
   for p in $(pids 'workerd'); do kill "$p" 2>/dev/null; done
   ;;
 stop)
-  for p in $(pids 'wrangler'); do kill "$p" 2>/dev/null; done
-  for p in $(pids 'workerd'); do kill "$p" 2>/dev/null; done
+  for p in $(pids "$SERVERS"); do kill "$p" 2>/dev/null; done
+  # wait until they are really gone: a workerd still holding its port makes the next start fail with "Address already in
+  # use" (and the stack then came up half there, which `reset` used to call ready)
+  for i in $(seq 1 20); do [ -z "$(pids "$SERVERS")" ] && break; sleep 0.5; done
+  for p in $(pids "$SERVERS"); do kill -9 "$p" 2>/dev/null; done
   rm -f "$BOOKMASTER_REPO/.dev.vars"; rm -rf "$PT_ROOT/.wrangler"
   ;;
 reset)
@@ -42,6 +47,11 @@ reset)
     b=$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:8789/)
     [ "$a" = 401 ] && [ "$b" = 200 ] && break; sleep 2
   done
+  # not up is not ready: say so, rather than let the checks fail one by one on a stack that never started
+  if ! { [ "$a" = 401 ] && [ "$b" = 200 ]; }; then
+    echo "stack did not start (BookMaster answered $a, the bridge $b) — see $WORK/bm.log and $WORK/pt.log" >&2
+    exit 1
+  fi
   B=http://127.0.0.1:8788
   rm -f "$WORK/cj1" "$WORK/cj2"
   curl -sS -c "$WORK/cj1" -X POST $B/api/auth/register -H 'content-type: application/json' -d '{"username":"pengu","display_name":"Andrew","password":"correct-horse-battery"}' >/dev/null
