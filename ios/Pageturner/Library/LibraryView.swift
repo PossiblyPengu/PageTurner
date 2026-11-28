@@ -219,6 +219,7 @@ struct LibraryView: View {
                         if let jpeg = image.jpegData(compressionQuality: 0.85) {
                             try? jpeg.write(to: library.coverURL(for: book))
                             library.coverChanged()
+                            BookMaster.shared.coverChosen(book.id, library: library)
                         }
                     })
             }

@@ -3,6 +3,15 @@ import UIKit
 extension BookMaster {
     private static let sentKey = "bm-covers-sent"
 
+    /// A jacket the reader has just chosen for a book (from the photos, a search, a drawn crop): sent again. A cover is
+    /// otherwise sent once, so a changed one never reached BookMaster, where the new push replaces the old.
+    func coverChosen(_ id: UUID, library: LibraryStore) {
+        var sent = Set(UserDefaults.standard.stringArray(forKey: Self.sentKey) ?? [])
+        guard sent.remove(id.uuidString) != nil else { return }   // never sent: it goes with the next batch as it is
+        UserDefaults.standard.set(Array(sent), forKey: Self.sentKey)
+        Task { await pushCovers(from: library) }
+    }
+
     /// Send the jackets of the library's books that are pinned to a shelf row, once each, so BookMaster's
     /// shelf shows the cover of the copy read here. BookMaster keeps its own art where it has better.
     func pushCovers(from library: LibraryStore) async {

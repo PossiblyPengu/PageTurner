@@ -149,6 +149,7 @@ func runData() async {
     runStoryRecapChecks()
     runBookEndingChecks()
     runBMWebNavChecks()
+    runCatalogueEditChecks()
     runShelfChecks()
     runChatChecks()
     runWebAppsChecks()
@@ -304,6 +305,12 @@ func run() async {
         check("own comment readable and recognised", mine?.content == "Slow start but worth it")
     } catch { check("fetch the thread", false, "\(error)") }
 
+    // pengu accepts Kristen's suggestion on BookMaster itself — it lands on his Want to Read shelf, which the pull below matches
+    if let nudgeId {
+        let accepted = sh("curl -s -b \(work)/cj1 -X POST http://127.0.0.1:8788/api/nudges/\(nudgeId)/accept")
+        check("setup: pengu accepts the suggestion", accepted.contains("\"ok\":true"), accepted)
+    }
+
     // ----------------------------------------------------------------- shelf
     section("Shelf pull")
     _ = q("update books set total_pages = 300 where title = 'Dune'")
@@ -382,6 +389,52 @@ func run() async {
         } catch { check("unshelve a row", false, "\(error)") }
     }
 
+    // ------------------------------------------------------------ book edits
+    section("Edits to a book")
+    var editPin: String?
+    do {
+        let shelved = try await bm.shelve(
+            ref: BMBookRef(title: "Piranesi", author: "Susanna Clarke", isbn: nil, openLibraryId: nil, userBookId: nil,
+                           bookDescription: nil, publishedYear: 2020, totalPages: 272),
+            status: .reading)
+        editPin = shelved.userBook?.userBookId
+        check("a book to edit is on the shelf", editPin != nil)
+        // the row also holds a cover link and genres this app never sends — an edit must not clear them
+        q("update books set genres='[\"Fantasy\",\"Literary Fiction\"]', cover_url='https://covers.openlibrary.org/b/id/42-L.jpg' where title='Piranesi'")
+        var was = Book(id: UUID(), title: "Piranesi", author: "Susanna Clarke", fileName: "x.epub", fileNames: ["x.epub"], addedAt: Date())
+        was.pages = 272
+        was.year = "2020"
+        var edited = was
+        edited.title = "Piranesi: A Novel"
+        edited.author = "Susanna Mary Clarke"
+        edited.pages = 300
+        edited.year = "2021"
+        edited.isbn = "9781635575637"
+        let changes = BMCatalogueEdit.changes(from: was, to: edited)
+        check("the edit is the five facts that changed", Set(changes.keys) == Set(BMCatalogueEdit.keys), "\(changes.keys.sorted())")
+        if let editPin { await bm.pushCatalogueEdit(pin: editPin, changes: changes) }
+        let row = q("select title, author, total_pages, published_year, isbn, genres, cover_url from books where title like 'Piranesi%'").first
+        check("BookMaster's catalogue row has the new title", s(row, "title") == "Piranesi: A Novel", "\(String(describing: row))")
+        check("…author", s(row, "author") == "Susanna Mary Clarke", s(row, "author") ?? "nil")
+        check("…pages, year and ISBN", s(row, "total_pages") == "300" && s(row, "published_year") == "2021" && s(row, "isbn") == "9781635575637", "\(String(describing: row))")
+        check("its genres were not cleared", s(row, "genres") == "[\"Fantasy\",\"Literary Fiction\"]", s(row, "genres") ?? "nil")
+        check("nor its cover", s(row, "cover_url") == "https://covers.openlibrary.org/b/id/42-L.jpg", s(row, "cover_url") ?? "nil")
+        check("the edit is in the app's cached shelf row too", bm.shelfRows.isEmpty || bm.shelfRows.first { $0.userBookId == editPin }?.title == "Piranesi: A Novel")
+
+        // a change made on BookMaster's own page since is not written over by an edit of something else
+        q("update books set title='Piranesi (edited on BookMaster)' where title like 'Piranesi%'")
+        var later = edited
+        later.isbn = nil
+        if let editPin { await bm.pushCatalogueEdit(pin: editPin, changes: BMCatalogueEdit.changes(from: edited, to: later)) }
+        let after = q("select title, isbn, total_pages from books where title like 'Piranesi%'").first
+        check("a fact the reader did not touch keeps BookMaster's own value", s(after, "title") == "Piranesi (edited on BookMaster)", "\(String(describing: after))")
+        check("a cleared ISBN is cleared there too", s(after, "isbn") == nil && s(after, "total_pages") == "300", "\(String(describing: after))")
+
+        // a row that is not on the shelf cannot be edited and does not stay parked
+        await bm.pushCatalogueEdit(pin: "no-such-row", changes: ["title": "Nobody's"])
+        check("an edit for a row that is gone is dropped", q("select id from books where title = 'Nobody''s'").isEmpty)
+    } catch { check("a book edited here is edited on BookMaster", false, "\(error)") }
+
     // ---------------------------------------------------------------- outage
     section("Outage and recovery")
     _ = system("'\(harness)/stack.sh' stop-bm-only >/dev/null 2>&1")
@@ -405,6 +458,14 @@ func run() async {
     let queueJSON2 = (try? Data(contentsOf: URL(fileURLWithPath: queueFile))).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] } ?? []
     check("newer progress replaces the parked progress (still 3 entries)", queueJSON2.count == 3, "\(queueJSON2.count)")
     check("the replacement joins at the back", queueJSON2.map { $0["kind"] as? String ?? "" } == ["session", "quote", "progress"], "\(queueJSON2.map { $0["kind"] ?? "?" })")
+    // details edited while BookMaster is down: parked as what changed, one entry however many edits, and made against
+    // the row as it is when it is finally sent
+    if let editPin {
+        await bm.pushCatalogueEdit(pin: editPin, changes: ["title": "Piranesi, edited offline"])
+        await bm.pushCatalogueEdit(pin: editPin, changes: ["total_pages": 301])
+        let parked = (try? Data(contentsOf: URL(fileURLWithPath: queueFile))).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] } ?? []
+        check("two edits made offline are one parked entry", parked.filter { $0["kind"] as? String == "edit-book" }.count == 1, "\(parked.map { $0["kind"] ?? "?" })")
+    }
 
     _ = system("'\(harness)/stack.sh' start-bm >/dev/null 2>&1 </dev/null")
     check("BookMaster is back", waitForBookMaster(up: true, seconds: 60))
@@ -417,6 +478,12 @@ func run() async {
     check("the newest position won (50)", s(ph, "current_page") == "50", s(ph, "current_page") ?? "nil")
     let queueJSON3 = (try? Data(contentsOf: URL(fileURLWithPath: queueFile))).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] } ?? []
     check("the queue is empty after the drain", queueJSON3.isEmpty, "\(queueJSON3.count)")
+    if editPin != nil {
+        let offline = q("select title, total_pages, genres, cover_url from books where title like 'Piranesi%'").first
+        check("the edits made offline arrived, together", s(offline, "title") == "Piranesi, edited offline" && s(offline, "total_pages") == "301", "\(String(describing: offline))")
+        check("…without clearing its genres or cover", s(offline, "genres") == "[\"Fantasy\",\"Literary Fiction\"]"
+              && s(offline, "cover_url") == "https://covers.openlibrary.org/b/id/42-L.jpg", "\(String(describing: offline))")
+    }
 
     // ---------------------------------------------------------------- unlink
     section("Unlink")

@@ -1103,6 +1103,13 @@ final class LibraryStore: ObservableObject {
     /// was open is not undone by a sheet that never touched it).
     func saveEdit(_ updated: Book, openedWith original: Book) {
         update(updated)
+        // what was changed that BookMaster's book page holds too goes on to its catalogue row — for the book it was
+        // before this edit: a lookup that moved the book to another shelf row (the pin below) is that book already
+        let changes = BMCatalogueEdit.changes(from: original, to: updated)
+        if !changes.isEmpty, updated.bookmasterId == original.bookmasterId,
+           let pin = books.first(where: { $0.id == original.id })?.bookmasterId {
+            Task { await BookMaster.shared.pushCatalogueEdit(pin: pin, changes: changes) }
+        }
         guard updated.bookmasterId != original.bookmasterId else { return }
         updateBookMaster(original.id) {
             $0.bookmasterId = updated.bookmasterId

@@ -60,7 +60,7 @@ final class BookMaster {
     }
 
     private struct QueueEntry: Codable {
-        var kind: String          // "progress" | "session" | "quote"
+        var kind: String          // "progress" | "session" | "quote" | "cover" | "edit-book"
         var title: String         // progress de-dupe key
         var body: Data
         /// Which entry a drain step means after its await; older files have none.
@@ -248,6 +248,18 @@ final class BookMaster {
         let payload = BMCoverPush(username: user.username, book: ref, coverB64: jpeg.base64EncodedString(), coverMime: "image/jpeg")
         guard let body = try? JSONEncoder().encode(payload) else { return false }
         return await sendRaw(kind: "cover", title: ref.title, body: body, park: false)
+    }
+
+    /// Details edited here, on to BookMaster's catalogue row for a book on its shelf (`pin`): the title, author, pages,
+    /// year and ISBN the reader changed (`BMCatalogueEdit.changes`). Parked like a push when offline: what is held is
+    /// only what changed, and the row is read — and the edit laid over it — at the moment it is sent
+    /// (`completeEdit`), so BookMaster's own genres, cover and later edits are not written over by a stale copy.
+    func pushCatalogueEdit(pin: String, changes: [String: Any]) async {
+        guard let user, syncEnabled, !changes.isEmpty else { return }
+        let json: [String: Any] = ["username": user.username, "user_book_id": pin, "set": changes]
+        guard let body = try? JSONSerialization.data(withJSONObject: json) else { return }
+        let out = await submit(kind: "edit-book", title: pin, body: body)
+        Log.event("bookmaster", "catalogue edit \(out.delivery == .sent ? "sent" : out.delivery == .queued ? "parked" : "not sent")")
     }
 
     /// A line worth keeping, from the reader's selection menu.
@@ -490,15 +502,35 @@ final class BookMaster {
         return await task.value
     }
 
+    private enum EditStep { case ready(Data), wait, dead }
+
     private func drain() async -> [UUID: PushOutcome] {
         var outcomes: [UUID: PushOutcome] = [:]
-        while let user {
+        drainLoop: while let user {
             queue.removeAll { Self.owner(of: $0.body) != user.username }
             saveQueue()
             guard let head = queue.first(where: { syncEnabled || $0.kind == "quote" || $0.manual == true }) else { break }
             let generation = accountGeneration
             let result: (Data, Int)
-            do { result = try await postResolving(head.kind, body: head.body) } catch { break }
+            do {
+                var payload = head.body
+                if head.kind == "edit-book" {
+                    switch try await completeEdit(head.body) {
+                    case let .ready(full):
+                        payload = full
+                    case .wait:
+                        break drainLoop
+                    case .dead:
+                        // the row is gone from the shelf, or the edit can never be made: it must not block the line
+                        guard generation == accountGeneration else { continue drainLoop }
+                        queue.removeAll { $0.id == head.id }
+                        saveQueue()
+                        if let id = head.id { outcomes[id] = .refused }
+                        continue drainLoop
+                    }
+                }
+                result = try await postResolving(head.kind, body: payload)
+            } catch { break }
             guard generation == accountGeneration else { continue }
             if Self.retriable(result.1) { break }
             // An unknown reader may be a blip: keep the entry until the link is declared dead.
@@ -512,11 +544,55 @@ final class BookMaster {
             if let id = head.id {
                 outcomes[id] = (200..<300).contains(result.1) ? .accepted(result.0) : .refused
             }
+            if head.kind == "edit-book", (200..<300).contains(result.1) { noteCatalogueRow(result.0) }
             if !(200..<300).contains(result.1) {
                 handleRefusal(status: result.1, data: result.0)
             }
         }
         return outcomes
+    }
+
+    /// A parked edit made ready to send: the catalogue row as BookMaster has it now, with the edit laid over it
+    /// (`BMCatalogueEdit.merged`). Throws when the network won't answer (the edit stays parked); `.wait` for a struggling
+    /// server or a link not yet declared dead; `.dead` when the shelf row is gone or the row cannot be edited.
+    private func completeEdit(_ body: Data) async throws -> EditStep {
+        guard let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+              let username = json["username"] as? String, let pin = json["user_book_id"] as? String,
+              let changes = json["set"] as? [String: Any] else { return .dead }
+        let (data, status) = try await get("book", query: ["username": username, "ub": pin])
+        if Self.retriable(status) { return .wait }
+        guard (200..<300).contains(status) else {
+            // an unknown reader may be a blip: kept until the link is declared dead
+            if status == 404, Self.errorMessage(data) == "Unknown reader" {
+                handleRefusal(status: status, data: data)
+                return .wait
+            }
+            return .dead
+        }
+        guard let reply = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let catalogue = reply["catalogue"] as? [String: Any],
+              var full = BMCatalogueEdit.merged(changes, onto: catalogue)
+        else { return .dead }
+        full["username"] = username
+        guard let out = try? JSONSerialization.data(withJSONObject: full) else { return .dead }
+        return .ready(out)
+    }
+
+    /// BookMaster's answer to an edit — the catalogue row as it now stands — into the cached shelf, so what the app
+    /// shows and matches against is right before the next pull.
+    private func noteCatalogueRow(_ data: Data) {
+        guard let row = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let bookID = row["id"] as? String else { return }
+        var touched = false
+        for i in shelfRows.indices where shelfRows[i].bookId == bookID {
+            if let title = row["title"] as? String { shelfRows[i].title = title }
+            if let author = row["author"] as? String { shelfRows[i].author = author }
+            shelfRows[i].totalPages = row["total_pages"] as? Int
+            shelfRows[i].publishedYear = row["published_year"] as? Int
+            shelfRows[i].isbn = row["isbn"] as? String
+            touched = true
+        }
+        if touched, let data = try? JSONEncoder().encode(shelfRows) { defaults.set(data, forKey: shelfKey) }
     }
 
     /// A book back on "want to read" has no place any more — a parked progress
@@ -536,6 +612,11 @@ final class BookMaster {
     private func enqueue(_ entry: QueueEntry) {
         var entry = entry
         if entry.id == nil { entry.id = UUID() }
+        if entry.kind == "edit-book",
+           let older = queue.last(where: { $0.kind == "edit-book" && BMCatalogueEdit.sameRow($0.body, entry.body) }) {
+            entry.body = BMCatalogueEdit.merging(older: older.body, newer: entry.body)
+            queue.removeAll { $0.id == older.id }
+        }
         if entry.kind == "progress" {
             // a rating parked with the older position rides on the newer one that replaces it
             if let older = queue.last(where: { $0.kind == "progress" && Self.sameBook($0.body, entry.body) }) {

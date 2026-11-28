@@ -43,6 +43,8 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   (`run.sh data`, ~430 checks, no servers). Anything that can be written without UIKit/Readium should
   be, so it can be checked there; `assemble.sh` lists the files it copies. `run.sh` stops if the target fails to
   build (it used to run the previous binary and report green).
+  The live run (`BOOKMASTER_REPO=<checkout> run.sh`) starts two wrangler servers and can take minutes before the first check: run it in
+  the background and read its output, not under a short timeout (a stack cut short leaves `wrangler` processes — `stack.sh stop`).
 - When touching Readium calls, verify signatures against the toolkit source — the 3.x API changed a lot
   between releases. The `Archive Readium sources` CI step uploads the resolved checkout as the
   `readium-src` artifact.
@@ -289,6 +291,16 @@ list and `ios/DESIGN.md` for the Liquid Glass design rules.
   Sessions and quotes always queue, oldest first, a 4xx is dropped. Presence beats are never queued.
   Only a push reply or a shelf pull may change a book's `bm*`
   fields (`LibraryStore.updateBookMaster` / `applyShelf`); `update()` always keeps the stored ones.
+- Details edited here reach BookMaster (`BookMaster/BMCatalogueEdit.swift`, Linux-checked; the live run in `ios/Checks` proves the round
+  trip and the offline path): saving Edit Details on a book that is on the shelf (pinned, and the pin not changed by the edit) sends what
+  changed — title, author, pages, year, ISBN — to the bridge's `edit-book`. A push (progress, session…) never did this: it only fills blanks
+  in the row (`fillBookGaps`), so an edit stopped at the phone. `edit-book` writes BookMaster's **shared** catalogue row (the web's own
+  book edit does the same, for both readers) and **clears what it isn't sent** — the genres and the cover link — so the app reads the row
+  (`GET book?ub=<pin>`) at send time and lays the change over it (`BookMaster.completeEdit`, `BMCatalogueEdit.merged`): a field the reader
+  did not change keeps BookMaster's value (a title edited there since is not written over), and genres and cover are sent back as they
+  are. The edit rides the offline queue as a diff (`kind: "edit-book"`, merged with another parked for the same row); a row that is gone
+  (404) is dropped, a struggling server waits. The description and the series have no place on BookMaster's page, so they stay here. A
+  jacket the reader picks is sent again (`BookMaster.coverChosen`): covers are otherwise sent once per book, and a changed one never arrived.
 - Linking: `BookMasterLinkSheet` (a `WKWebView` on the shared default data store, so the sign-in it ends with is also the one BookMaster's tabs use) opens
   bookmaster.pages.dev/link/pageturner?from=https://pageturner.pages.dev; BookMaster signs the user in and
   sends the browser to `pageturner.pages.dev/?bm-link=<code>`, which the sheet's navigation delegate cancels,

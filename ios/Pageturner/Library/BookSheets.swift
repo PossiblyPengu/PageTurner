@@ -526,6 +526,8 @@ struct BookDetailSheet: View {
                     let ok = await MetadataLookup.applyCover(from: candidate.coverURLs, to: book, library: library)
                     coverFetching = false
                     coverFailed = !ok
+                    // the jacket chosen here goes to BookMaster too
+                    if ok { BookMaster.shared.coverChosen(book.id, library: library) }
                 }
             },
             onCoverCropped: { image in
@@ -534,6 +536,7 @@ struct BookDetailSheet: View {
                 do {
                     try jpeg.write(to: library.coverURL(for: book))
                     library.coverChanged()
+                    BookMaster.shared.coverChosen(book.id, library: library)
                 } catch { coverFailed = true }
             }))
     }
@@ -856,8 +859,13 @@ struct BookEditSheet: View {
         } else if let pickedImage, let jpeg = pickedImage.jpegData(compressionQuality: 0.85) {
             try? jpeg.write(to: library.coverURL(for: book))
             library.coverChanged()
+            BookMaster.shared.coverChosen(book.id, library: library)
         } else if !pickedCovers.isEmpty {
-            Task { await MetadataLookup.applyCover(from: pickedCovers, to: book, library: library) }
+            Task {
+                if await MetadataLookup.applyCover(from: pickedCovers, to: book, library: library) {
+                    BookMaster.shared.coverChosen(book.id, library: library)
+                }
+            }
         }
     }
 }
