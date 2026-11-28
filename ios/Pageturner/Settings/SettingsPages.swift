@@ -10,21 +10,40 @@ struct SettingsRow: View {
     let symbol: String
     let tint: Color
     var detail: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var icon: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 30, height: 30)
+            .background(tint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .accessibilityHidden(true)
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(tint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .accessibilityHidden(true)
-            Text(title)
-            Spacer(minLength: 8)
-            if let detail {
+        if typeSize.isAccessibilitySize, let detail {
+            // title and value cannot share a line at these sizes: the title broke mid-word ("Book-/Master") and the
+            // value was cut to "Not l…". The value goes under the title, in full.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 12) {
+                    icon
+                    Text(title)
+                }
                 Text(detail)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .padding(.leading, 42)
+            }
+        } else {
+            HStack(spacing: 12) {
+                icon
+                Text(title)
+                Spacer(minLength: 8)
+                if let detail {
+                    Text(detail)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
     }

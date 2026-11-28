@@ -120,7 +120,8 @@ enum DebugScenario {
         try? await Task.sleep(nanoseconds: 800_000_000)
         // Moby-Dick is the one with progress, shelves, highlights and a bookmark
         let text = library.books.first { $0.title == "Moby-Dick" } ?? library.books.first { !$0.isAudio }
-        let audio = library.books.first { $0.isAudio }
+        // one that is on the phone: a Drive audiobook cannot play here, and the player's screenshots showed its alert
+        let audio = library.books.first { $0.isAudio && !library.inCloud.contains($0.id) } ?? library.books.first { $0.isAudio }
         switch screen {
         case "library", "search": selectTab(.library)
         case "reading": selectTab(.reading)

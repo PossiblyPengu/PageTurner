@@ -36,6 +36,9 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var sleepRemaining: TimeInterval?
     @Published private(set) var coverImage: UIImage?
     @Published var notice: String?
+    /// The book could not be opened at all (a Drive book to stream with no Google sign-in): there is nothing to play,
+    /// so the player is closed once the reader has read why (`NowPlayingView`).
+    @Published private(set) var cannotOpen = false
     /// True until `open()` has measured the files — Play does nothing before that.
     @Published private(set) var isLoading = true
 
@@ -169,6 +172,7 @@ final class AudioPlayer: ObservableObject {
             await refreshStreamToken()
             guard streamLoader != nil else {
                 notice = "Sign in to Google Drive (Settings → Google Drive) to play this book without downloading it."
+                cannotOpen = true
                 return
             }
             // closed while the token was being fetched: nothing left to keep fresh

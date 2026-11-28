@@ -87,7 +87,15 @@ struct NowPlayingView: View {
         }
         .alert((player.notice ?? "Pageturner").ptAlertTitle(or: "Pageturner"), isPresented: Binding(
             get: { player.notice != nil },
-            set: { if !$0 { player.notice = nil } }
+            set: {
+                guard !$0 else { return }
+                player.notice = nil
+                // a player with nothing to play is not left standing over the app — the book's page is where it was asked for
+                if player.cannotOpen {
+                    onStop()
+                    onClose()
+                }
+            }
         )) {
             Button("OK", role: .cancel) {}
         } message: {
