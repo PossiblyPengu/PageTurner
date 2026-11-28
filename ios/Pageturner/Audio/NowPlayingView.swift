@@ -331,7 +331,17 @@ struct NowPlayingView: View {
         .accessibilityLabel(label)
     }
 
+    /// Speed, sleep, chapters, marks: each with its word when the row has room for them, icons alone when it has not.
+    /// Four labelled pills are wider than a phone (the row spilled over both edges and "Chapters" broke mid-word), so
+    /// the choice is the row's width, not only the text size.
     private var extras: some View {
+        ViewThatFits(in: .horizontal) {
+            extrasRow(compact: false)
+            extrasRow(compact: true)
+        }
+    }
+
+    private func extrasRow(compact: Bool) -> some View {
         PTGlassGroup(spacing: 12) {
             HStack(spacing: 12) {
                 Menu {
@@ -351,7 +361,7 @@ struct NowPlayingView: View {
                     }
                     }
                 } label: {
-                    chip(speedLabel(Double(player.rate)), symbol: "speedometer")
+                    chip(speedLabel(Double(player.rate)), symbol: "speedometer", compact: compact)
                         .ptNumberRoll(on: player.rate)
                 }
                 .accessibilityLabel("Playback speed")
@@ -366,16 +376,16 @@ struct NowPlayingView: View {
                     }
                 } label: {
                     if let left = player.sleepRemaining {
-                        chip("\(Int(left / 60) + 1)m", symbol: "moon.fill")
+                        chip("\(Int(left / 60) + 1)m", symbol: "moon.fill", compact: compact)
                     } else {
-                        chip("Sleep", symbol: "moon")
+                        chip("Sleep", symbol: "moon", compact: compact)
                     }
                 }
                 .accessibilityLabel("Sleep timer")
 
                 if player.chapters.count > 1 {
                     Button { showChapters = true } label: {
-                        chip("Chapters", symbol: "list.bullet")
+                        chip("Chapters", symbol: "list.bullet", compact: compact)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Chapters")
@@ -391,7 +401,7 @@ struct NowPlayingView: View {
                         }
                     }
                 } label: {
-                    chip(player.clips.isEmpty ? "Mark" : "Marks", symbol: "bookmark")
+                    chip(player.clips.isEmpty ? "Mark" : "Marks", symbol: "bookmark", compact: compact)
                 }
                 .accessibilityLabel("Marks")
                 .sensoryFeedback(.success, trigger: player.clips.count) { old, new in new > old }
@@ -399,17 +409,19 @@ struct NowPlayingView: View {
         }
     }
 
-    /// A glass pill with an icon and a word; just the icon once the text is large
-    /// enough that three words won't fit in a row (each control has its own VoiceOver label).
-    private func chip(_ text: String, symbol: String) -> some View {
+    /// A glass pill with an icon and a word; just the icon when the row is out of room, or the text is large
+    /// enough that the words won't fit (each control has its own VoiceOver label).
+    private func chip(_ text: String, symbol: String, compact: Bool = false) -> some View {
         Group {
-            if typeSize >= .xxxLarge {
+            if compact || typeSize >= .xxxLarge {
                 Image(systemName: symbol)
                     .font(.title3)
                     .frame(minWidth: 56, minHeight: 48)
             } else {
                 Label(text, systemImage: symbol)
                     .font(.subheadline.weight(.medium).monospacedDigit())
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .padding(.horizontal, 16)
                     .frame(height: 40)
             }
